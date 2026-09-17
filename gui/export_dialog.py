@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QCheckBox, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QUrl
-from PySide6.QtGui import QIcon, QFont, QColor, QDesktopServices
+from PySide6.QtGui import QIcon, QFont, QColor, QDesktopServices, QPixmap
 
 from config import COLORS, ASSETS_DIR, SUBPROCESS_FLAGS
 from core.models import PipelineState
@@ -96,6 +96,8 @@ class ExportDialog(QDialog):
     """
     Modern Adobe-style Export Dialog.
     """
+    SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
     def __init__(self, parent, state: PipelineState, settings: dict):
         super().__init__(parent)
         self.state = state
@@ -104,9 +106,10 @@ class ExportDialog(QDialog):
 
         self.start_time: float = 0.0
         self.current_percent: int = 0
+        self._spinner_idx: int = 0
 
         self.setWindowTitle("Export Dialogue Pack — Voicer Studio")
-        self.setFixedSize(580, 420)
+        self.setFixedSize(620, 440)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self.setStyleSheet(f"""
@@ -157,12 +160,20 @@ class ExportDialog(QDialog):
                 background-color: #2563EB;
             }}
             QPushButton#DangerBtn {{
-                background-color: #2B1518;
+                background-color: #241416;
                 color: #F87171;
                 border: 1px solid #7F1D1D;
+                border-radius: 6px;
+                padding: 7px 18px;
+                font-weight: 600;
             }}
             QPushButton#DangerBtn:hover {{
-                background-color: #451015;
+                background-color: #3B1215;
+                border-color: #EF4444;
+                color: #FFFFFF;
+            }}
+            QPushButton#DangerBtn:pressed {{
+                background-color: #1F0A0C;
             }}
         """)
 
@@ -182,10 +193,45 @@ class ExportDialog(QDialog):
         self._setup_page_complete()
 
         self.timer = QTimer(self)
-        self.timer.setInterval(500)
+        self.timer.setInterval(200)
         self.timer.timeout.connect(self._on_timer_tick)
 
         self.stack.setCurrentIndex(0)
+
+    def _get_preview_pixmap(self, width: int = 144, height: int = 81) -> Optional[QPixmap]:
+        """Find or generate a video/dialogue preview thumbnail."""
+        for d in self.state.dialogues:
+            if not d.is_deleted and d.image_path and Path(d.image_path).exists():
+                pix = QPixmap(str(d.image_path))
+                if not pix.isNull():
+                    return pix.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+
+        if self.state.video_path and Path(self.state.video_path).exists():
+            from config import TEMP_DIR, SUBPROCESS_FLAGS
+            thumb_cache = TEMP_DIR / "thumbnails" / f"{Path(self.state.video_path).stem}_preview.jpg"
+            thumb_cache.parent.mkdir(parents=True, exist_ok=True)
+            if thumb_cache.exists():
+                pix = QPixmap(str(thumb_cache))
+                if not pix.isNull():
+                    return pix.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+            else:
+                try:
+                    cmd = [
+                        "ffmpeg", "-y", "-ss", "00:00:01",
+                        "-i", str(self.state.video_path),
+                        "-frames:v", "1",
+                        "-vf", f"scale={width*2}:{height*2}:force_original_aspect_ratio=increase,crop={width*2}:{height*2}",
+                        "-q:v", "3",
+                        str(thumb_cache)
+                    ]
+                    subprocess.run(cmd, capture_output=True, timeout=5, creationflags=SUBPROCESS_FLAGS)
+                    if thumb_cache.exists():
+                        pix = QPixmap(str(thumb_cache))
+                        if not pix.isNull():
+                            return pix.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                except Exception:
+                    pass
+        return None
 
     # ── Page 0: Confirm & Pre-Export ──────────────────────────────────────────
 
@@ -206,20 +252,48 @@ class ExportDialog(QDialog):
         card.setObjectName("Card")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(16, 14, 16, 14)
-        card_layout.setSpacing(10)
+        card_layout.setSpacing(12)
 
+        # Preview Row: Left thumbnail, right metadata
+        preview_row = QHBoxLayout()
+        preview_row.setSpacing(14)
+
+        lbl_thumb = QLabel()
+        lbl_thumb.setFixedSize(144, 81)
+        lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_thumb.setStyleSheet("background-color: #121212; border: 1px solid #2D2D2D; border-radius: 6px;")
+        pix = self._get_preview_pixmap(144, 81)
+        if pix:
+            lbl_thumb.setPixmap(pix)
+        else:
+            lbl_thumb.setText("🎬 Video")
+            lbl_thumb.setStyleSheet("background-color: #141414; border: 1px solid #282828; border-radius: 6px; color: #777777; font-weight: bold;")
+        preview_row.addWidget(lbl_thumb)
+
+        vbox_meta = QVBoxLayout()
+        vbox_meta.setSpacing(4)
         pack_title = self.state.pack_info.title or (self.state.video_path.stem if self.state.video_path else "Dialogue_Pack")
         self.lbl_pack_title = QLabel(f"<b>Pack Title:</b> {pack_title}")
-        card_layout.addWidget(self.lbl_pack_title)
+        self.lbl_pack_title.setStyleSheet("font-size: 10pt; color: #FFFFFF;")
+        vbox_meta.addWidget(self.lbl_pack_title)
 
         active_items = self.state.active_dialogues()
         total_dur = sum(d.duration for d in active_items)
         dur_m = int(total_dur // 60)
         dur_s = int(total_dur % 60)
         spk_count = len(self.state.speakers)
-        lbl_stats = QLabel(f"<b>Contents:</b> {len(active_items)} dialogue clips • {spk_count} characters • Duration: {dur_m:02d}:{dur_s:02d}")
-        lbl_stats.setStyleSheet("color: #CCCCCC;")
-        card_layout.addWidget(lbl_stats)
+        lbl_stats = QLabel(f"<b>Contents:</b> {len(active_items)} dialogue clips • {spk_count} characters<br/><b>Total Duration:</b> {dur_m:02d}:{dur_s:02d}")
+        lbl_stats.setStyleSheet("color: #CCCCCC; font-size: 9pt;")
+        vbox_meta.addWidget(lbl_stats)
+        vbox_meta.addStretch()
+
+        preview_row.addLayout(vbox_meta, 1)
+        card_layout.addLayout(preview_row)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background-color: #282828; max-height: 1px;")
+        card_layout.addWidget(sep)
 
         lbl_dest_hdr = QLabel("<b>Destination ZIP File:</b>")
         card_layout.addWidget(lbl_dest_hdr)
@@ -241,7 +315,7 @@ class ExportDialog(QDialog):
         dest_row.addWidget(btn_browse)
         card_layout.addLayout(dest_row)
 
-        self.chk_dub_video = QCheckBox("Encode & include game video (dub_video.ogv & dub_video.mp4)")
+        self.chk_dub_video = QCheckBox("Encode && include game video (dub_video.ogv && dub_video.mp4)")
         self.chk_dub_video.setChecked(self.state.pack_info.include_dub_video)
         self.chk_dub_video.setStyleSheet("margin-top: 4px; color: #CCCCCC;")
         card_layout.addWidget(self.chk_dub_video)
@@ -285,22 +359,49 @@ class ExportDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
+        hdr_row = QHBoxLayout()
         lbl_header = QLabel("Exporting Dialogue Pack...")
         lbl_header.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        hdr_row.addWidget(lbl_header)
+        hdr_row.addStretch()
+
+        self.lbl_spinner = QLabel("⠋")
+        self.lbl_spinner.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        self.lbl_spinner.setStyleSheet("color: #38BDF8;")
+        hdr_row.addWidget(self.lbl_spinner)
+        layout.addLayout(hdr_row)
+
         self.lbl_progress_sub = QLabel("Rendering audio slices, cue cards, and game assets...")
         self.lbl_progress_sub.setStyleSheet("color: #9E9E9E; font-size: 9pt;")
-        layout.addWidget(lbl_header)
         layout.addWidget(self.lbl_progress_sub)
 
         card = QFrame()
         card.setObjectName("Card")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(18, 18, 18, 18)
-        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(18, 16, 18, 16)
+        card_layout.setSpacing(12)
 
+        # Mini thumbnail + current task row
+        task_row = QHBoxLayout()
+        task_row.setSpacing(12)
+
+        self.lbl_prog_thumb = QLabel()
+        self.lbl_prog_thumb.setFixedSize(96, 54)
+        self.lbl_prog_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_prog_thumb.setStyleSheet("background-color: #121212; border: 1px solid #2D2D2D; border-radius: 4px;")
+        task_row.addWidget(self.lbl_prog_thumb)
+
+        vbox_task = QVBoxLayout()
+        vbox_task.setSpacing(3)
+        self.lbl_prog_title = QLabel()
+        self.lbl_prog_title.setStyleSheet("font-weight: bold; color: #FFFFFF; font-size: 9.5pt;")
         self.lbl_step_detail = QLabel("Initializing export engine...")
-        self.lbl_step_detail.setStyleSheet("color: #38BDF8; font-weight: 500; font-size: 9.5pt;")
-        card_layout.addWidget(self.lbl_step_detail)
+        self.lbl_step_detail.setStyleSheet("color: #38BDF8; font-weight: 500; font-size: 9pt;")
+        vbox_task.addWidget(self.lbl_prog_title)
+        vbox_task.addWidget(self.lbl_step_detail)
+        vbox_task.addStretch()
+        task_row.addLayout(vbox_task, 1)
+        card_layout.addLayout(task_row)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(22)
@@ -328,7 +429,7 @@ class ExportDialog(QDialog):
         vbox_eta.setSpacing(2)
         lbl_eta_title = QLabel("ESTIMATED REMAINING")
         lbl_eta_title.setStyleSheet("color: #888888; font-size: 7.5pt; font-weight: bold;")
-        self.lbl_eta = QLabel("Calculating...")
+        self.lbl_eta = QLabel("Estimating...")
         self.lbl_eta.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self.lbl_eta.setStyleSheet("color: #38BDF8;")
         vbox_eta.addWidget(lbl_eta_title)
@@ -383,13 +484,32 @@ class ExportDialog(QDialog):
         card_layout.setSpacing(10)
 
         self.lbl_done_path = QLabel()
-        self.lbl_done_path.setStyleSheet("color: #FFFFFF; font-weight: 500;")
+        self.lbl_done_path.setStyleSheet("color: #FFFFFF; font-weight: 500; font-size: 10pt;")
         self.lbl_done_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(self.lbl_done_path)
 
-        self.lbl_done_details = QLabel()
-        self.lbl_done_details.setStyleSheet("color: #CCCCCC; line-height: 1.4;")
-        card_layout.addWidget(self.lbl_done_details)
+        sep_done = QFrame()
+        sep_done.setFrameShape(QFrame.Shape.HLine)
+        sep_done.setStyleSheet("background-color: #282828; max-height: 1px; margin: 4px 0px;")
+        card_layout.addWidget(sep_done)
+
+        self.lbl_done_size = QLabel()
+        self.lbl_done_size.setStyleSheet("color: #CCCCCC; font-size: 9.5pt;")
+        card_layout.addWidget(self.lbl_done_size)
+
+        self.lbl_done_cues = QLabel()
+        self.lbl_done_cues.setStyleSheet("color: #CCCCCC; font-size: 9.5pt;")
+        card_layout.addWidget(self.lbl_done_cues)
+
+        self.lbl_done_time = QLabel()
+        self.lbl_done_time.setStyleSheet("color: #CCCCCC; font-size: 9.5pt;")
+        card_layout.addWidget(self.lbl_done_time)
+
+        self.lbl_done_folder = QLabel()
+        self.lbl_done_folder.setStyleSheet("color: #888888; font-size: 8.5pt;")
+        self.lbl_done_folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        card_layout.addWidget(self.lbl_done_folder)
+
 
         layout.addWidget(card)
         layout.addStretch()
@@ -416,6 +536,16 @@ class ExportDialog(QDialog):
     def _start_export(self):
         self.state.pack_info.include_dub_video = self.chk_dub_video.isChecked()
 
+        # Update thumbnail & title on progress page
+        pix = self._get_preview_pixmap(96, 54)
+        if pix:
+            self.lbl_prog_thumb.setPixmap(pix)
+        else:
+            self.lbl_prog_thumb.setText("🎬")
+            self.lbl_prog_thumb.setStyleSheet("background-color: #141414; border: 1px solid #282828; border-radius: 4px; color: #777777;")
+        pack_title = self.state.pack_info.title or (self.state.video_path.stem if self.state.video_path else "Dialogue_Pack")
+        self.lbl_prog_title.setText(pack_title)
+
         self.stack.setCurrentIndex(1)
         self.start_time = time.time()
         self.timer.start()
@@ -440,6 +570,9 @@ class ExportDialog(QDialog):
         self.lbl_pct.setText(f"{percent}%")
 
     def _on_timer_tick(self):
+        self._spinner_idx = (self._spinner_idx + 1) % len(self.SPINNER_FRAMES)
+        self.lbl_spinner.setText(self.SPINNER_FRAMES[self._spinner_idx])
+
         if self.start_time <= 0:
             return
         elapsed = time.time() - self.start_time
@@ -452,7 +585,10 @@ class ExportDialog(QDialog):
             remaining = max(0.0, total_est - elapsed)
             rm = int(remaining // 60)
             rs = int(remaining % 60)
-            self.lbl_eta.setText(f"~{rm:02d}:{rs:02d}")
+            if rm > 0:
+                self.lbl_eta.setText(f"~{rm}m {rs:02d}s")
+            else:
+                self.lbl_eta.setText(f"~{rs}s")
         else:
             self.lbl_eta.setText("Estimating...")
 
@@ -462,12 +598,10 @@ class ExportDialog(QDialog):
 
         self.lbl_done_path.setText(f"<b>ZIP Archive:</b> {zip_path}")
         active_count = len(self.state.active_dialogues())
-        self.lbl_done_details.setText(
-            f"• <b>Archive Size:</b> {size_mb:.2f} MB<br/>"
-            f"• <b>Total Dialogues:</b> {active_count} cues generated<br/>"
-            f"• <b>Processing Time:</b> {elapsed:.1f} seconds<br/>"
-            f"• <b>Pack Directory:</b> {pack_dir}"
-        )
+        self.lbl_done_size.setText(f"• <b>Archive Size:</b> {size_mb:.2f} MB")
+        self.lbl_done_cues.setText(f"• <b>Total Dialogues:</b> {active_count} cue cards generated")
+        self.lbl_done_time.setText(f"• <b>Processing Time:</b> {elapsed:.1f} seconds")
+        self.lbl_done_folder.setText(f"• <b>Pack Directory:</b> {pack_dir}")
 
         self.stack.setCurrentIndex(2)
 

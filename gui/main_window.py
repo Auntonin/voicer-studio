@@ -1103,8 +1103,17 @@ class MainWindow(QMainWindow):
             state = ProjectManager.load_project(path)
             self._state = state
             self._undo_manager = UndoManager()
-            self._current_project_path = path
-            self._is_dirty = False
+
+            # If loaded path was an autosave file, sanitize the project path to base project name
+            if ".autosave" in path.name.lower() or path.name.startswith("."):
+                clean = ProjectManager.clean_stem(path.stem)
+                orig_file = path.parent / f"{clean}.voicer"
+                self._current_project_path = orig_file if orig_file.exists() else None
+                self._mark_dirty(True)
+            else:
+                self._current_project_path = path
+                self._is_dirty = False
+
             self._last_saved_time = datetime.now().strftime("%H:%M:%S")
 
             if state.video_path and state.video_path.exists():
@@ -1159,6 +1168,7 @@ class MainWindow(QMainWindow):
         if self._current_project_path:
             ok = ProjectManager.save_project(self._state, self._current_project_path)
             if ok:
+                ProjectManager.delete_autosave(self._current_project_path)
                 self._last_saved_time = datetime.now().strftime("%H:%M:%S")
                 self._mark_dirty(False)
                 self._add_recent_project(str(self._current_project_path.resolve()))
@@ -1194,6 +1204,7 @@ class MainWindow(QMainWindow):
         path = Path(path_str)
         ok = ProjectManager.save_project(self._state, path)
         if ok:
+            ProjectManager.delete_autosave(path)
             self._current_project_path = path
             self._last_saved_time = datetime.now().strftime("%H:%M:%S")
             self._mark_dirty(False)
@@ -1622,14 +1633,21 @@ class MainWindow(QMainWindow):
                 if not self.on_save_project():
                     event.ignore()
                     return
+            elif reply == QMessageBox.StandardButton.Discard:
+                # Explicitly discard changes: clear dirty flag and delete temporary autosaves
+                self._is_dirty = False
+                try:
+                    ProjectManager.delete_autosave(self._current_project_path or (self._state.video_path if self._state else None))
+                except Exception:
+                    pass
             elif reply == QMessageBox.StandardButton.Cancel:
                 event.ignore()
                 return
 
-        # Auto-save recovery backup before exit if still dirty
+        # Auto-save recovery backup before exit only if still dirty (e.g. abrupt close)
         if self._is_dirty and (self._state.video_path or self._state.dialogues):
             try:
-                ProjectManager.auto_save(self._state, self._current_project_path, fallback_dir=Path.cwd() / "output")
+                ProjectManager.auto_save(self._state, self._current_project_path)
             except Exception:
                 pass
 

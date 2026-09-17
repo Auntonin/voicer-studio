@@ -166,14 +166,63 @@ class PackBuilder:
                         "-c:v", "libtheora", "-qscale:v", "10", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "20M",
                         "-pix_fmt", "yuv420p", "-g", "15",
                         "-c:a", "libvorbis", "-qscale:a", "8",
+                        "-progress", "pipe:1", "-nostats", "-v", "error",
                         str(dest_vid)
                     ]
                     from config import SUBPROCESS_FLAGS
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
-                    if res.returncode != 0 or not dest_vid.exists():
-                        logger.error(f"FFmpeg OGV encoding failed: {res.stderr}")
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True,
+                        creationflags=SUBPROCESS_FLAGS
+                    )
+
+                    total_dur = state.video_duration if (state.video_duration and state.video_duration > 0) else 0.0
+                    last_pct = 50
+
+                    if proc.stdout:
+                        try:
+                            for line in proc.stdout:
+                                line = line.strip()
+                                if line.startswith("out_time_us="):
+                                    try:
+                                        us_val = int(line.split("=", 1)[1])
+                                        cur_sec = us_val / 1_000_000.0
+                                        if total_dur > 0:
+                                            frac = min(1.0, max(0.0, cur_sec / total_dur))
+                                            pct = 50 + int(22 * frac)
+                                            if pct != last_pct:
+                                                last_pct = pct
+                                                if progress_cb:
+                                                    progress_cb(pct, f"Encoding game video dub_video.ogv: {int(frac * 100)}% ({cur_sec:.1f}s / {total_dur:.1f}s)...")
+                                        else:
+                                            if progress_cb:
+                                                progress_cb(50, f"Encoding game video dub_video.ogv: {cur_sec:.1f}s rendered...")
+                                    except (ValueError, IndexError):
+                                        pass
+                                elif line.startswith("progress=end"):
+                                    if progress_cb:
+                                        progress_cb(72, "Finished encoding dub_video.ogv.")
+                        except Exception:
+                            # Cancellation requested via progress_cb
+                            proc.kill()
+                            proc.wait()
+                            if dest_vid.exists():
+                                try:
+                                    dest_vid.unlink()
+                                except Exception:
+                                    pass
+                            raise
+
+                    _, stderr_data = proc.communicate()
+                    if proc.returncode != 0 or not dest_vid.exists():
+                        logger.error(f"FFmpeg OGV encoding failed (exit code {proc.returncode}): {stderr_data}")
                 except Exception as e:
                     logger.error(f"Failed to encode dub_video.ogv: {e}")
+                    raise
 
         if progress_cb:
             progress_cb(72, "Pack assets assembled.")

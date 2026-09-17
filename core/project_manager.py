@@ -15,12 +15,15 @@ import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
+from config import TEMP_DIR
 from core.models import PipelineState, PipelineStep, DialogueItem, SpeakerInfo, PackInfo
 from core.audio_extractor import AudioExtractor
 
 logger = logging.getLogger(__name__)
 
 PROJECT_FILE_EXTENSION = ".voicer"
+AUTOSAVE_DIR = TEMP_DIR / "autosave"
+
 
 
 class ProjectManager:
@@ -332,6 +335,18 @@ class ProjectManager:
             pass
         return 2.5
 
+    @staticmethod
+    def clean_stem(stem: str) -> str:
+        """Strip any repeating '.autosave' or '.recovery' suffix and leading dots to prevent cascading names."""
+        s = stem
+        while True:
+            new_s = re.sub(r'\.(autosave|recovery)$', '', s, flags=re.IGNORECASE)
+            if new_s == s:
+                break
+            s = new_s
+        s = s.lstrip('.')
+        return s or "untitled"
+
     @classmethod
     def auto_save(
         cls,
@@ -341,9 +356,9 @@ class ProjectManager:
     ) -> Optional[Path]:
         """
         Background safe auto-save.
-        - If project path is known: writes to <project_name>.autosave.voicer
-        - If only video is known: writes to <video_dir>/.<video_stem>.autosave.voicer
-        - If neither: writes to fallback_dir/.untitled.autosave.voicer
+        - If current_project_path is known, writes <clean_stem>.autosave.voicer next to it.
+        - If only video or unsaved project, writes to isolated TEMP_DIR / 'autosave' to keep user folders clean.
+        - Strips any existing '.autosave' to eliminate '.autosave.autosave' cascading.
         """
         if not state:
             return None
@@ -352,13 +367,19 @@ class ProjectManager:
 
         if current_project_path:
             p = Path(current_project_path)
-            target_path = p.with_name(f"{p.stem}.autosave{p.suffix or PROJECT_FILE_EXTENSION}")
-        elif state.video_path:
-            v = Path(state.video_path)
-            target_path = v.parent / f".{v.stem}.autosave{PROJECT_FILE_EXTENSION}"
-        elif fallback_dir:
-            f = Path(fallback_dir)
-            target_path = f / f".untitled.autosave{PROJECT_FILE_EXTENSION}"
+            clean = cls.clean_stem(p.stem)
+            target_path = p.with_name(f"{clean}.autosave{p.suffix or PROJECT_FILE_EXTENSION}")
+        else:
+            # When no project file is explicitly saved, isolate autosaves in TEMP_DIR / "autosave"
+            # Never clutter user folders (Downloads, Videos, Desktop) with hidden files
+            AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
+            if state.video_path:
+                clean = cls.clean_stem(Path(state.video_path).stem)
+            elif state.pack_info and state.pack_info.title and state.pack_info.title != "Untitled Pack":
+                clean = cls.clean_stem(state.pack_info.title)
+            else:
+                clean = "untitled"
+            target_path = AUTOSAVE_DIR / f"{clean}.autosave{PROJECT_FILE_EXTENSION}"
 
         if not target_path:
             return None
@@ -367,12 +388,41 @@ class ProjectManager:
         return target_path if success else None
 
     @classmethod
+    def delete_autosave(cls, project_or_video_path: Optional[Path]) -> None:
+        """Remove autosave recovery files upon clean project save or discard."""
+        if not project_or_video_path:
+            cand = AUTOSAVE_DIR / f"untitled.autosave{PROJECT_FILE_EXTENSION}"
+            if cand.exists():
+                try:
+                    cand.unlink()
+                except Exception:
+                    pass
+            return
+
+        p = Path(project_or_video_path)
+        clean = cls.clean_stem(p.stem)
+        candidates = [
+            p.with_name(f"{clean}.autosave{p.suffix or PROJECT_FILE_EXTENSION}"),
+            p.parent / f".{clean}.autosave{PROJECT_FILE_EXTENSION}",
+            AUTOSAVE_DIR / f"{clean}.autosave{PROJECT_FILE_EXTENSION}",
+        ]
+        for cand in candidates:
+            if cand.exists() and cand.is_file():
+                try:
+                    cand.unlink()
+                    logger.debug(f"Removed autosave recovery file: {cand}")
+                except Exception as e:
+                    logger.warning(f"Could not delete autosave {cand}: {e}")
+
+    @classmethod
     def find_autosave(cls, project_or_video_path: Path) -> Optional[Path]:
         """Check if an autosave recovery file exists and is valid."""
         p = Path(project_or_video_path)
+        clean = cls.clean_stem(p.stem)
         candidates = [
-            p.with_name(f"{p.stem}.autosave{p.suffix or PROJECT_FILE_EXTENSION}"),
-            p.parent / f".{p.stem}.autosave{PROJECT_FILE_EXTENSION}",
+            p.with_name(f"{clean}.autosave{p.suffix or PROJECT_FILE_EXTENSION}"),
+            AUTOSAVE_DIR / f"{clean}.autosave{PROJECT_FILE_EXTENSION}",
+            p.parent / f".{clean}.autosave{PROJECT_FILE_EXTENSION}",
         ]
         for cand in candidates:
             if cand.exists() and cand.is_file() and cand.stat().st_size > 0:

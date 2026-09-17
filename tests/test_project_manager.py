@@ -155,9 +155,13 @@ def test_auto_save():
         assert as_path.name == "MyShow.autosave.voicer"
         assert as_path.exists()
 
-        # Check find_autosave
-        found = ProjectManager.find_autosave(proj_file)
-        assert found == as_path
+        # Check that repeated autosave on the autosave file does NOT cascade into .autosave.autosave
+        as_path2 = ProjectManager.auto_save(state, current_project_path=as_path)
+        assert as_path2.name == "MyShow.autosave.voicer", f"Expected MyShow.autosave.voicer, got {as_path2.name}"
+
+        # Check delete_autosave
+        ProjectManager.delete_autosave(proj_file)
+        assert not as_path.exists(), "Autosave file should have been deleted"
 
         print("-> Auto save PASSED.")
 
@@ -166,3 +170,4 @@ if __name__ == "__main__":
     test_pack_folder_import()
     test_auto_save()
     print("\nALL PROJECT MANAGER TESTS PASSED SUCCESSFULLY!")
+
