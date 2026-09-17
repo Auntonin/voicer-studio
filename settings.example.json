@@ -1,0 +1,20 @@
+{
+  "hf_token": "",
+  "whisper_model": "large-v3",
+  "whisper_language": null,
+  "voice_sep_mode": "hq",
+  "timestamp_mode": "start_only",
+  "vad_threshold": 0.5,
+  "vad_padding_ms": 80,
+  "vad_merge_gap_ms": 120,
+  "image_quality": 95,
+  "audio_bitrate": "320k",
+  "thai_dubbing_opt": true,
+  "clean_hallucinations": true,
+  "format_keywords": true,
+  "whisper_initial_prompt": "บทสนทนาพากย์ไทย เสียงพากย์อนิเมะและเกม Thai and English dubbing dialogue",
+  "output_dir": "",
+  "include_dub_video": true,
+  "pack_authors": [],
+  "recent_videos": []
+}

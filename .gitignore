@@ -1,0 +1,68 @@
+# ==============================================================================
+# .gitignore — Voicer Studio / The Choice Voicer Dialogue Extractor
+# ==============================================================================
+
+# --- Python Environments & Virtualenvs ---
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Python Bytecode & Caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# --- Temporary & Local Processing Files ---
+.temp/
+temp/
+tmp/
+*.tmp
+*.wav
+*.m4a
+*.log
+crash.log
+
+# --- Scratch & Test Media Files ---
+scratch/
+test_output/
+output/
+*.zip
+
+# --- Deep Learning Neural Network Weights (>100MB cannot be pushed to GitHub) ---
+models/*.ckpt
+models/*.pth
+models/*.pt
+models/*.bin
+models/*.safetensors
+models/*.onnx
+!models/.gitkeep
+
+# --- User Configuration & Sensitive Tokens ---
+settings.json
+.env
+.env.local
+
+# --- Build & Intermediate Compilation Objects ---
+*.res
+*.o
+*.obj
+build/
+dist/
+*.spec
+
+# --- Operating System & Editor Files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~

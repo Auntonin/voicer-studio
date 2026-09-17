@@ -1,0 +1,42 @@
+# ============================================================
+# The Choice Voicer Dialogue Extractor — Requirements
+# ============================================================
+# Install: pip install -r requirements.txt
+# Recommended: Python 3.10, 3.11, or 3.12
+# ============================================================
+
+# --- GUI ---
+PySide6>=6.7.0
+
+# --- Video / Audio Processing ---
+ffmpeg-python>=0.2.0
+pydub>=0.25.0
+
+# --- AI: Speech-to-Text ---
+faster-whisper>=1.0.0
+
+# --- AI: Speaker Diarization ---
+pyannote.audio>=3.1.0
+
+# --- AI: Deep Learning Runtime ---
+torch>=2.1.0
+torchaudio>=2.1.0
+torchvision>=0.16.0
+
+# --- AI: Voice / Stem Separation ---
+audio-separator>=0.20.0
+demucs>=4.0.0
+
+# --- Computer Vision & Image Handling ---
+opencv-python>=4.8.0
+pillow>=10.0.0
+
+# --- Audio Utilities & DSP ---
+soundfile>=0.12.0
+librosa>=0.10.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# --- Network & Utilities ---
+requests>=2.31.0
+tqdm>=4.66.0
