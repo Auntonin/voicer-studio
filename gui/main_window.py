@@ -10,6 +10,7 @@ import sys
 import json
 import ctypes
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -26,7 +27,8 @@ from config import (
     APP_NAME, APP_VERSION, COLORS, SETTINGS_FILE,
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WHISPER_MODEL_DEFAULT
 )
-from core.models import PipelineState, PipelineStep, UndoManager, SpeakerInfo, DialogueItem
+from core.models import PipelineState, PipelineStep, UndoManager, SpeakerInfo, DialogueItem, PackInfo
+from core.project_manager import ProjectManager, PROJECT_FILE_EXTENSION
 from core.pipeline import PipelineWorker, ExportWorker, build_options_from_settings
 from gui.dialogue_table import DialogueTable
 from gui.clip_editor import ClipEditor
@@ -66,6 +68,15 @@ class MainWindow(QMainWindow):
         self._export_worker: ExportWorker | None = None
         self._settings: dict = self._load_settings()
         self._output_dir: Path | None = None
+        self._current_project_path: Path | None = None
+        self._is_dirty: bool = False
+        self._last_saved_time: str | None = None
+
+        # Background Auto-Save timer (checks dirty flag every 30 seconds)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(30000)
+        self._autosave_timer.timeout.connect(self._on_autosave_timer_tick)
+        self._autosave_timer.start()
 
         self._build_menubar()
         self._build_toolbar()
@@ -196,7 +207,12 @@ class MainWindow(QMainWindow):
         urls = event.mimeData().urls()
         if urls:
             path = Path(urls[0].toLocalFile())
-            if path.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
+            if path.is_dir():
+                if (path / "_pack_info.ini").exists() or any(path.glob("*.txt")):
+                    self.load_pack_folder(path)
+            elif path.suffix.lower() in {".voicer", ".json"}:
+                self.load_project_file(path)
+            elif path.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
                 self.load_video(path)
 
     # ── Menu Bar & Toolbar ───────────────────────────────────────────────────
@@ -206,12 +222,39 @@ class MainWindow(QMainWindow):
 
         # File Menu
         menu_file = menubar.addMenu("File")
+
+        act_new_proj = menu_file.addAction("New Project")
+        act_new_proj.setShortcut("Ctrl+N")
+        act_new_proj.triggered.connect(self.on_new_project)
+
+        act_open_proj = menu_file.addAction("Open Project...")
+        act_open_proj.setShortcut("Ctrl+O")
+        act_open_proj.triggered.connect(self.on_open_project)
+
+        act_open_pack = menu_file.addAction("Open Pack Folder...")
+        act_open_pack.triggered.connect(self.on_open_pack_folder)
+
+        self._menu_recent_projects = menu_file.addMenu("Open Recent Project")
+        self._rebuild_recent_projects_menu()
+
+        menu_file.addSeparator()
+
+        act_save_proj = menu_file.addAction("Save Project")
+        act_save_proj.setShortcut("Ctrl+S")
+        act_save_proj.triggered.connect(self.on_save_project)
+
+        act_save_proj_as = menu_file.addAction("Save Project As...")
+        act_save_proj_as.setShortcut("Ctrl+Shift+S")
+        act_save_proj_as.triggered.connect(self.on_save_project_as)
+
+        menu_file.addSeparator()
+
         act_import = menu_file.addAction("Import Video...")
-        act_import.setShortcut("Ctrl+O")
+        act_import.setShortcut("Ctrl+I")
         act_import.triggered.connect(self.on_import_video)
 
-        self._menu_recent = menu_file.addMenu("Open Recent")
-        self._rebuild_recent_menu()
+        self._menu_recent_videos = menu_file.addMenu("Open Recent Video")
+        self._rebuild_recent_videos_menu()
 
         menu_file.addSeparator()
 
@@ -319,12 +362,17 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             return a
 
-        self._act_import      = act("Import Video",          self.on_import_video,       "Ctrl+O", "Import a video file")
-        self._act_analyze     = act("Analyze",                self.on_analyze,            "Ctrl+R", "One-Click: Run audio separation, speech extraction, and auto-export ZIP pack")
+        self._act_open_proj   = act("Open Project",          self.on_open_project,       "Ctrl+O", "Open .voicer project or pack folder")
+        self._act_save_proj   = act("Save",                  self.on_save_project,       "Ctrl+S", "Save project (.voicer)")
+        self._act_import      = act("Import Video",          self.on_import_video,       "Ctrl+I", "Import a video file")
+        self._act_analyze     = act("Analyze",               self.on_analyze,            "Ctrl+R", "One-Click: Run audio separation, speech extraction, and auto-export ZIP pack")
         self._act_export      = act("Export Pack ZIP",       self.on_export,             "Ctrl+E", "Export The Choice Voicer pack")
         self._act_open_folder = act("Open Output Folder",    self.on_open_export_folder, "",       "Open output folder in Explorer")
         self._act_settings    = act("Settings",              self.on_settings,           "",       "Application settings")
 
+        tb.addAction(self._act_open_proj)
+        tb.addAction(self._act_save_proj)
+        tb.addSeparator()
         tb.addAction(self._act_import)
         tb.addSeparator()
         tb.addAction(self._act_analyze)
@@ -534,6 +582,10 @@ class MainWindow(QMainWindow):
         self._clip_editor.change_image_requested.connect(self._on_change_image)
         self._clip_editor.play_started.connect(self._stop_global_playback)
 
+        # ── Connect Pack Info Panel & Table Edit Signals ──
+        self._pack_info_panel.pack_info_changed.connect(self._on_pack_info_changed)
+        self._dialogue_table.dialogue_changed.connect(self._on_dialogue_changed)
+
     def _set_active_speaker(self, spk_id: str):
         if spk_id and spk_id in self._state.speakers:
             self._active_speaker_id = spk_id
@@ -598,11 +650,13 @@ class MainWindow(QMainWindow):
 
     def on_undo(self):
         if self._undo_manager.undo(self._state):
+            self._mark_dirty(True)
             self._refresh_all_views()
             self._log_message("Undo executed", "info")
 
     def on_redo(self):
         if self._undo_manager.redo(self._state):
+            self._mark_dirty(True)
             self._refresh_all_views()
             self._log_message("Redo executed", "info")
 
@@ -631,6 +685,7 @@ class MainWindow(QMainWindow):
             self._state.speaker_order.append(new_spk_id)
             
         self._active_speaker_id = new_spk_id
+        self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(f"Added track '{new_spk_id}'", "ok")
 
@@ -668,6 +723,7 @@ class MainWindow(QMainWindow):
                     d.speaker_id = default_spk
             if self._active_speaker_id == spk_id:
                 self._active_speaker_id = default_spk
+            self._mark_dirty(True)
             self._refresh_all_views()
             self._log_message(f"Deleted speaker track '{spk_info.display_name}'", "info")
 
@@ -686,12 +742,14 @@ class MainWindow(QMainWindow):
         )
         self._state.dialogues.append(new_d)
         self._state.renumber()
+        self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(f"Added new dialogue clip #{new_d.index} for speaker {spk_id}", "ok")
 
     def _on_speaker_added(self, spk_id: str):
         self._push_undo()
         self._active_speaker_id = spk_id
+        self._mark_dirty(True)
         self._refresh_all_views()
 
     def _on_speaker_deleted(self, spk_id: str):
@@ -727,6 +785,7 @@ class MainWindow(QMainWindow):
                 break
         self._state.renumber()
         self._clip_editor.clear()
+        self._mark_dirty(True)
         self._refresh_all_views()
 
     def _on_merge_next(self, idx: int):
@@ -741,6 +800,7 @@ class MainWindow(QMainWindow):
                 next_d.is_deleted = True
                 break
         self._state.renumber()
+        self._mark_dirty(True)
         self._refresh_all_views()
 
     def _on_split(self, idx: int):
@@ -761,6 +821,7 @@ class MainWindow(QMainWindow):
                 self._state.dialogues.append(new_d)
                 break
         self._state.renumber()
+        self._mark_dirty(True)
         self._refresh_all_views()
 
     def _on_caption_changed(self, idx: int, text: str):
@@ -769,6 +830,7 @@ class MainWindow(QMainWindow):
             if d.index == idx:
                 d.caption = text
                 break
+        self._mark_dirty(True)
         self._dialogue_table.populate(self._state)
 
     def _on_speaker_changed(self, idx: int, spk_id: str):
@@ -779,6 +841,7 @@ class MainWindow(QMainWindow):
             if d.index == idx:
                 d.speaker_id = spk_id
                 break
+        self._mark_dirty(True)
         self._refresh_all_views()
 
     def _on_timestamps_changed(self, idx: int, start: float, end: float):
@@ -800,6 +863,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self._log_message(f"Could not auto-regenerate audio clip: {e}", "warn")
 
+        self._mark_dirty(True)
         self._dialogue_table.populate(self._state)
         self._timeline.populate(self._state)
 
@@ -812,6 +876,7 @@ class MainWindow(QMainWindow):
 
     def _on_speaker_renamed(self, spk_id: str, new_name: str):
         self._push_undo()
+        self._mark_dirty(True)
         self._dialogue_table.populate(self._state)
         self._timeline.populate(self._state)
 
@@ -823,6 +888,7 @@ class MainWindow(QMainWindow):
                     gen = ClipGenerator()
                     out_dir = self._output_dir or (self._state.video_path.parent / "output" / "pack")
                     gen.regenerate_clip(d, self._state, out_dir)
+                    self._mark_dirty(True)
                     self._dialogue_table.populate(self._state)
                     self._clip_editor.load_item(d, self._state)
                     self._log_message(f"Regenerated audio for clip #{d.index}", "ok")
@@ -843,6 +909,7 @@ class MainWindow(QMainWindow):
                     audio_src = self._state.work_audio_path
                     if audio_src and audio_src.exists():
                         d.caption = t.transcribe_segment(audio_src, d.start, d.end)
+                        self._mark_dirty(True)
                         self._dialogue_table.populate(self._state)
                         self._clip_editor.load_item(d, self._state)
                         self._log_message(f"Regenerated caption for clip #{d.index}", "ok")
@@ -863,6 +930,7 @@ class MainWindow(QMainWindow):
                             out_img = self._output_dir / f"{d.id_str}_{spk_name}.png"
                             ext.save_frame(frame, out_img)
                             d.image_path = out_img
+                            self._mark_dirty(True)
                             self._dialogue_table.populate(self._state)
                             self._clip_editor.load_item(d, self._state)
                             self._pack_info_panel.populate(self._state)
@@ -871,15 +939,69 @@ class MainWindow(QMainWindow):
                     self._log_message(f"Error changing image: {e}", "error")
                 break
 
+    def _on_pack_info_changed(self, info: PackInfo):
+        self._state.pack_info = info
+        self._mark_dirty(True)
+
+    def _on_dialogue_changed(self, item: DialogueItem):
+        self._mark_dirty(True)
+
     # ── Status Bar ───────────────────────────────────────────────────────────
 
     def _build_statusbar(self):
         sb = QStatusBar()
         self.setStatusBar(sb)
         self._status_video = QLabel("No video loaded")
+        self._status_save = QLabel("💾 Ready")
+        self._status_save.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8.5pt; padding-right: 12px;")
         self._status_version = QLabel(f"v{APP_VERSION}  |  The Choice Voicer Dialogue Extractor")
         sb.addWidget(self._status_video)
+        sb.addPermanentWidget(self._status_save)
         sb.addPermanentWidget(self._status_version)
+
+    # ── Project & Dirty State Tracking ────────────────────────────────────────
+
+    def _mark_dirty(self, dirty: bool = True):
+        self._is_dirty = dirty
+        self._update_window_title()
+        self._update_save_status()
+
+    def _update_window_title(self):
+        star = " *" if self._is_dirty else ""
+        if self._current_project_path:
+            self.setWindowTitle(f"{APP_NAME} — {self._current_project_path.name}{star}")
+        elif self._state.video_path:
+            self.setWindowTitle(f"{APP_NAME} — [{self._state.video_path.name}]{star}")
+        else:
+            self.setWindowTitle(f"{APP_NAME}{star}")
+
+    def _update_save_status(self):
+        if not hasattr(self, '_status_save'):
+            return
+        if self._is_dirty:
+            self._status_save.setText("💾 Unsaved changes*")
+            self._status_save.setStyleSheet("color: #f59e0b; font-size: 8.5pt; padding-right: 12px;")
+        else:
+            t = f" ({self._last_saved_time})" if self._last_saved_time else ""
+            self._status_save.setText(f"💾 Saved{t}")
+            self._status_save.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8.5pt; padding-right: 12px;")
+
+    def _on_autosave_timer_tick(self):
+        if not self._is_dirty:
+            return
+        # Only auto-save if something has been loaded or created
+        if not self._state.video_path and not self._state.dialogues:
+            return
+
+        as_path = ProjectManager.auto_save(
+            self._state,
+            self._current_project_path,
+            fallback_dir=Path.cwd() / "output"
+        )
+        if as_path:
+            t = datetime.now().strftime("%H:%M:%S")
+            self._status_save.setText(f"💾 Auto-saved ({t})*")
+            self._status_save.setStyleSheet("color: #38bdf8; font-size: 8.5pt; padding-right: 12px;")
 
     # ── State helpers ─────────────────────────────────────────────────────────
 
@@ -895,6 +1017,251 @@ class MainWindow(QMainWindow):
         else:
             print(f"[{level}] {msg}")
 
+    # ── Project Operations (New / Open / Save / Pack Import) ───────────────────
+
+    def _check_unsaved_changes(self) -> bool:
+        """Prompt to save if changes are unsaved. Returns True to proceed, False to abort."""
+        if not self._is_dirty or (not self._state.video_path and not self._state.dialogues):
+            return True
+
+        proj_name = self._current_project_path.name if self._current_project_path else (self._state.pack_info.title or "Untitled Project")
+        reply = QMessageBox.question(
+            self,
+            "Save Changes?",
+            f"Save changes to '{proj_name}' before continuing?",
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save
+        )
+        if reply == QMessageBox.StandardButton.Save:
+            return self.on_save_project()
+        elif reply == QMessageBox.StandardButton.Discard:
+            return True
+        return False
+
+    def on_new_project(self):
+        """Reset workspace to a fresh empty project."""
+        if not self._check_unsaved_changes():
+            return
+
+        self._state = PipelineState()
+        self._undo_manager = UndoManager()
+        self._current_project_path = None
+        self._output_dir = None
+        self._is_dirty = False
+        self._last_saved_time = None
+
+        self._video_panel.reset()
+        self._clip_editor.clear()
+        self._refresh_all_views()
+        self._status_video.setText("No video loaded")
+        self._update_window_title()
+        self._update_save_status()
+        self._log_message("New project initialized", "info")
+
+    def on_open_project(self):
+        """Open a .voicer project file."""
+        if not self._check_unsaved_changes():
+            return
+
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Voicer Project",
+            "",
+            "Voicer Studio Project (*.voicer *.json);;All Files (*)",
+        )
+        if path_str:
+            self.load_project_file(Path(path_str))
+
+    def on_open_pack_folder(self):
+        """Import an existing exported pack folder (with _pack_info.ini and cue cards)."""
+        if not self._check_unsaved_changes():
+            return
+
+        dir_str = QFileDialog.getExistingDirectory(
+            self,
+            "Open Exported Pack Folder",
+            ""
+        )
+        if dir_str:
+            self.load_pack_folder(Path(dir_str))
+
+    def load_project_file(self, path: Path):
+        """Load project from .voicer file."""
+        try:
+            state = ProjectManager.load_project(path)
+            self._state = state
+            self._undo_manager = UndoManager()
+            self._current_project_path = path
+            self._is_dirty = False
+            self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+
+            if state.video_path and state.video_path.exists():
+                self._video_panel.load_video(state.video_path)
+                self._video_panel.show_video_info(state)
+                self._status_video.setText(f"File: {state.video_path.name}")
+                self._timeline.set_duration(state.video_duration)
+            else:
+                self._status_video.setText(f"Project: {path.name} (No video file)")
+
+            self._refresh_all_views()
+            self._update_window_title()
+            self._update_save_status()
+            self._add_recent_project(str(path.resolve()))
+            self._log_message(f"Opened project: {path.name} ({len(state.dialogues)} dialogues)", "ok")
+            self._show_toast("Project Loaded", f"Loaded {len(state.dialogues)} dialogues from {path.name}", "ok")
+        except Exception as e:
+            self._log_message(f"Failed to open project: {e}", "error")
+            QMessageBox.critical(self, "Open Project Error", f"Could not load project file:\n{e}")
+
+    def load_pack_folder(self, pack_dir: Path):
+        """Reconstruct project from an exported pack directory."""
+        try:
+            state = ProjectManager.load_from_pack_folder(pack_dir)
+            self._state = state
+            self._undo_manager = UndoManager()
+            self._output_dir = pack_dir
+            self._current_project_path = pack_dir / f"{pack_dir.name}.voicer"
+            self._is_dirty = False
+            self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+
+            if state.video_path and state.video_path.exists():
+                self._video_panel.load_video(state.video_path)
+                self._video_panel.show_video_info(state)
+                self._status_video.setText(f"File: {state.video_path.name}")
+                self._timeline.set_duration(state.video_duration)
+            else:
+                self._status_video.setText(f"Pack: {pack_dir.name}")
+
+            self._refresh_all_views()
+            self._update_window_title()
+            self._update_save_status()
+            self._add_recent_project(str(self._current_project_path.resolve()))
+            self._log_message(f"Imported pack folder: {pack_dir.name} ({len(state.dialogues)} dialogues)", "ok")
+            self._show_toast("Pack Folder Imported", f"Imported {len(state.dialogues)} dialogues.", "ok")
+        except Exception as e:
+            self._log_message(f"Failed to import pack folder: {e}", "error")
+            QMessageBox.critical(self, "Import Pack Error", f"Could not import pack folder:\n{e}")
+
+    def on_save_project(self) -> bool:
+        """Save to current project path, or prompt for path if untitled."""
+        if self._current_project_path:
+            ok = ProjectManager.save_project(self._state, self._current_project_path)
+            if ok:
+                self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+                self._mark_dirty(False)
+                self._add_recent_project(str(self._current_project_path.resolve()))
+                self._log_message(f"Project saved: {self._current_project_path.name}", "ok")
+                self._show_toast("Project Saved", self._current_project_path.name, "ok")
+                return True
+            else:
+                self._log_message("Failed to save project file", "error")
+                QMessageBox.critical(self, "Save Error", "Could not save project file.")
+                return False
+        return self.on_save_project_as()
+
+    def on_save_project_as(self) -> bool:
+        """Prompt user for a destination and save project."""
+        suggested_name = "Untitled_Project"
+        if self._state.pack_info.title and self._state.pack_info.title != "Untitled Pack":
+            suggested_name = self._state.pack_info.title.replace(" ", "_")
+        elif self._state.video_path:
+            suggested_name = self._state.video_path.stem
+
+        default_dir = self._state.video_path.parent if self._state.video_path else Path.cwd()
+        suggested_path = default_dir / f"{suggested_name}.voicer"
+
+        path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project As",
+            str(suggested_path),
+            "Voicer Studio Project (*.voicer);;JSON Files (*.json)",
+        )
+        if not path_str:
+            return False
+
+        path = Path(path_str)
+        ok = ProjectManager.save_project(self._state, path)
+        if ok:
+            self._current_project_path = path
+            self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+            self._mark_dirty(False)
+            self._add_recent_project(str(path.resolve()))
+            self._log_message(f"Project saved as: {path.name}", "ok")
+            self._show_toast("Project Saved", path.name, "ok")
+            return True
+        else:
+            self._log_message("Failed to save project file", "error")
+            QMessageBox.critical(self, "Save Error", "Could not save project file.")
+            return False
+
+    def _rebuild_recent_projects_menu(self):
+        if not hasattr(self, "_menu_recent_projects"):
+            return
+        self._menu_recent_projects.clear()
+        recents = self._settings.get("recent_projects", [])
+        if not recents:
+            act = self._menu_recent_projects.addAction("No Recent Projects")
+            act.setEnabled(False)
+            return
+
+        for p_str in recents:
+            p = Path(p_str)
+            if p.exists():
+                act = self._menu_recent_projects.addAction(f"{p.name}  ({p.parent})")
+                act.triggered.connect(lambda _, path=p: self.load_project_file(path))
+
+        self._menu_recent_projects.addSeparator()
+        act_clear = self._menu_recent_projects.addAction("Clear Recent Projects")
+        act_clear.triggered.connect(self._clear_recent_projects)
+
+    def _add_recent_project(self, path_str: str):
+        recents = self._settings.get("recent_projects", [])
+        if path_str in recents:
+            recents.remove(path_str)
+        recents.insert(0, path_str)
+        self._settings["recent_projects"] = recents[:10]
+        self._save_settings(self._settings)
+        self._rebuild_recent_projects_menu()
+
+    def _clear_recent_projects(self):
+        self._settings["recent_projects"] = []
+        self._save_settings(self._settings)
+        self._rebuild_recent_projects_menu()
+
+    def _rebuild_recent_videos_menu(self):
+        if not hasattr(self, "_menu_recent_videos"):
+            return
+        self._menu_recent_videos.clear()
+        recents = self._settings.get("recent_videos", [])
+        if not recents:
+            act = self._menu_recent_videos.addAction("No Recent Videos")
+            act.setEnabled(False)
+            return
+
+        for p_str in recents:
+            p = Path(p_str)
+            if p.exists():
+                act = self._menu_recent_videos.addAction(f"{p.name}  ({p.parent})")
+                act.triggered.connect(lambda _, path=p: self.load_video(path))
+
+        self._menu_recent_videos.addSeparator()
+        act_clear = self._menu_recent_videos.addAction("Clear Recent Videos")
+        act_clear.triggered.connect(self._clear_recent_videos)
+
+    def _add_recent_video(self, path_str: str):
+        recents = self._settings.get("recent_videos", [])
+        if path_str in recents:
+            recents.remove(path_str)
+        recents.insert(0, path_str)
+        self._settings["recent_videos"] = recents[:10]
+        self._save_settings(self._settings)
+        self._rebuild_recent_videos_menu()
+
+    def _clear_recent_videos(self):
+        self._settings["recent_videos"] = []
+        self._save_settings(self._settings)
+        self._rebuild_recent_videos_menu()
+
     # ── Action Slots ──────────────────────────────────────────────────────────
 
     def on_import_video(self):
@@ -906,40 +1273,6 @@ class MainWindow(QMainWindow):
         )
         if path_str:
             self.load_video(Path(path_str))
-
-    def _rebuild_recent_menu(self):
-        if not hasattr(self, "_menu_recent"):
-            return
-        self._menu_recent.clear()
-        recents = self._settings.get("recent_videos", [])
-        if not recents:
-            act = self._menu_recent.addAction("No Recent Files")
-            act.setEnabled(False)
-            return
-
-        for p_str in recents:
-            p = Path(p_str)
-            if p.exists():
-                act = self._menu_recent.addAction(f"{p.name}  ({p.parent})")
-                act.triggered.connect(lambda _, path=p: self.load_video(path))
-
-        self._menu_recent.addSeparator()
-        act_clear = self._menu_recent.addAction("Clear Recent List")
-        act_clear.triggered.connect(self._clear_recent_videos)
-
-    def _add_recent_video(self, path_str: str):
-        recents = self._settings.get("recent_videos", [])
-        if path_str in recents:
-            recents.remove(path_str)
-        recents.insert(0, path_str)
-        self._settings["recent_videos"] = recents[:10]
-        self._save_settings(self._settings)
-        self._rebuild_recent_menu()
-
-    def _clear_recent_videos(self):
-        self._settings["recent_videos"] = []
-        self._save_settings(self._settings)
-        self._rebuild_recent_menu()
 
     def load_video(self, path: Path):
         """Load a video file into the pipeline state and update UI."""
@@ -955,7 +1288,6 @@ class MainWindow(QMainWindow):
         self._add_recent_video(str(path.resolve()))
         self._state.video_path = path
         self._state.pack_info.title = path.stem
-        self._log_message(f"Video loaded: {path.name}", "ok")
 
         # Auto-incremental output directory setup
         from core.pack_builder import PackBuilder
@@ -970,7 +1302,9 @@ class MainWindow(QMainWindow):
         self._video_panel.load_video(path)
         self._video_panel.show_video_info(self._state)
         self._status_video.setText(f"File: {path.name}")
+        self._mark_dirty(True)
         self._update_toolbar_state()
+        self._log_message(f"Video loaded: {path.name}", "ok")
 
     def on_open_export_folder(self):
         """Open the output pack folder in Windows File Explorer."""
@@ -1146,6 +1480,19 @@ class MainWindow(QMainWindow):
         else:
             self._show_toast()
 
+        self._mark_dirty(True)
+        # Immediately auto-save project so newly extracted dialogues and pack data are persisted
+        as_path = ProjectManager.auto_save(
+            self._state,
+            self._current_project_path,
+            fallback_dir=Path.cwd() / "output"
+        )
+        if as_path:
+            t = datetime.now().strftime("%H:%M:%S")
+            self._status_save.setText(f"💾 Auto-saved ({t})*")
+            self._status_save.setStyleSheet("color: #38bdf8; font-size: 8.5pt; padding-right: 12px;")
+            self._log_message(f"Extraction results auto-saved to: {as_path.name}", "info")
+
     def _on_pack_ready(self, pack_dir_str: str):
         """Called when pipeline reports the pack output directory."""
         self._output_dir = Path(pack_dir_str)
@@ -1297,8 +1644,44 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():
+            reply = QMessageBox.question(
+                self,
+                "Pipeline In Progress",
+                "A dialogue processing pipeline is currently running.\nDo you really want to cancel it and quit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
             self._worker.cancel()
             self._worker.wait(3000)
+
+        # Prompt for unsaved project changes
+        if self._is_dirty and (self._state.video_path or self._state.dialogues):
+            name = self._current_project_path.name if self._current_project_path else (self._state.pack_info.title or "Untitled Project")
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                f"Do you want to save changes to '{name}' before closing?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save
+            )
+            if reply == QMessageBox.StandardButton.Save:
+                if not self.on_save_project():
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+
+        # Auto-save recovery backup before exit if still dirty
+        if self._is_dirty and (self._state.video_path or self._state.dialogues):
+            try:
+                ProjectManager.auto_save(self._state, self._current_project_path, fallback_dir=Path.cwd() / "output")
+            except Exception:
+                pass
+
         event.accept()
 
     def _build_stylesheet(self) -> str:

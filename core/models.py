@@ -55,6 +55,19 @@ class SpeakerInfo:
         name = "".join(c for c in name if c in FILENAME_ALLOWED_CHARS)
         return name or f"Speaker_{self._extract_index() + 1}"
 
+    def to_dict(self) -> dict:
+        return {
+            "speaker_id": self.speaker_id,
+            "display_name": self.display_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> SpeakerInfo:
+        return cls(
+            speaker_id=str(data.get("speaker_id", "SPEAKER_00")),
+            display_name=str(data.get("display_name", ""))
+        )
+
 
 # ── Dialogue Item ──────────────────────────────────────────────────────────────
 
@@ -125,6 +138,67 @@ class DialogueItem:
         """Human-readable end time: '00:10.520'"""
         return _format_ts(self.end)
 
+    def to_dict(self, base_dir: Optional[Path] = None) -> dict:
+        def _rel_or_abs(p: Optional[Path]) -> Optional[str]:
+            if not p:
+                return None
+            if base_dir:
+                try:
+                    return str(p.relative_to(base_dir).as_posix())
+                except ValueError:
+                    pass
+            return str(p.as_posix()) if hasattr(p, 'as_posix') else str(p)
+
+        return {
+            "index": self.index,
+            "speaker_id": self.speaker_id,
+            "start": round(self.start, 4),
+            "end": round(self.end, 4),
+            "caption": self.caption,
+            "caption_language": self.caption_language,
+            "audio_path": _rel_or_abs(self.audio_path),
+            "image_path": _rel_or_abs(self.image_path),
+            "txt_path": _rel_or_abs(self.txt_path),
+            "caption_confirmed": self.caption_confirmed,
+            "image_confirmed": self.image_confirmed,
+            "audio_confirmed": self.audio_confirmed,
+            "is_deleted": self.is_deleted,
+            "selected_frame_idx": self.selected_frame_idx,
+            "extra_speakers": list(self.extra_speakers),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, base_dir: Optional[Path] = None) -> DialogueItem:
+        def _resolve_path(p_str: Optional[str]) -> Optional[Path]:
+            if not p_str:
+                return None
+            p = Path(p_str)
+            if p.is_absolute() and p.exists():
+                return p
+            if base_dir:
+                candidate = (base_dir / p).resolve()
+                if candidate.exists():
+                    return candidate
+            return p
+
+        return cls(
+            index=int(data.get("index", 1)),
+            speaker_id=str(data.get("speaker_id", "SPEAKER_00")),
+            start=float(data.get("start", 0.0)),
+            end=float(data.get("end", 0.0)),
+            caption=str(data.get("caption", "")),
+            caption_language=data.get("caption_language"),
+            audio_path=_resolve_path(data.get("audio_path")),
+            image_path=_resolve_path(data.get("image_path")),
+            txt_path=_resolve_path(data.get("txt_path")),
+            caption_confirmed=bool(data.get("caption_confirmed", False)),
+            image_confirmed=bool(data.get("image_confirmed", False)),
+            audio_confirmed=bool(data.get("audio_confirmed", False)),
+            is_deleted=bool(data.get("is_deleted", False)),
+            selected_frame_idx=data.get("selected_frame_idx"),
+            extra_speakers=list(data.get("extra_speakers", [])),
+        )
+
 
 def _format_ts(seconds: float) -> str:
     """Format seconds as mm:ss.mmm"""
@@ -157,6 +231,23 @@ class PackInfo:
             f'title="{self.title}"\n'
             f'icon="{self.icon}"\n'
             f"authors={authors_str}\n"
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "icon": self.icon,
+            "authors": list(self.authors),
+            "include_dub_video": self.include_dub_video,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> PackInfo:
+        return cls(
+            title=str(data.get("title", "Untitled Pack")),
+            icon=str(data.get("icon", "")),
+            authors=list(data.get("authors", ["unknown"])),
+            include_dub_video=bool(data.get("include_dub_video", True)),
         )
 
 
@@ -292,6 +383,97 @@ class PipelineState:
 
     def is_step_done(self, step: PipelineStep) -> bool:
         return self.step_completed.get(step, False)
+
+    def to_dict(self, base_dir: Optional[Path] = None) -> dict:
+        def _rel_or_abs(p: Optional[Path]) -> Optional[str]:
+            if not p:
+                return None
+            if base_dir:
+                try:
+                    return str(p.relative_to(base_dir).as_posix())
+                except ValueError:
+                    pass
+            return str(p.as_posix()) if hasattr(p, 'as_posix') else str(p)
+
+        return {
+            "version": 1,
+            "video_path": _rel_or_abs(self.video_path),
+            "work_audio_path": _rel_or_abs(self.work_audio_path),
+            "separated_vocals_path": _rel_or_abs(self.separated_vocals_path),
+            "separated_bg_path": _rel_or_abs(self.separated_bg_path),
+            "pack_backing_track_path": _rel_or_abs(self.pack_backing_track_path),
+            "video_duration": self.video_duration,
+            "video_width": self.video_width,
+            "video_height": self.video_height,
+            "video_fps": self.video_fps,
+            "video_audio_tracks": self.video_audio_tracks,
+            "speakers": {k: v.to_dict() for k, v in self.speakers.items()},
+            "speaker_order": list(self.speaker_order),
+            "dialogues": [d.to_dict(base_dir) for d in self.dialogues],
+            "pack_info": self.pack_info.to_dict(),
+            "current_step": self.current_step.name,
+            "step_completed": {k.name: v for k, v in self.step_completed.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, base_dir: Optional[Path] = None) -> PipelineState:
+        def _resolve_path(p_str: Optional[str]) -> Optional[Path]:
+            if not p_str:
+                return None
+            p = Path(p_str)
+            if p.is_absolute() and p.exists():
+                return p
+            if base_dir:
+                candidate = (base_dir / p).resolve()
+                if candidate.exists():
+                    return candidate
+            return p
+
+        state = cls()
+        state.video_path = _resolve_path(data.get("video_path"))
+        state.work_audio_path = _resolve_path(data.get("work_audio_path"))
+        state.separated_vocals_path = _resolve_path(data.get("separated_vocals_path"))
+        state.separated_bg_path = _resolve_path(data.get("separated_bg_path"))
+        state.pack_backing_track_path = _resolve_path(data.get("pack_backing_track_path"))
+
+        state.video_duration = float(data.get("video_duration", 0.0))
+        state.video_width = int(data.get("video_width", 0))
+        state.video_height = int(data.get("video_height", 0))
+        state.video_fps = float(data.get("video_fps", 0.0))
+        state.video_audio_tracks = int(data.get("video_audio_tracks", 0))
+
+        # Speakers
+        speakers_dict = {}
+        for k, v in data.get("speakers", {}).items():
+            speakers_dict[k] = SpeakerInfo.from_dict(v)
+        state.speakers = speakers_dict
+        state.speaker_order = list(data.get("speaker_order", list(speakers_dict.keys())))
+
+        # Dialogues
+        state.dialogues = [
+            DialogueItem.from_dict(d, base_dir)
+            for d in data.get("dialogues", [])
+        ]
+
+        # Pack Info
+        if "pack_info" in data:
+            state.pack_info = PackInfo.from_dict(data["pack_info"])
+
+        # Steps
+        step_name = data.get("current_step", "IDLE")
+        try:
+            state.current_step = PipelineStep[step_name]
+        except KeyError:
+            state.current_step = PipelineStep.IDLE
+
+        state.step_completed = {}
+        for k, v in data.get("step_completed", {}).items():
+            try:
+                state.step_completed[PipelineStep[k]] = bool(v)
+            except KeyError:
+                pass
+
+        return state
 
 
 # ── Undo / Redo State Manager ──────────────────────────────────────────────────

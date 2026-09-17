@@ -260,6 +260,17 @@ def main():
 
     window.showMaximized()
 
+    # If a project or video path is passed as an argument, load it
+    if len(sys.argv) > 1:
+        arg_path = Path(sys.argv[1])
+        if arg_path.exists():
+            if arg_path.suffix.lower() in (".voicer", ".json"):
+                window.load_project_file(arg_path)
+            elif arg_path.is_dir():
+                window.load_pack_folder(arg_path)
+            elif arg_path.suffix.lower() in (".mp4", ".mkv", ".mov", ".webm", ".avi"):
+                window.load_video(arg_path)
+
     # Smooth handoff to main window
     splash.finish(window)
 

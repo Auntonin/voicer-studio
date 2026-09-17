@@ -52,10 +52,20 @@ class PackInfoPanel(QWidget):
 
     def populate(self, state: PipelineState):
         self.state = state
+        self._is_populating = True
+
+        self.edit_title.blockSignals(True)
         self.combo_icon.blockSignals(True)
+        self.edit_authors.blockSignals(True)
+        self.chk_dub_video.blockSignals(True)
         
+        # Populate pack metadata
+        self.edit_title.setText(state.pack_info.title or "")
+        self.edit_authors.setPlainText("\n".join(state.pack_info.authors) if state.pack_info.authors else "")
+        self.chk_dub_video.setChecked(state.pack_info.include_dub_video)
+
         # Preserve current selection
-        prev_icon = self.combo_icon.currentText()
+        prev_icon = state.pack_info.icon or self.combo_icon.currentText()
         self.combo_icon.clear()
         
         # Populate available frame images
@@ -64,23 +74,35 @@ class PackInfoPanel(QWidget):
             fname = f"{d.id_str}_{spk_name}.png"
             self.combo_icon.addItem(fname, d.image_path)
         
-        # Restore previous selection if still available
+        # Restore selection
         if prev_icon:
             restore_idx = self.combo_icon.findText(prev_icon)
             if restore_idx >= 0:
                 self.combo_icon.setCurrentIndex(restore_idx)
+            elif prev_icon:
+                self.combo_icon.addItem(prev_icon)
+                self.combo_icon.setCurrentText(prev_icon)
             
-        self.combo_icon.blockSignals(False)
-        self._on_icon_changed()
+        self._update_icon_preview()
 
-    def _on_icon_changed(self):
+        self.edit_title.blockSignals(False)
+        self.combo_icon.blockSignals(False)
+        self.edit_authors.blockSignals(False)
+        self.chk_dub_video.blockSignals(False)
+        self._is_populating = False
+
+    def _update_icon_preview(self):
         img_path = self.combo_icon.currentData()
         if img_path and hasattr(img_path, 'exists') and img_path.exists():
             pix = QPixmap(str(img_path)).scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio)
             self.lbl_icon_preview.setPixmap(pix)
         else:
             self.lbl_icon_preview.setText("No Icon")
-        self._on_changed()
+
+    def _on_icon_changed(self):
+        self._update_icon_preview()
+        if not getattr(self, '_is_populating', False):
+            self._on_changed()
 
     def get_pack_info(self) -> PackInfo:
         info = PackInfo()
@@ -93,6 +115,7 @@ class PackInfoPanel(QWidget):
         return info
 
     def set_pack_info(self, info: PackInfo):
+        self._is_populating = True
         self.edit_title.blockSignals(True)
         self.combo_icon.blockSignals(True)
         self.edit_authors.blockSignals(True)
@@ -106,12 +129,16 @@ class PackInfoPanel(QWidget):
         
         self.edit_authors.setPlainText("\n".join(info.authors))
         self.chk_dub_video.setChecked(info.include_dub_video)
+        self._update_icon_preview()
         
         self.edit_title.blockSignals(False)
         self.combo_icon.blockSignals(False)
         self.edit_authors.blockSignals(False)
         self.chk_dub_video.blockSignals(False)
+        self._is_populating = False
         
     def _on_changed(self, *args):
+        if getattr(self, '_is_populating', False):
+            return
         self.pack_info_changed.emit(self.get_pack_info())
 
