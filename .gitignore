@@ -58,6 +58,13 @@ build/
 dist/
 *.spec
 
+# --- Executables & Standalone Launcher Build Scripts (kept locally only) ---
+*.exe
+VoicerStudio.exe
+build_exe.py
+launcher.c
+launcher.rc
+
 # --- Operating System & Editor Files ---
 .DS_Store
 Thumbs.db

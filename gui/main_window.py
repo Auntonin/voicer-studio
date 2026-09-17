@@ -51,9 +51,12 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(self._build_stylesheet())
         self.setAcceptDrops(True)
 
-        app_icon_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
-        if app_icon_path.exists():
-            self.setWindowIcon(QIcon(str(app_icon_path)))
+        ico_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.ico"
+        png_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
+        if ico_path.exists():
+            self.setWindowIcon(QIcon(str(ico_path)))
+        elif png_path.exists():
+            self.setWindowIcon(QIcon(str(png_path)))
 
         self._state = PipelineState()
         self._undo_manager = UndoManager()

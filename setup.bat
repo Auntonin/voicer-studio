@@ -123,44 +123,25 @@ if errorlevel 1 (
     echo        [OK] All packages installed
 )
 
+:: ── Ensure Default Configuration ─────────────────────────
+if not exist "settings.json" (
+    if exist "settings.example.json" (
+        copy "settings.example.json" "settings.json" >nul
+        echo        [OK] Initialized default settings.json
+    )
+)
+
 :: ── Post-install info ─────────────────────────────────────
 echo.
 echo  ==========================================
 echo   Setup Complete!
 echo  ==========================================
 echo.
-echo  IMPORTANT — Before first use:
-echo.
-echo  [Speaker Diarization - pyannote.audio]
-echo    1. Create account at https://huggingface.co
-echo    2. Accept model license at:
-echo       https://huggingface.co/pyannote/speaker-diarization-3.1
-echo    3. Generate token at:
-echo       https://huggingface.co/settings/tokens
-echo    4. Enter token in app Settings (first launch)
-echo.
-echo  [Whisper Models - auto-downloaded on first use]
-echo    tiny   ~75MB    fast, less accurate
-echo    base   ~142MB   balanced
-echo    small  ~466MB   good quality
-echo    medium ~1.5GB   high quality
-echo    large  ~3GB     best quality (recommended)
-echo.
-echo  [Demucs Voice Separation - auto-downloaded on first use]
-echo    htdemucs       ~83MB   standard
-echo    htdemucs_6s    ~280MB  high quality (recommended)
-echo.
 echo  To launch the application:
+echo    start.bat
+echo    -- OR --
 echo    run.bat
 echo    -- OR --
 echo    .venv\Scripts\python.exe main.py
-echo.
-
-:: ── Create run.bat ────────────────────────────────────────
-echo @echo off > run.bat
-echo call .venv\Scripts\activate.bat >> run.bat
-echo python main.py >> run.bat
-echo        [OK] Created run.bat
-
 echo.
 pause

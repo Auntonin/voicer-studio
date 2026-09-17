@@ -30,8 +30,8 @@
   Adobe-inspired dark theme timeline with draggable clips, interactive waveforms, keyboard shortcuts (`Space`, `Ctrl+Z`, `S` Split, `M` Merge, `Del`), and multi-speaker layering.
 * **🚀 One-Click All-in-One "Analyze"**:
   Import a video and click **Analyze** once. The pipeline extracts audio, separates stems, slices dialogue clips (`.mp3`), captures lossless video frames (`.png`), generates `dub_video.ogv` + `dub_video.mp4`, and automatically builds the final `[PackTitle].zip` archive!
-* **🖥️ Native Windows Executable (`VoicerStudio.exe`)**:
-  Compiled native Windows GUI binary (`-mwindows`) with embedded icon, native Windows 10/11 Immersive Dark Title Bar, and zero command prompt flashing.
+* **🖥️ Native Windows Integration & One-Click Launch (`start.bat`)**:
+  Automated virtual environment management, automatic configuration initialization, native Windows 10/11 taskbar branding, and zero setup hassle.
 
 ---
 
@@ -86,7 +86,7 @@ authors=["Voicer Studio"]
 
 ---
 
-### Installation
+### Quick Start (One-Click)
 
 1. **Clone the repository:**
    ```powershell
@@ -94,33 +94,14 @@ authors=["Voicer Studio"]
    cd voicer-studio
    ```
 
-2. **Run automated setup:**
-   Double-click **`setup.bat`** (or run via PowerShell):
-   ```powershell
-   .\setup.ps1
-   ```
-   This will:
-   - Create an isolated virtual environment (`.venv`)
-   - Detect your NVIDIA GPU and install CUDA PyTorch (or CPU fallback)
-   - Install all dependencies from `requirements.txt`
+2. **Run the application:**
+   Double-click **`start.bat`** (or run `.\start.bat` in terminal).
 
-3. **Launch the application:**
-   Double-click **`VoicerStudio.exe`** (or run `run.bat`).
-
----
-
-## 🛠️ Building the Standalone Executable
-
-Voicer Studio comes with an automated Python build script that generates the standalone native Windows launcher:
-
-```powershell
-python build_exe.py
-```
-
-* Dynamically reads version metadata from `config.py`.
-* Generates high-res multi-resolution icons (`assets/app_icon.ico` & `assets/app_icon.png`).
-* Compiles `launcher.c` + `launcher.res` using GCC into `VoicerStudio.exe` (~126 KB).
-* True Windows GUI binary: **No CMD console window opens on launch**.
+   > [!TIP]
+   > `start.bat` is fully automated:
+   > - It automatically creates your local `settings.json` from `settings.example.json`.
+   > - If running for the first time, it automatically sets up your Python virtual environment (`.venv`) and installs required dependencies.
+   > - Then it starts Voicer Studio with full Windows taskbar icon integration.
 
 ---
 
@@ -128,20 +109,20 @@ python build_exe.py
 
 ```text
 voicer-studio/
-├── VoicerStudio.exe       ← Standalone native launcher (Double-click to run)
+├── start.bat / run.bat    ← One-click automated launcher & runner
+├── setup.bat / setup.ps1  ← Standalone environment installer script
 ├── main.py                ← Application entry point & Adobe-style Splash Screen
 ├── config.py              ← Studio settings, color palette & constants
-├── build_exe.py           ← Automated build script for compiling VoicerStudio.exe
-├── launcher.c             ← Native C launcher source
-├── launcher.rc            ← Windows resource script (icon & version info)
 ├── requirements.txt       ← Python dependencies
-├── settings.example.json  ← Template user settings
-├── setup.bat / setup.ps1  ← One-click environment installer
-├── run.bat / run.ps1      ← Alternative console launcher scripts
+├── settings.example.json  ← Template user settings (auto-copied on first run)
 ├── test_core.py           ← Core validation and unit test suite
 │
+├── assets/                ← Official application brand assets
+│   ├── app_icon.ico       ← Multi-resolution Windows application icon
+│   └── app_icon.png       ← High-resolution studio logo
+│
 ├── core/                  ← Processing Engine & AI Pipelines
-│   ├── separator.py       ← BS-RoFormer & Demucs stem separation
+│   ├── separator.py       ← BS-RoFormer stem separation (vocal & BGM isolation)
 │   ├── transcriber.py     ← Faster-Whisper transcription & sentence segmentation
 │   ├── diarization.py     ← Pyannote speaker clustering
 │   ├── vad.py             ← Silero VAD speech detection

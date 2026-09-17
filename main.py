@@ -177,6 +177,16 @@ def check_ffmpeg() -> bool:
 
 
 def main():
+    # ── Windows Taskbar & Shell App ID ──────────────────────────────────────────
+    # Explicit AppUserModelID decouples the process from generic python.exe,
+    # ensuring the Windows taskbar displays the official studio app icon.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TheChoiceVoicer.VoicerStudio.1.1.0")
+        except Exception:
+            pass
+
     # Enable high-DPI scaling
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 
@@ -185,12 +195,23 @@ def main():
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("TheChoiceVoicer")
 
-    # Load application icon
-    icon_path = PROJECT_ROOT / "assets" / "app_icon.png"
+    # Load application icon (prefer .ico with full multi-resolution mipmaps)
+    ico_path = PROJECT_ROOT / "assets" / "app_icon.ico"
+    png_path = PROJECT_ROOT / "assets" / "app_icon.png"
+    app_icon = QIcon()
+    if ico_path.exists():
+        app_icon = QIcon(str(ico_path))
+    elif png_path.exists():
+        app_icon = QIcon(str(png_path))
+
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+
     icon_pixmap = None
-    if icon_path.exists():
-        icon_pixmap = QPixmap(str(icon_path))
-        app.setWindowIcon(QIcon(icon_pixmap))
+    if png_path.exists():
+        icon_pixmap = QPixmap(str(png_path))
+    elif ico_path.exists():
+        icon_pixmap = QPixmap(str(ico_path))
 
     # App-wide font
     font = QFont("Segoe UI", 10)
