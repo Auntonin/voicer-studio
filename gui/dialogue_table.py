@@ -68,7 +68,25 @@ class DialogueTable(QWidget):
                 border: 1px solid #333333;
             }}
         """)
-        self.table.setHorizontalHeaderLabels(["#", "Character", "Start", "End", "Duration", "Caption", "Img", "Aud", "Confirm"])
+        headers = ["#", "Character", "Start", "End", "Duration", "Caption", "Img", "Aud", "Confirm"]
+        self.table.setHorizontalHeaderLabels(headers)
+        
+        tooltips = [
+            "Dialogue line sequence index",
+            "Assigned character / speaker layer",
+            "Start timestamp (HH:MM:SS.mmm)",
+            "End timestamp (HH:MM:SS.mmm)",
+            "Total segment duration in seconds",
+            "Speech transcript caption text",
+            "Companion image frame extracted on disk (Yes / —)",
+            "Companion audio clip extracted on disk (Yes / —)",
+            "Proofreading status checkbox: Check when verified and approved"
+        ]
+        for col, tip in enumerate(tooltips):
+            h_item = self.table.horizontalHeaderItem(col)
+            if h_item:
+                h_item.setToolTip(tip)
+
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -144,7 +162,11 @@ class DialogueTable(QWidget):
             
         cb = QCheckBox()
         cb.setChecked(getattr(item, 'caption_confirmed', False))
-        cb.stateChanged.connect(lambda state, itm=item: setattr(itm, 'caption_confirmed', state == Qt.CheckState.Checked.value))
+        cb.setToolTip("Mark as verified and approved (Proofread QA)")
+        def _on_confirm_toggled(state, itm=item):
+            itm.caption_confirmed = (state == Qt.CheckState.Checked.value)
+            self.dialogue_changed.emit(itm)
+        cb.stateChanged.connect(_on_confirm_toggled)
         w = QWidget()
         l = QHBoxLayout(w)
         l.addWidget(cb)

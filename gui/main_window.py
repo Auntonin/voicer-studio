@@ -25,7 +25,7 @@ from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette
 
 from config import (
     APP_NAME, APP_VERSION, COLORS, SETTINGS_FILE,
-    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WHISPER_MODEL_DEFAULT
+    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WHISPER_MODEL_DEFAULT, ASSETS_DIR
 )
 from core.models import PipelineState, PipelineStep, UndoManager, SpeakerInfo, DialogueItem, PackInfo
 from core.project_manager import ProjectManager, PROJECT_FILE_EXTENSION
@@ -349,12 +349,16 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self):
         tb = QToolBar("Main Toolbar")
         tb.setMovable(False)
-        tb.setIconSize(QSize(18, 18))
-        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        tb.setIconSize(QSize(16, 16))
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(tb)
 
-        def act(label: str, slot, shortcut: str = "", tip: str = "") -> QAction:
+        def act(label: str, slot, shortcut: str = "", tip: str = "", icon_name: str = "") -> QAction:
             a = QAction(label, self)
+            if icon_name:
+                icon_path = ASSETS_DIR / "icons" / icon_name
+                if icon_path.exists():
+                    a.setIcon(QIcon(str(icon_path)))
             if shortcut:
                 a.setShortcut(shortcut)
             if tip:
@@ -362,11 +366,11 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             return a
 
-        self._act_import      = act("Import Video",          self.on_import_video,       "Ctrl+I", "Import a video file")
-        self._act_analyze     = act("Analyze",               self.on_analyze,            "Ctrl+R", "One-Click: Run audio separation, speech extraction, and auto-export ZIP pack")
-        self._act_export      = act("Export Pack ZIP",       self.on_export,             "Ctrl+E", "Export The Choice Voicer pack")
-        self._act_open_folder = act("Open Output Folder",    self.on_open_export_folder, "",       "Open output folder in Explorer")
-        self._act_settings    = act("Settings",              self.on_settings,           "",       "Application settings")
+        self._act_import      = act("Import Video",          self.on_import_video,       "Ctrl+I", "Import a video file", "import.svg")
+        self._act_analyze     = act("Analyze",               self.on_analyze,            "Ctrl+R", "One-Click: Run audio separation, speech extraction, and auto-export ZIP pack", "analyze.svg")
+        self._act_export      = act("Export Pack ZIP",       self.on_export,             "Ctrl+E", "Export The Choice Voicer pack", "package.svg")
+        self._act_open_folder = act("Open Output Folder",    self.on_open_export_folder, "",       "Open output folder in Explorer", "folder.svg")
+        self._act_settings    = act("Settings",              self.on_settings,           "",       "Application settings", "settings.svg")
 
         tb.addAction(self._act_import)
         tb.addSeparator()
@@ -472,22 +476,25 @@ class MainWindow(QMainWindow):
         tl_header.addWidget(legend_label)
         tl_header.addStretch()
 
-        # Track & Clip manual management buttons
-        btn_tl_add_track = QPushButton("[+] Add Track")
-        btn_tl_del_track = QPushButton("[-] Delete Track")
-        btn_tl_add_clip  = QPushButton("[+] Add Clip")
-        
-        btn_tl_play    = QPushButton("Play")
-        btn_tl_stop    = QPushButton("Stop")
-        btn_tl_zoomin  = QPushButton("Zoom +")
-        btn_tl_zoomout = QPushButton("Zoom -")
-        
-        btn_tl_add_track.setToolTip("Add new character track")
-        btn_tl_del_track.setToolTip("Delete last character track")
-        btn_tl_add_clip.setToolTip("Add new audio clip on selected track")
+        # Track & Clip manual management buttons with professional icons
+        def icon_btn(text: str, icon_file: str, tip: str = "") -> QPushButton:
+            b = QPushButton(text)
+            path = ASSETS_DIR / "icons" / icon_file
+            if path.exists():
+                b.setIcon(QIcon(str(path)))
+                b.setIconSize(QSize(13, 13))
+            if tip:
+                b.setToolTip(tip)
+            return b
 
-        btn_tl_play.setToolTip("Play overall timeline audio (Space)")
-        btn_tl_stop.setToolTip("Stop playback")
+        btn_tl_add_track = icon_btn("Add Track", "plus.svg", "Add new character track")
+        btn_tl_del_track = icon_btn("Delete Track", "minus.svg", "Delete last character track")
+        btn_tl_add_clip  = icon_btn("Add Clip", "clip.svg", "Add new audio clip on selected track")
+        
+        btn_tl_play    = icon_btn("Play", "play.svg", "Play overall timeline audio (Space)")
+        btn_tl_stop    = icon_btn("Stop", "stop.svg", "Stop playback")
+        btn_tl_zoomin  = icon_btn("Zoom In", "zoom-in.svg", "Zoom In Timeline (+)")
+        btn_tl_zoomout = icon_btn("Zoom Out", "zoom-out.svg", "Zoom Out Timeline (-)")
 
         tl_header.addWidget(btn_tl_add_track)
         tl_header.addWidget(btn_tl_del_track)
@@ -547,6 +554,7 @@ class MainWindow(QMainWindow):
         self._dialogue_table.dialogue_deleted.connect(self._on_dialogue_deleted)
         self._dialogue_table.merge_next_requested.connect(self._on_merge_next)
         self._dialogue_table.split_requested.connect(self._on_split)
+        self._dialogue_table.dialogue_changed.connect(lambda itm: self._mark_dirty(True))
 
         # ── Connect Timeline Signals ──
         self._timeline.segment_selected.connect(self._select_dialogue_by_idx)

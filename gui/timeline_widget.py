@@ -280,18 +280,22 @@ class TimelineWidget(QWidget):
             if drag_item and drag_item.speaker_id in speakers_list:
                 active_drag_spk_idx = speakers_list.index(drag_item.speaker_id)
 
+        # Check if dragging a track header to dim the lifted track
+        dragged_track_spk_id = self._dragging[1] if (self._dragging and self._dragging[0] == "track_header") else None
+
         # 2. Track Lanes (Alternating neutral dark shades + subtle border)
         for spk_idx, spk_id in enumerate(speakers_list):
             y_top = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
             track_rect = QRectF(self.HEADER_WIDTH, y_top, self.width() - self.HEADER_WIDTH, self.TRACK_HEIGHT)
 
-            bg_color = QColor("#242424") if spk_idx % 2 == 0 else QColor("#1e1e1e")
+            is_lifted_track = (spk_id == dragged_track_spk_id)
+            bg_color = QColor("#141414") if is_lifted_track else (QColor("#242424") if spk_idx % 2 == 0 else QColor("#1e1e1e"))
             painter.fillRect(track_rect, bg_color)
 
-            # Highlight track lane if clip is currently being dragged over it
+            # Subtle highlight track lane if clip is currently being dragged over it
             if spk_idx == active_drag_spk_idx:
-                painter.fillRect(track_rect, QColor(56, 189, 248, 25))
-                painter.setPen(QPen(QColor("#38BDF8"), 1.2))
+                painter.fillRect(track_rect, QColor(255, 255, 255, 10))
+                painter.setPen(QPen(QColor(255, 255, 255, 45), 1.0))
                 painter.drawRect(track_rect)
 
             # Bottom separator line
@@ -497,7 +501,8 @@ class TimelineWidget(QWidget):
             row_rect = QRectF(0, y_top, self.HEADER_WIDTH, self.TRACK_HEIGHT)
 
             # Row background
-            painter.fillRect(row_rect, QColor("#262626"))
+            is_lifted = (spk_id == dragged_track_spk_id)
+            painter.fillRect(row_rect, QColor("#141414") if is_lifted else QColor("#262626"))
             painter.setPen(QPen(QColor("#303030"), 1))
             painter.drawLine(0, int(y_top + self.TRACK_HEIGHT), self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT))
 
@@ -589,38 +594,34 @@ class TimelineWidget(QWidget):
             target_slot = max(0, min(len(speakers_list), int(round(raw_slot))))
             line_y = self.RULER_HEIGHT + target_slot * (self.TRACK_HEIGHT + self.TRACK_GAP)
 
-            # Draw glowing insertion line across entire timeline width
-            painter.setPen(QPen(QColor("#38BDF8"), 2.5))
+            # Subtle dashed insertion guideline (clean white/silver, NOT bright cyan)
+            painter.setPen(QPen(QColor(255, 255, 255, 140), 1.5, Qt.PenStyle.DashLine))
             painter.drawLine(0, int(line_y), self.width(), int(line_y))
 
-            # Left indicator triangle pointing at insertion line
-            tri = [
-                QPointF(0, line_y - 5),
-                QPointF(8, line_y),
-                QPointF(0, line_y + 5),
-            ]
-            painter.setBrush(QBrush(QColor("#38BDF8")))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawPolygon(tri)
-
-            # Floating Ghost Track Header Card following mouse Y
-            ghost_y = drag_y - self.TRACK_HEIGHT / 2.0
+            # Clamp ghost_y so it can NEVER rise above "AUDIO TRACKS" ruler bar!
+            min_ghost_y = float(self.RULER_HEIGHT)
+            max_ghost_y = float(self.RULER_HEIGHT + max(0, len(speakers_list) - 1) * (self.TRACK_HEIGHT + self.TRACK_GAP))
+            ghost_y = max(min_ghost_y, min(max_ghost_y, drag_y - self.TRACK_HEIGHT / 2.0))
             ghost_rect = QRectF(2, ghost_y, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT)
 
             # Drop shadow
-            painter.fillRect(QRectF(6, ghost_y + 4, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), QColor(0, 0, 0, 150))
-            # Card body
-            painter.fillRect(ghost_rect, QColor(36, 36, 36, 235))
-            painter.setPen(QPen(QColor("#38BDF8"), 1.8))
-            painter.drawRoundedRect(ghost_rect, 4, 4)
+            painter.fillRect(QRectF(5, ghost_y + 3, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), QColor(0, 0, 0, 160))
+            # Card body: dark translucent elevated card with speaker's subtle border (NOT filled with blue!)
+            painter.fillRect(ghost_rect, QColor(32, 32, 32, 240))
 
             try:
                 g_spk_idx = speakers_list.index(drag_spk_id)
             except ValueError:
                 g_spk_idx = 0
             g_color = QColor(self.colors[g_spk_idx % len(self.colors)])
+
+            painter.setPen(QPen(g_color, 1.2))
+            painter.drawRoundedRect(ghost_rect, 4, 4)
+
+            # Left color indicator strip
             painter.fillRect(QRectF(2, ghost_y, 4, self.TRACK_HEIGHT), g_color)
 
+            # Track badge
             g_badge_rect = QRectF(10, ghost_y + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
             painter.setBrush(QBrush(QColor("#1a1a1a")))
             painter.setPen(QPen(g_color.lighter(115), 1.5))
@@ -630,6 +631,7 @@ class TimelineWidget(QWidget):
             painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
             painter.drawText(g_badge_rect, Qt.AlignmentFlag.AlignCenter, f"A{g_spk_idx+1}")
 
+            # Speaker Name
             g_name = self.state.get_speaker(drag_spk_id).display_name if self.state else drag_spk_id
             g_name_rect = QRectF(44, ghost_y + (self.TRACK_HEIGHT - 18) / 2, self.HEADER_WIDTH - 50, 18)
             painter.setPen(QColor("#FFFFFF"))
@@ -784,7 +786,11 @@ class TimelineWidget(QWidget):
                 spk_id = self._dragging[1]
                 start_x = self._dragging[2]
                 start_y = self._dragging[3]
-                self._dragging = ("track_header", spk_id, start_x, start_y, y)
+                speakers_list = self._get_speaker_list()
+                min_drag_y = self.RULER_HEIGHT + self.TRACK_HEIGHT / 2.0
+                max_drag_y = self.RULER_HEIGHT + max(1, len(speakers_list)) * (self.TRACK_HEIGHT + self.TRACK_GAP) - self.TRACK_HEIGHT / 2.0
+                clamped_y = max(min_drag_y, min(max_drag_y, y))
+                self._dragging = ("track_header", spk_id, start_x, start_y, clamped_y)
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self.update()
                 return

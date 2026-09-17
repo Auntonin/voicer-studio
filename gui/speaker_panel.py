@@ -5,7 +5,7 @@ from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QIcon
 
 from core.models import PipelineState, SpeakerInfo
-from config import COLORS
+from config import COLORS, ASSETS_DIR
 
 
 class SpeakerListWidget(QListWidget):
@@ -66,7 +66,11 @@ class SpeakerPanel(QWidget):
         top_bar.addWidget(lbl_title)
         top_bar.addStretch()
 
-        self.btn_add_speaker = QPushButton("[+] Add Speaker")
+        self.btn_add_speaker = QPushButton("Add Speaker")
+        add_icon_path = ASSETS_DIR / "icons" / "user-plus.svg"
+        if add_icon_path.exists():
+            self.btn_add_speaker.setIcon(QIcon(str(add_icon_path)))
+            self.btn_add_speaker.setIconSize(QSize(13, 13))
         self.btn_add_speaker.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['bg_input']};
@@ -166,6 +170,10 @@ class SpeakerPanel(QWidget):
             
             # Delete speaker button
             btn_del = QPushButton("Delete")
+            del_icon_path = ASSETS_DIR / "icons" / "user-minus.svg"
+            if del_icon_path.exists():
+                btn_del.setIcon(QIcon(str(del_icon_path)))
+                btn_del.setIconSize(QSize(12, 12))
             btn_del.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {COLORS['bg_input']};
