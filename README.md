@@ -90,7 +90,7 @@ authors=["Voicer Studio"]
 
 1. **Clone the repository:**
    ```powershell
-   git clone https://github.com/your-username/voicer-studio.git
+   git clone https://github.com/Auntonin/voicer-studio.git
    cd voicer-studio
    ```
 
