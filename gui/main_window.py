@@ -462,7 +462,7 @@ class MainWindow(QMainWindow):
         self._timeline_scroll = QScrollArea()
         self._timeline_scroll.setWidgetResizable(True)
         self._timeline_scroll.setWidget(self._timeline)
-        self._timeline_scroll.setMinimumHeight(140)
+        self._timeline_scroll.setMinimumHeight(160)
         self._timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self._timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         tl_layout.addWidget(self._timeline_scroll)
