@@ -502,23 +502,28 @@ class TimelineWidget(QWidget):
 
             # Row background
             is_lifted = (spk_id == dragged_track_spk_id)
-            painter.fillRect(row_rect, QColor("#141414") if is_lifted else QColor("#262626"))
-            painter.setPen(QPen(QColor("#303030"), 1))
-            painter.drawLine(0, int(y_top + self.TRACK_HEIGHT), self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT))
+            if is_lifted:
+                painter.fillRect(row_rect, QColor("#151515"))
+                painter.setPen(QPen(QColor("#383838"), 1.0, Qt.PenStyle.DashLine))
+                painter.drawRect(row_rect.adjusted(1, 1, -1, -1))
+            else:
+                painter.fillRect(row_rect, QColor("#242424"))
+                painter.setPen(QPen(QColor("#303030"), 1))
+                painter.drawLine(0, int(y_top + self.TRACK_HEIGHT), self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT))
 
             color_hex = self.colors[spk_idx % len(self.colors)]
             track_color = QColor(color_hex)
 
             # Left color indicator bar
-            painter.fillRect(QRectF(0, y_top, 4, self.TRACK_HEIGHT), track_color)
+            painter.fillRect(QRectF(0, y_top, 4, self.TRACK_HEIGHT), track_color if not is_lifted else track_color.darker(160))
 
             # Track badge (e.g. "A1", "A2")
             badge_rect = QRectF(10, y_top + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
             painter.setBrush(QBrush(QColor("#1a1a1a")))
-            painter.setPen(QPen(track_color.lighter(115), 1.5))
+            painter.setPen(QPen(track_color.lighter(115) if not is_lifted else track_color.darker(140), 1.5))
             painter.drawRoundedRect(badge_rect, 4, 4)
 
-            painter.setPen(QColor("#FFFFFF"))
+            painter.setPen(QColor("#FFFFFF" if not is_lifted else "#555555"))
             font_badge = QFont("Segoe UI", 8, QFont.Weight.Bold)
             painter.setFont(font_badge)
             painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"A{spk_idx+1}")
@@ -526,7 +531,7 @@ class TimelineWidget(QWidget):
             # Speaker Name
             spk_name = self.state.get_speaker(spk_id).display_name if self.state else spk_id
             name_rect = QRectF(44, y_top + 6, self.HEADER_WIDTH - 48, 18)
-            painter.setPen(QColor("#E0E0E0"))
+            painter.setPen(QColor("#E0E0E0" if not is_lifted else "#555555"))
             font_name = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
             painter.setFont(font_name)
             fm_name = QFontMetrics(font_name)
@@ -536,7 +541,7 @@ class TimelineWidget(QWidget):
             # Clip count subtitle
             count = sum(1 for d in (self.state.active_dialogues() if self.state else []) if d.speaker_id == spk_id)
             sub_rect = QRectF(44, y_top + 25, self.HEADER_WIDTH - 48, 14)
-            painter.setPen(QColor("#888888"))
+            painter.setPen(QColor("#888888" if not is_lifted else "#444444"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
             painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{count} clips")
@@ -584,6 +589,9 @@ class TimelineWidget(QWidget):
         painter.setBrush(QBrush(QColor("#FFFFFF" if is_active else "#E0F2FE")))
         painter.drawEllipse(QPointF(px, 6.0), 1.5, 1.5)
 
+        # Reset brush to avoid leaking into subsequent drawing
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
         # 8. Track Reordering Visual Feedback (Drag Ghost + Drop Target Insertion Line)
         if self._dragging and self._dragging[0] == "track_header" and len(self._dragging) > 4:
             drag_spk_id = self._dragging[1]
@@ -594,9 +602,19 @@ class TimelineWidget(QWidget):
             target_slot = max(0, min(len(speakers_list), int(round(raw_slot))))
             line_y = self.RULER_HEIGHT + target_slot * (self.TRACK_HEIGHT + self.TRACK_GAP)
 
-            # Subtle dashed insertion guideline (clean white/silver, NOT bright cyan)
-            painter.setPen(QPen(QColor(255, 255, 255, 140), 1.5, Qt.PenStyle.DashLine))
+            # Subtle dashed insertion guideline (clean silver-white)
+            painter.setPen(QPen(QColor(255, 255, 255, 130), 1.5, Qt.PenStyle.DashLine))
             painter.drawLine(0, int(line_y), self.width(), int(line_y))
+
+            # Small target indicator triangle on the left edge
+            tri = [
+                QPointF(0, line_y - 4),
+                QPointF(6, line_y),
+                QPointF(0, line_y + 4),
+            ]
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(255, 255, 255, 160)))
+            painter.drawPolygon(tri)
 
             # Clamp ghost_y so it can NEVER rise above "AUDIO TRACKS" ruler bar!
             min_ghost_y = float(self.RULER_HEIGHT)
@@ -604,10 +622,12 @@ class TimelineWidget(QWidget):
             ghost_y = max(min_ghost_y, min(max_ghost_y, drag_y - self.TRACK_HEIGHT / 2.0))
             ghost_rect = QRectF(2, ghost_y, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT)
 
-            # Drop shadow
-            painter.fillRect(QRectF(5, ghost_y + 3, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), QColor(0, 0, 0, 160))
-            # Card body: dark translucent elevated card with speaker's subtle border (NOT filled with blue!)
-            painter.fillRect(ghost_rect, QColor(32, 32, 32, 240))
+            # Multi-layer soft drop shadow (realistic 3D elevation indicating it is grabbed)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(0, 0, 0, 70)))
+            painter.drawRoundedRect(QRectF(4, ghost_y + 4, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), 6, 6)
+            painter.setBrush(QBrush(QColor(0, 0, 0, 140)))
+            painter.drawRoundedRect(QRectF(3, ghost_y + 2, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), 6, 6)
 
             try:
                 g_spk_idx = speakers_list.index(drag_spk_id)
@@ -615,15 +635,31 @@ class TimelineWidget(QWidget):
                 g_spk_idx = 0
             g_color = QColor(self.colors[g_spk_idx % len(self.colors)])
 
-            painter.setPen(QPen(g_color, 1.2))
-            painter.drawRoundedRect(ghost_rect, 4, 4)
+            # Card body: Sleek dark studio gradient (NOT bright blue!)
+            card_grad = QLinearGradient(0, ghost_y, 0, ghost_y + self.TRACK_HEIGHT)
+            card_grad.setColorAt(0.0, QColor("#2A2A2A"))
+            card_grad.setColorAt(1.0, QColor("#1E1E1E"))
+            painter.setBrush(QBrush(card_grad))
+            painter.setPen(QPen(g_color, 1.5))
+            painter.drawRoundedRect(ghost_rect, 5, 5)
 
-            # Left color indicator strip
-            painter.fillRect(QRectF(2, ghost_y, 4, self.TRACK_HEIGHT), g_color)
+            # Left color indicator strip (rounded corners on the left)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(g_color))
+            painter.drawRoundedRect(QRectF(2, ghost_y, 4, self.TRACK_HEIGHT), 2, 2)
 
-            # Track badge
-            g_badge_rect = QRectF(10, ghost_y + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
-            painter.setBrush(QBrush(QColor("#1a1a1a")))
+            # Subtle Grip Handle Dots (6 dots: 2 columns x 3 rows) showing it is grabbed
+            painter.setBrush(QBrush(QColor(180, 180, 180, 200)))
+            grip_x1 = 9.0
+            grip_x2 = 13.0
+            for dot_row in range(3):
+                dot_y = ghost_y + (self.TRACK_HEIGHT / 2.0) - 5.0 + (dot_row * 5.0)
+                painter.drawEllipse(QPointF(grip_x1, dot_y), 1.1, 1.1)
+                painter.drawEllipse(QPointF(grip_x2, dot_y), 1.1, 1.1)
+
+            # Track badge (A1, A2...)
+            g_badge_rect = QRectF(18, ghost_y + (self.TRACK_HEIGHT - 22) / 2, 26, 22)
+            painter.setBrush(QBrush(QColor("#161616")))
             painter.setPen(QPen(g_color.lighter(115), 1.5))
             painter.drawRoundedRect(g_badge_rect, 4, 4)
 
@@ -633,10 +669,19 @@ class TimelineWidget(QWidget):
 
             # Speaker Name
             g_name = self.state.get_speaker(drag_spk_id).display_name if self.state else drag_spk_id
-            g_name_rect = QRectF(44, ghost_y + (self.TRACK_HEIGHT - 18) / 2, self.HEADER_WIDTH - 50, 18)
+            g_name_rect = QRectF(48, ghost_y + 7, self.HEADER_WIDTH - 52, 16)
             painter.setPen(QColor("#FFFFFF"))
             painter.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
-            painter.drawText(g_name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, g_name)
+            fm_gname = QFontMetrics(painter.font())
+            elided_gname = fm_gname.elidedText(g_name, Qt.TextElideMode.ElideRight, int(self.HEADER_WIDTH - 52))
+            painter.drawText(g_name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_gname)
+
+            # Subtitle
+            sub_rect = QRectF(48, ghost_y + 24, self.HEADER_WIDTH - 52, 14)
+            painter.setPen(QColor("#9E9E9E"))
+            font_sub = QFont("Segoe UI", 7)
+            painter.setFont(font_sub)
+            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Reordering...")
 
     # ── Mouse Interaction & Cursors ─────────────────────────────────────────────
 
