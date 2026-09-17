@@ -246,13 +246,15 @@ class PipelineWorker(QThread):
             self.signals.sub_progress.emit(0, total, "เตรียมโหลดเสียงเข้า RAM...")
 
             import numpy as np, subprocess as _sp, io
+            from config import SUBPROCESS_FLAGS
             audio_data, sr = None, 16000
             try:
                 import scipy.io.wavfile as wavfile
                 res = _sp.run(
                     ["ffmpeg", "-y", "-i", str(self.state.work_audio_path),
                      "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"],
-                    stdout=_sp.PIPE, stderr=_sp.DEVNULL, timeout=120
+                    stdout=_sp.PIPE, stderr=_sp.DEVNULL, timeout=120,
+                    creationflags=SUBPROCESS_FLAGS
                 )
                 if res.returncode == 0 and res.stdout:
                     sr, raw = wavfile.read(io.BytesIO(res.stdout))
@@ -481,7 +483,8 @@ class PipelineWorker(QThread):
                             "-c:a", "libvorbis", "-qscale:a", "8",
                             str(dub_video_path)
                         ]
-                        subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                        from config import SUBPROCESS_FLAGS
+                        subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
 
             self.signals.sub_progress.emit(total, total, f"สร้างแพ็กครบ {total} ไฟล์")
             self._complete_step(step)
@@ -489,13 +492,23 @@ class PipelineWorker(QThread):
             self._fail_step(step, str(e))
             raise
 
+    def _resolve_output_dir(self) -> Path:
+        if self._output_dir:
+            return self._output_dir
+        pack_name = self._get_pack_name()
+        out_dir = self._get_output_dir() / pack_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        self._output_dir = out_dir
+        return out_dir
+
     def _step_validation(self):
         step = PipelineStep.VALIDATION
         self._begin_step(step)
         try:
             from core.quality_checker import QualityChecker
             checker = QualityChecker()
-            results = checker.check_all(self.state, self._output_dir)
+            pack_dir = self._resolve_output_dir()
+            results = checker.check_all(self.state, pack_dir)
 
             errors = [r for r in results if r.level == "error"]
             warns  = [r for r in results if r.level == "warn"]

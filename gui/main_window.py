@@ -1348,6 +1348,7 @@ class MainWindow(QMainWindow):
     def _probe_video(self, path: Path):
         """Use ffprobe to extract video metadata."""
         import subprocess, json
+        from config import SUBPROCESS_FLAGS
         try:
             result = subprocess.run(
                 [
@@ -1357,6 +1358,7 @@ class MainWindow(QMainWindow):
                     str(path),
                 ],
                 capture_output=True, text=True, timeout=15,
+                creationflags=SUBPROCESS_FLAGS
             )
             data = json.loads(result.stdout)
             for stream in data.get("streams", []):

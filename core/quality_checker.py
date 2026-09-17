@@ -18,10 +18,15 @@ class CheckResult:
 class QualityChecker:
     def check_all(self, state: PipelineState, pack_dir: Path) -> List[CheckResult]:
         results = []
+        if not pack_dir:
+            results.append(CheckResult('error', "Pack directory has not been generated yet."))
+            return results
+
+        pack_dir = Path(pack_dir)
         logger.info(f"Running quality checks on {pack_dir}")
         
         # Check overall files
-        if not (pack_dir / "_pack_info.ini").exists():
+        if not pack_dir.exists() or not (pack_dir / "_pack_info.ini").exists():
             results.append(CheckResult('error', "Missing _pack_info.ini"))
         else:
             txt = (pack_dir / "_pack_info.ini").read_text(encoding='utf-8')

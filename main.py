@@ -18,6 +18,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# ── Windows Taskbar & Shell App ID (Must run before Qt initialization) ────────
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TheChoiceVoicer.VoicerStudio.1.1.0")
+    except Exception:
+        pass
+
 # ── PySide6 imports ───────────────────────────────────────────────────────────
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QWidget
@@ -167,9 +175,11 @@ def check_ffmpeg() -> bool:
     """Check if ffmpeg is available in PATH."""
     import subprocess
     try:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         result = subprocess.run(
             ["ffmpeg", "-version"],
-            capture_output=True, timeout=5
+            capture_output=True, timeout=5,
+            creationflags=flags
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):

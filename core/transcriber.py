@@ -91,7 +91,8 @@ class Transcriber:
                 str(temp_wav)
             ]
             try:
-                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                from config import SUBPROCESS_FLAGS
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, creationflags=SUBPROCESS_FLAGS)
                 segments, _ = self.model.transcribe(str(temp_wav), **transcribe_kwargs)
                 raw_text = " ".join([segment.text.strip() for segment in segments]).strip()
                 temp_wav.unlink(missing_ok=True)
@@ -126,10 +127,11 @@ class Transcriber:
         sr = 16000
         try:
             import scipy.io.wavfile as wavfile
+            from config import SUBPROCESS_FLAGS
             res = subprocess.run([
                 "ffmpeg", "-y", "-i", str(work_audio_path),
                 "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"
-            ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
+            ], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120, creationflags=SUBPROCESS_FLAGS)
             if res.returncode == 0 and len(res.stdout) > 0:
                 import io
                 sr, raw_data = wavfile.read(io.BytesIO(res.stdout))

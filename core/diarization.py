@@ -166,11 +166,12 @@ class SpeakerDiarizer:
             import subprocess
             import io
 
-            # Load full audio as 16kHz mono float32 via ffmpeg pipe
+            from config import SUBPROCESS_FLAGS
             res = subprocess.run(
                 ["ffmpeg", "-y", "-i", str(audio_path),
                  "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120,
+                creationflags=SUBPROCESS_FLAGS
             )
             if res.returncode != 0 or not res.stdout:
                 return None

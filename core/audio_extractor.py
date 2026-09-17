@@ -19,8 +19,9 @@ class AudioExtractor:
             "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "2",
             str(output_path)
         ]
+        from config import SUBPROCESS_FLAGS
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
         except FileNotFoundError:
             raise RuntimeError("ffmpeg not found. Please install ffmpeg.")
         except subprocess.TimeoutExpired:
@@ -39,8 +40,9 @@ class AudioExtractor:
             "ffprobe", "-v", "quiet", "-print_format", "json",
             "-show_streams", "-show_format", str(video_path)
         ]
+        from config import SUBPROCESS_FLAGS
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
         except FileNotFoundError:
             logger.error("ffprobe not found.")
             return {"duration": 0.0, "width": 0, "height": 0, "fps": 0.0, "audio_tracks": 0}

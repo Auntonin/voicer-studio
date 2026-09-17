@@ -106,7 +106,8 @@ class VoiceSeparator:
             cmd.extend(["-d", self.device])
         cmd.append(str(audio_path))
 
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800)
+        from config import SUBPROCESS_FLAGS
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, creationflags=SUBPROCESS_FLAGS)
 
         track_name = audio_path.stem
         model_dir = output_dir / model / track_name
@@ -143,7 +144,8 @@ class VoiceSeparator:
             str(output_path)
         ]
         try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+            from config import SUBPROCESS_FLAGS
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, creationflags=SUBPROCESS_FLAGS)
             return output_path
         except FileNotFoundError:
             logger.error("FFmpeg not found in PATH when generating backing track.")

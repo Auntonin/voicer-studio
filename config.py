@@ -5,7 +5,14 @@ Application-wide configuration and constants.
 """
 
 import os
+import sys
+import subprocess
 from pathlib import Path
+
+# ── Process & Subsystem Flags ──────────────────────────────────────────────────
+# On Windows GUI applications, subprocess calls pop up black command windows
+# unless CREATE_NO_WINDOW is explicitly provided.
+SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 # ── App Metadata ───────────────────────────────────────────────────────────────
 APP_NAME = "The Choice Voicer Dialogue Extractor"

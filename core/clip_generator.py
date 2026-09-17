@@ -29,7 +29,8 @@ class ClipGenerator:
             "-ar", str(AUDIO_SAMPLE_RATE),
             str(output_path)
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        from config import SUBPROCESS_FLAGS
+        res = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
         if res.returncode != 0:
             logger.error(f"FFmpeg error generating clip {item.index}: {res.stderr}")
             raise RuntimeError(f"FFmpeg failed to generate clip {item.index}: {res.stderr[:200]}")

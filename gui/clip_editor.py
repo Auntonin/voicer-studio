@@ -307,7 +307,8 @@ class ClipEditor(QWidget):
                     "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                     str(tmp)
                 ]
-                res = subprocess.run(cmd, capture_output=True, timeout=10)
+                from config import SUBPROCESS_FLAGS
+                res = subprocess.run(cmd, capture_output=True, timeout=10, creationflags=SUBPROCESS_FLAGS)
                 if res.returncode == 0 and tmp.exists():
                     self.player.setSource(QUrl.fromLocalFile(str(tmp)))
                     self.player.play()

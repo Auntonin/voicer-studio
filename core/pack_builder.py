@@ -151,7 +151,8 @@ class PackBuilder:
                         "-c:a", "libvorbis", "-qscale:a", "8",
                         str(dest_vid)
                     ]
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                    from config import SUBPROCESS_FLAGS
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
                     if res.returncode != 0 or not dest_vid.exists():
                         logger.error(f"FFmpeg OGV encoding failed: {res.stderr}")
                 except Exception as e:
