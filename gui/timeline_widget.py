@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from PySide6.QtWidgets import (
-    QWidget, QToolTip, QApplication
+    QWidget, QToolTip, QApplication, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QTimer, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -37,7 +37,9 @@ class TimelineWidget(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self._dragging = None       # ("start"|"end"|"body", item, drag_start_x, drag_start_val)
+        self._dragging = None       # ("start"|"end"|"body"|"playhead"|"track_header", item, drag_start_x, drag_start_val)
+        self._is_hovering_playhead = False
+        self._was_playing_before_drag = False
         self.colors = ["#1473E6", "#3fb950", "#d29922", "#e55353", "#a371f7", "#39c5cf", "#f778ba"]
 
         # Track layout parameters
@@ -67,6 +69,15 @@ class TimelineWidget(QWidget):
     def set_current_time(self, t: float):
         self.current_time = max(0.0, min(self.duration if self.duration > 0 else 99999.0, t))
         self.update()
+
+    def ensure_playhead_visible(self, margin: int = 60):
+        """Keep playhead in view when scrubbing near viewport edges."""
+        parent = self.parentWidget()
+        if parent:
+            scroll_area = parent.parentWidget()
+            if isinstance(scroll_area, QScrollArea):
+                px = int(self.HEADER_WIDTH + self.current_time * self.pixels_per_second)
+                scroll_area.ensureVisible(px, int(self.height() / 2), margin, 0)
 
     def set_duration(self, d: float):
         self.duration = max(1.0, d)
@@ -251,34 +262,62 @@ class TimelineWidget(QWidget):
             spk_name = self.state.get_speaker(spk_id).display_name if self.state else spk_id
             painter.drawText(lbl_rect.adjusted(10, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, f"A{spk_idx+1}: {spk_name[:12]}")
 
-        # 5. Playhead line
+        # 5. Playhead line & handle
         px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
-        painter.setPen(QPen(QColor("#1473E6"), 2))
-        painter.drawLine(px, 0, px, self.height())
+        is_active = (self._dragging and self._dragging[0] == "playhead") or self._is_hovering_playhead
 
-        # Playhead handle head on ruler
+        # Vertical tracking line
+        line_color = QColor("#3898FF") if is_active else QColor("#1473E6")
+        painter.setPen(QPen(line_color, 2))
+        painter.drawLine(int(px), 0, int(px), self.height())
+
+        # Playhead handle head on ruler (modern Adobe / DaVinci look)
+        head_w = 6.0
+        head_h = 12.0
+        head_tip = 18.0
         head_poly = [
-            QPointF(px - 5, 0),
-            QPointF(px + 5, 0),
-            QPointF(px + 5, 10),
-            QPointF(px, 16),
-            QPointF(px - 5, 10),
+            QPointF(px - head_w, 0),
+            QPointF(px + head_w, 0),
+            QPointF(px + head_w, head_h),
+            QPointF(px, head_tip),
+            QPointF(px - head_w, head_h),
         ]
-        painter.setBrush(QBrush(QColor("#1473E6")))
-        painter.setPen(Qt.PenStyle.NoPen)
+
+        handle_color = QColor("#2580EB") if is_active else QColor("#1473E6")
+        painter.setBrush(QBrush(handle_color))
+        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#A0C8FF"), 1.2))
         painter.drawPolygon(head_poly)
+
+        # Center grip mark inside the handle
+        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#C4DEFF"), 1.0))
+        painter.drawLine(int(px), 3, int(px), int(head_h - 1))
 
     # ── Mouse Interaction & Cursors ─────────────────────────────────────────────
 
+    def leaveEvent(self, event):
+        if self._is_hovering_playhead:
+            self._is_hovering_playhead = False
+            self.update()
+        super().leaveEvent(event)
+
     def _hit_test(self, x: float, y: float) -> Tuple[Optional[str], Optional[DialogueItem]]:
-        """Returns (mode, dialogue_item) where mode in ['start', 'end', 'body', 'ruler', 'track']"""
-        if y < self.RULER_HEIGHT:
-            return "ruler", None
+        """Returns (mode, dialogue_item) where mode in ['playhead', 'ruler', 'start', 'end', 'body', 'track', 'header']"""
         if x < self.HEADER_WIDTH:
             return "header", None
 
+        px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
+
+        # 1. Playhead handle grab zone (on ruler or top edge)
+        if abs(x - px) <= 8 and y <= self.RULER_HEIGHT + 4:
+            return "playhead", None
+
+        # 2. Ruler area (clicking/dragging anywhere on ruler scrubs playhead)
+        if y < self.RULER_HEIGHT:
+            return "ruler", None
+
+        # 3. Clips on track lanes
         speakers_list = self._get_speaker_list()
-        t = (x - self.HEADER_WIDTH) / self.pixels_per_second
+        t = (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)
 
         for item in self.state.active_dialogues() if self.state else []:
             try:
@@ -289,7 +328,7 @@ class TimelineWidget(QWidget):
             y_top = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
             if y_top <= y <= y_top + self.TRACK_HEIGHT:
                 if item.start <= t <= item.end:
-                    edge_sec = 6.0 / self.pixels_per_second
+                    edge_sec = 6.0 / max(1.0, self.pixels_per_second)
                     if t - item.start <= edge_sec:
                         return "start", item
                     elif item.end - t <= edge_sec:
@@ -297,21 +336,39 @@ class TimelineWidget(QWidget):
                     else:
                         return "body", item
 
+        # 4. Playhead vertical line over empty space
+        if abs(x - px) <= 6:
+            return "playhead", None
+
+        # 5. Empty track area
         return "track", None
 
     def mousePressEvent(self, event):
         self.setFocus()
-        if not self.state: return
+        if not self.state:
+            return
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+
         x = event.pos().x()
         y = event.pos().y()
 
         mode, item = self._hit_test(x, y)
 
-        if mode == "ruler" or mode == "track":
-            t = max(0.0, (x - self.HEADER_WIDTH) / self.pixels_per_second)
+        if mode in ("playhead", "ruler", "track"):
+            # Pause playback while scrubbing so it does not fight mouse dragging
+            self._was_playing_before_drag = self._is_playing
+            if self._is_playing:
+                self.stop_playback()
+
+            t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
             self.set_current_time(t)
             self.seek_requested.emit(t)
+            self.ensure_playhead_visible(margin=60)
             self.selected_index = -1
+            self._dragging = ("playhead", None, x, t)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
         elif mode == "header":
             track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
             speakers_list = self._get_speaker_list()
@@ -326,11 +383,11 @@ class TimelineWidget(QWidget):
         self.update()
 
     def _snap_time(self, t: float, ignore_item: Optional[DialogueItem] = None) -> float:
-        """Snap time value to playhead, clip boundaries, or track start/end if within 10 pixels."""
+        """Snap time value to clip boundaries or track start/end if within 10 pixels."""
         if not self.state:
             return t
         snap_thresh = 10.0 / max(1.0, self.pixels_per_second)
-        candidates = [0.0, self.current_time, self.duration]
+        candidates = [0.0, self.duration]
 
         for d in self.state.active_dialogues():
             if ignore_item and d.index == ignore_item.index:
@@ -344,7 +401,8 @@ class TimelineWidget(QWidget):
         return t
 
     def mouseMoveEvent(self, event):
-        if not self.state: return
+        if not self.state:
+            return
         x = event.pos().x()
         y = event.pos().y()
 
@@ -355,8 +413,27 @@ class TimelineWidget(QWidget):
                 self.update()
                 return
 
+            if mode == "playhead":
+                t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
+                self.set_current_time(t)
+                self.seek_requested.emit(t)
+                self.ensure_playhead_visible(margin=60)
+
+                # Show dynamic time badge while scrubbing
+                m = int(t // 60)
+                s = int(t % 60)
+                ms = int((t - int(t)) * 1000)
+                QToolTip.showText(
+                    event.globalPos(),
+                    f"⏱ {m:02d}:{s:02d}.{ms:03d}",
+                    self
+                )
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                self.update()
+                return
+
             _, item, start_x, start_val = self._dragging
-            dx = (x - start_x) / self.pixels_per_second
+            dx = (x - start_x) / max(1.0, self.pixels_per_second)
             if mode == "start":
                 raw = start_val + dx
                 snapped = self._snap_time(raw, ignore_item=item)
@@ -385,6 +462,12 @@ class TimelineWidget(QWidget):
                     item.speaker_id = speakers_list[target_spk_idx]
             self.update()
         else:
+            px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
+            is_near_playhead = (abs(x - px) <= 8 and y <= self.RULER_HEIGHT + 6) or (abs(x - px) <= 5)
+            if is_near_playhead != self._is_hovering_playhead:
+                self._is_hovering_playhead = is_near_playhead
+                self.update()
+
             mode, item = self._hit_test(x, y)
             if mode in ("start", "end"):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)  # Trim Cursor
@@ -392,8 +475,10 @@ class TimelineWidget(QWidget):
                 self.setCursor(Qt.CursorShape.SizeAllCursor)  # Move Cursor
             elif mode == "header":
                 self.setCursor(Qt.CursorShape.SizeVerCursor)  # Track Drag Cursor
+            elif mode == "playhead":
+                self.setCursor(Qt.CursorShape.SizeHorCursor)  # Playhead Drag Cursor
             elif mode == "ruler":
-                self.setCursor(Qt.CursorShape.PointingHandCursor)  # Seek Cursor
+                self.setCursor(Qt.CursorShape.PointingHandCursor)  # Ruler Scrub Cursor
             else:
                 self.setCursor(Qt.CursorShape.ArrowCursor)
 
@@ -422,7 +507,16 @@ class TimelineWidget(QWidget):
             elif mode in ("start", "end", "body"):
                 item = self._dragging[1]
                 self.segment_moved.emit(item.index, item.start, item.end)
-            
+            elif mode == "playhead":
+                x = event.pos().x()
+                t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
+                self.set_current_time(t)
+                self.seek_requested.emit(t)
+                QToolTip.hideText()
+                if self._was_playing_before_drag:
+                    self.start_playback()
+                    self._was_playing_before_drag = False
+
             self._dragging = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()

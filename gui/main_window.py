@@ -570,6 +570,8 @@ class MainWindow(QMainWindow):
         self._timeline.set_current_time(t)
 
     def _on_timeline_seek(self, t: float):
+        if self._video_panel.is_playing():
+            self._video_panel.pause_playback()
         self._timeline.set_current_time(t)
         self._video_panel.set_position(t)
         for item in self._state.active_dialogues():
