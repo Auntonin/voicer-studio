@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import Callable, Optional
 
 from core.models import PipelineState, DialogueItem, PackInfo
 from config import FILENAME_ALLOWED_CHARS
@@ -85,15 +86,19 @@ class PackBuilder:
                 return candidate
             counter += 1
 
-    def build_pack(self, state: PipelineState, output_dir: Path, options: dict) -> Path:
+    def build_pack(self, state: PipelineState, output_dir: Path, options: dict, progress_cb: Optional[Callable[[int, str], None]] = None) -> Path:
         pack_dir = self.get_unique_pack_dir(output_dir, state.pack_info.title)
         pack_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Building pack in {pack_dir}")
+        if progress_cb:
+            progress_cb(5, "Preparing pack directory and assets...")
         
         timestamp_mode = options.get('timestamp_mode', 'start_only')
+        active_items = state.active_dialogues()
+        total_items = max(1, len(active_items))
         
-        for item in state.active_dialogues():
+        for idx, item in enumerate(active_items):
             speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
             base_name = item.filename_base(speaker_safe_name)
             
@@ -114,14 +119,22 @@ class PackBuilder:
             txt_content = self.build_txt(item, state, timestamp_mode, speaker_display_names=options.get('speaker_display_names'))
             txt_path.write_text(txt_content, encoding='utf-8')
             item.txt_path = txt_path
+
+            if progress_cb and (idx % 2 == 0 or idx == total_items - 1):
+                item_pct = 5 + int(30 * (idx + 1) / total_items)
+                progress_cb(item_pct, f"Exporting dialogue cues [{idx+1}/{total_items}]...")
             
         # Write pack info
+        if progress_cb:
+            progress_cb(38, "Writing _pack_info.ini...")
         pack_info_path = pack_dir / "_pack_info.ini"
         pack_info_path.write_text(self.build_pack_info(state.pack_info), encoding='utf-8')
         
         # Copy backing track if generated (_backing_track.mp3)
         if hasattr(state, 'pack_backing_track_path') and state.pack_backing_track_path:
             if state.pack_backing_track_path.exists():
+                if progress_cb:
+                    progress_cb(42, "Copying backing track (_backing_track.mp3)...")
                 dest_bg = pack_dir / "_backing_track.mp3"
                 if state.pack_backing_track_path.resolve() != dest_bg.resolve():
                     shutil.copy2(state.pack_backing_track_path, dest_bg)
@@ -129,6 +142,8 @@ class PackBuilder:
         # Copy/convert dub video if asked (dub_video.ogv & dub_video.mp4)
         if options.get('include_dub_video', False) and state.video_path and state.video_path.exists():
             # 1. Untouched original copy as dub_video.mp4
+            if progress_cb:
+                progress_cb(45, "Copying full source video (dub_video.mp4)...")
             dest_mp4 = pack_dir / "dub_video.mp4"
             if state.video_path.resolve() != dest_mp4.resolve():
                 try:
@@ -142,6 +157,8 @@ class PackBuilder:
                 if state.video_path.resolve() != dest_vid.resolve():
                     shutil.copy2(state.video_path, dest_vid)
             else:
+                if progress_cb:
+                    progress_cb(50, "Encoding game video dub_video.ogv (Theora/Vorbis)...")
                 try:
                     cmd = [
                         "ffmpeg", "-y", "-i", str(state.video_path),
@@ -158,15 +175,25 @@ class PackBuilder:
                 except Exception as e:
                     logger.error(f"Failed to encode dub_video.ogv: {e}")
 
+        if progress_cb:
+            progress_cb(72, "Pack assets assembled.")
         return pack_dir
 
     @staticmethod
-    def export_zip(pack_dir: Path, zip_path: Path) -> Path:
+    def export_zip(pack_dir: Path, zip_path: Path, progress_cb: Optional[Callable[[int, str], None]] = None) -> Path:
         logger.info(f"Exporting ZIP to {zip_path}")
         zip_path.parent.mkdir(parents=True, exist_ok=True)
+        files = [f for f in sorted(pack_dir.iterdir()) if f.is_file()]
+        total_files = max(1, len(files))
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in sorted(pack_dir.iterdir()):
-                if file_path.is_file():
-                    arcname = f"{pack_dir.name}/{file_path.name}"
-                    zipf.write(file_path, arcname)
+            for idx, file_path in enumerate(files):
+                arcname = f"{pack_dir.name}/{file_path.name}"
+                zipf.write(file_path, arcname)
+                if progress_cb:
+                    pct = 75 + int(24 * (idx + 1) / total_files)
+                    progress_cb(pct, f"Compressing ZIP: {file_path.name} [{idx+1}/{total_files}]...")
+
+        if progress_cb:
+            progress_cb(100, "ZIP archive ready.")
         return zip_path

@@ -1564,73 +1564,10 @@ class MainWindow(QMainWindow):
             ext.release()
 
     def on_export(self):
-        """Show PreviewDialog then export ZIP."""
-        from core.pack_builder import PackBuilder
-        title = self._state.pack_info.title or (self._state.video_path.stem if self._state.video_path else "Dialogue_Pack")
-        base = Path(self._settings.get("output_dir", "")) if self._settings.get("output_dir", "") else (self._state.video_path.parent / "output" if self._state.video_path else Path.cwd() / "output")
-        
-        builder = PackBuilder()
-        options = {
-            "timestamp_mode": self._settings.get("timestamp_mode", "start_only"),
-            "include_dub_video": self._state.pack_info.include_dub_video
-        }
-        self._output_dir = builder.build_pack(self._state, base, options)
-
-        # Run quality check
-        from core.quality_checker import QualityChecker
-        checker = QualityChecker()
-        results = checker.check_all(self._state, self._output_dir)
-
-        # Convert to (icon, message) tuples for PreviewDialog
-        check_tuples = []
-        for r in results:
-            icon = {"ok": "OK", "warn": "WARN", "error": "FAIL"}.get(r.level, "·")
-            check_tuples.append((icon, r.message))
-
-        dlg = PreviewDialog(self)
-        dlg.export_confirmed.connect(self._do_export_zip)
-        dlg.show_for_state(self._state, self._output_dir, check_tuples)
-
-    def _do_export_zip(self, _dummy: str):
-        """Run ExportWorker after preview dialog confirms."""
-        from core.pack_builder import PackBuilder
-        title = self._state.pack_info.title or (self._state.video_path.stem if self._state.video_path else "Dialogue_Pack")
-        base_dir = self._state.video_path.parent if self._state.video_path else Path.cwd()
-        suggested_zip = PackBuilder.get_unique_zip_path(base_dir, title)
-
-        zip_name, _ = QFileDialog.getSaveFileName(
-            self, "Save Pack ZIP",
-            str(suggested_zip),
-            "ZIP files (*.zip)",
-        )
-        if not zip_name:
-            return
-
-        zip_p = Path(zip_name)
-        self._export_worker = ExportWorker(self._output_dir, zip_p)
-        self._export_worker.log_msg.connect(self._progress_panel.log)
-        self._export_worker.progress.connect(self._progress_panel.set_progress)
-
-        def on_finished(p_str: str):
-            self._log_message(f"Pack ZIP Exported: {p_str}", "ok")
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Export Complete")
-            msg_box.setText(
-                f"<b>Pack exported successfully!</b><br/><br/>"
-                f"<b>ZIP Archive:</b> {p_str}<br/>"
-                f"<b>Pack Directory:</b> {self._output_dir}"
-            )
-            btn_open = msg_box.addButton("Open Output Folder", QMessageBox.ButtonRole.AcceptRole)
-            btn_ok = msg_box.addButton("OK", QMessageBox.ButtonRole.RejectRole)
-            msg_box.exec_()
-            if msg_box.clickedButton() == btn_open:
-                self.on_open_export_folder()
-
-        self._export_worker.finished.connect(on_finished)
-        self._export_worker.error.connect(
-            lambda e: QMessageBox.critical(self, "Export Error", e)
-        )
-        self._export_worker.start()
+        """Open Adobe-style Export Dialog with real-time progress, ETA, and background rendering."""
+        from gui.export_dialog import ExportDialog
+        dlg = ExportDialog(self, self._state, self._settings)
+        dlg.exec_()
 
     def on_settings(self):
         dlg = SettingsDialog(self)
