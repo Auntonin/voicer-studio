@@ -362,17 +362,12 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             return a
 
-        self._act_open_proj   = act("Open Project",          self.on_open_project,       "Ctrl+O", "Open .voicer project or pack folder")
-        self._act_save_proj   = act("Save",                  self.on_save_project,       "Ctrl+S", "Save project (.voicer)")
         self._act_import      = act("Import Video",          self.on_import_video,       "Ctrl+I", "Import a video file")
         self._act_analyze     = act("Analyze",               self.on_analyze,            "Ctrl+R", "One-Click: Run audio separation, speech extraction, and auto-export ZIP pack")
         self._act_export      = act("Export Pack ZIP",       self.on_export,             "Ctrl+E", "Export The Choice Voicer pack")
         self._act_open_folder = act("Open Output Folder",    self.on_open_export_folder, "",       "Open output folder in Explorer")
         self._act_settings    = act("Settings",              self.on_settings,           "",       "Application settings")
 
-        tb.addAction(self._act_open_proj)
-        tb.addAction(self._act_save_proj)
-        tb.addSeparator()
         tb.addAction(self._act_import)
         tb.addSeparator()
         tb.addAction(self._act_analyze)
@@ -461,17 +456,17 @@ class MainWindow(QMainWindow):
         # Timeline Header Controls Bar
         tl_header = QHBoxLayout()
         tl_title = QLabel("MULTI-TRACK TIMELINE", objectName="section_title")
-        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
+        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #e0e0e0; background: transparent; border-left: 3px solid #777777; padding-left: 8px;")
         tl_header.addWidget(tl_title)
 
         # Hotkey legend badges
         legend_label = QLabel(
             '<span style="color:#888;">Shortcuts: </span>'
-            '<b style="color:#58a6ff;">Space</b> Play/Pause &nbsp;'
-            '<b style="color:#58a6ff;">Ctrl+Z</b> Undo &nbsp;'
-            '<b style="color:#58a6ff;">S</b> Split &nbsp;'
-            '<b style="color:#58a6ff;">M</b> Merge &nbsp;'
-            '<b style="color:#58a6ff;">Del</b> Delete'
+            '<b style="color:#d4d4d4;">Space</b> <span style="color:#777;">Play/Pause</span> &nbsp;'
+            '<b style="color:#d4d4d4;">Ctrl+Z</b> <span style="color:#777;">Undo</span> &nbsp;'
+            '<b style="color:#d4d4d4;">S</b> <span style="color:#777;">Split</span> &nbsp;'
+            '<b style="color:#d4d4d4;">M</b> <span style="color:#777;">Merge</span> &nbsp;'
+            '<b style="color:#d4d4d4;">Del</b> <span style="color:#777;">Delete</span>'
         )
         legend_label.setStyleSheet("font-size: 8.5pt; padding-left: 16px; padding-right: 16px; margin-left: 12px;")
         tl_header.addWidget(legend_label)

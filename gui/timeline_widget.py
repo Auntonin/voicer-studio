@@ -47,7 +47,15 @@ class TimelineWidget(QWidget):
         self._pan_start_h = 0
         self._pan_start_v = 0
 
-        self.colors = ["#1473E6", "#3fb950", "#d29922", "#e55353", "#a371f7", "#39c5cf", "#f778ba"]
+        self.colors = [
+            "#4a505b",  # Steel Slate Gray
+            "#3e434c",  # Deep Charcoal
+            "#565d6a",  # Cool Graphite Gray
+            "#373c44",  # Dark Ash Gray
+            "#606775",  # Medium Silver Slate
+            "#444953",  # Neutral Dark Gray
+            "#505663",  # Muted Slate
+        ]
 
         # Professional NLE Track layout parameters
         self.HEADER_WIDTH = 136
@@ -518,11 +526,11 @@ class TimelineWidget(QWidget):
 
         # Background subtle glow line
         if is_active:
-            painter.setPen(QPen(QColor(56, 189, 248, 50), 4))
+            painter.setPen(QPen(QColor(255, 255, 255, 45), 4))
             painter.drawLine(int(px), 0, int(px), self.height())
 
         # Vertical tracking line
-        line_color = QColor("#38BDF8") if is_active else QColor("#0EA5E9")
+        line_color = QColor("#FFFFFF") if is_active else QColor("#D1D5DB")
         painter.setPen(QPen(line_color, 1.5))
         painter.drawLine(int(px), 0, int(px), self.height())
 
@@ -540,19 +548,19 @@ class TimelineWidget(QWidget):
 
         grad = QLinearGradient(px, 0, px, head_tip)
         if is_active:
-            grad.setColorAt(0.0, QColor("#38BDF8"))
-            grad.setColorAt(1.0, QColor("#0284C7"))
+            grad.setColorAt(0.0, QColor("#FFFFFF"))
+            grad.setColorAt(1.0, QColor("#D1D5DB"))
         else:
-            grad.setColorAt(0.0, QColor("#0EA5E9"))
-            grad.setColorAt(1.0, QColor("#0369A1"))
+            grad.setColorAt(0.0, QColor("#F3F4F6"))
+            grad.setColorAt(1.0, QColor("#9CA3AF"))
 
         painter.setBrush(QBrush(grad))
-        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#BAE6FD"), 1.2))
+        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#E5E7EB"), 1.2))
         painter.drawPolygon(head_poly)
 
         # Center indicator dot
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#FFFFFF" if is_active else "#E0F2FE")))
+        painter.setBrush(QBrush(QColor("#1F2937" if is_active else "#374151")))
         painter.drawEllipse(QPointF(px, 6.0), 1.5, 1.5)
 
     # ── Mouse Interaction & Cursors ─────────────────────────────────────────────
