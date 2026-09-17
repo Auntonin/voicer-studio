@@ -456,17 +456,17 @@ class MainWindow(QMainWindow):
         # Timeline Header Controls Bar
         tl_header = QHBoxLayout()
         tl_title = QLabel("MULTI-TRACK TIMELINE", objectName="section_title")
-        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #e0e0e0; background: transparent; border-left: 3px solid #777777; padding-left: 8px;")
+        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
         tl_header.addWidget(tl_title)
 
         # Hotkey legend badges
         legend_label = QLabel(
             '<span style="color:#888;">Shortcuts: </span>'
-            '<b style="color:#d4d4d4;">Space</b> <span style="color:#777;">Play/Pause</span> &nbsp;'
-            '<b style="color:#d4d4d4;">Ctrl+Z</b> <span style="color:#777;">Undo</span> &nbsp;'
-            '<b style="color:#d4d4d4;">S</b> <span style="color:#777;">Split</span> &nbsp;'
-            '<b style="color:#d4d4d4;">M</b> <span style="color:#777;">Merge</span> &nbsp;'
-            '<b style="color:#d4d4d4;">Del</b> <span style="color:#777;">Delete</span>'
+            '<b style="color:#58a6ff;">Space</b> <span style="color:#aaa;">Play/Pause</span> &nbsp;'
+            '<b style="color:#58a6ff;">Ctrl+Z</b> <span style="color:#aaa;">Undo</span> &nbsp;'
+            '<b style="color:#58a6ff;">S</b> <span style="color:#aaa;">Split</span> &nbsp;'
+            '<b style="color:#58a6ff;">M</b> <span style="color:#aaa;">Merge</span> &nbsp;'
+            '<b style="color:#58a6ff;">Del</b> <span style="color:#aaa;">Delete</span>'
         )
         legend_label.setStyleSheet("font-size: 8.5pt; padding-left: 16px; padding-right: 16px; margin-left: 12px;")
         tl_header.addWidget(legend_label)
@@ -557,6 +557,7 @@ class MainWindow(QMainWindow):
         self._timeline.split_requested.connect(self._on_split)
         self._timeline.merge_requested.connect(self._on_merge_next)
         self._timeline.delete_requested.connect(self._on_dialogue_deleted)
+        self._timeline.tracks_reordered.connect(self._on_timeline_tracks_reordered)
 
         # ── Connect Speaker Panel Signals ──
         self._speaker_panel.speaker_renamed.connect(self._on_speaker_renamed)
@@ -868,6 +869,14 @@ class MainWindow(QMainWindow):
             if d.index == idx:
                 self._clip_editor.load_item(d, self._state)
                 break
+        self._dialogue_table.populate(self._state)
+
+    def _on_timeline_tracks_reordered(self):
+        self._push_undo()
+        self._mark_dirty(True)
+        self._speaker_panel.populate(self._state)
+        self._timeline.populate(self._state)
+        self._show_toast("Tracks Reordered", "Speaker track ordering updated", "info")
 
     def _on_speaker_renamed(self, spk_id: str, new_name: str):
         self._push_undo()

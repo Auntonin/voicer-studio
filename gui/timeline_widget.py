@@ -25,6 +25,7 @@ class TimelineWidget(QWidget):
     add_track_requested = Signal()
     delete_track_requested = Signal(str)
     add_clip_requested = Signal(str, float)
+    tracks_reordered = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,7 +38,7 @@ class TimelineWidget(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self._dragging = None       # ("start"|"end"|"body"|"playhead"|"track_header", item, drag_start_x, drag_start_val)
+        self._dragging = None       # ("start"|"end"|"body"|"playhead"|"track_header", item, drag_start_x, drag_start_val, ...)
         self._is_hovering_playhead = False
         self._was_playing_before_drag = False
         
@@ -47,14 +48,16 @@ class TimelineWidget(QWidget):
         self._pan_start_h = 0
         self._pan_start_v = 0
 
+        # Distinct colors for each speaker track (clearly separated on timeline)
         self.colors = [
-            "#4a505b",  # Steel Slate Gray
-            "#3e434c",  # Deep Charcoal
-            "#565d6a",  # Cool Graphite Gray
-            "#373c44",  # Dark Ash Gray
-            "#606775",  # Medium Silver Slate
-            "#444953",  # Neutral Dark Gray
-            "#505663",  # Muted Slate
+            "#2563EB",  # Speaker 1: Royal Studio Blue
+            "#059669",  # Speaker 2: Emerald Green
+            "#D97706",  # Speaker 3: Warm Amber / Gold
+            "#7C3AED",  # Speaker 4: Studio Violet
+            "#E11D48",  # Speaker 5: Rose Crimson
+            "#0891B2",  # Speaker 6: Ocean Teal
+            "#4F46E5",  # Speaker 7: Deep Indigo
+            "#D946EF",  # Speaker 8: Vivid Magenta
         ]
 
         # Professional NLE Track layout parameters
@@ -257,29 +260,42 @@ class TimelineWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # 1. Fill deep matte obsidian background
-        painter.fillRect(self.rect(), QColor("#131417"))
+        # 1. Fill deep matte neutral dark background (matching website #1e1e1e)
+        painter.fillRect(self.rect(), QColor("#1e1e1e"))
 
         speakers_list = self._get_speaker_list()
 
         # Empty state prompt
         if not self.state or not self.state.dialogues:
-            painter.setPen(QColor("#475569"))
+            painter.setPen(QColor("#777777"))
             font_empty = QFont("Segoe UI", 9)
             painter.setFont(font_empty)
             empty_rect = QRectF(self.HEADER_WIDTH, self.RULER_HEIGHT, self.width() - self.HEADER_WIDTH, self.height() - self.RULER_HEIGHT)
             painter.drawText(empty_rect, Qt.AlignmentFlag.AlignCenter, "Import a video file or audio to display dialogue clips on the timeline")
 
-        # 2. Track Lanes (Alternating dark shades + subtle border)
+        # Check if dragging a clip to highlight target track lane
+        active_drag_spk_idx = -1
+        if self._dragging and self._dragging[0] == "body" and self.state:
+            drag_item = self._dragging[1]
+            if drag_item and drag_item.speaker_id in speakers_list:
+                active_drag_spk_idx = speakers_list.index(drag_item.speaker_id)
+
+        # 2. Track Lanes (Alternating neutral dark shades + subtle border)
         for spk_idx, spk_id in enumerate(speakers_list):
             y_top = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
             track_rect = QRectF(self.HEADER_WIDTH, y_top, self.width() - self.HEADER_WIDTH, self.TRACK_HEIGHT)
 
-            bg_color = QColor("#17181D") if spk_idx % 2 == 0 else QColor("#141519")
+            bg_color = QColor("#242424") if spk_idx % 2 == 0 else QColor("#1e1e1e")
             painter.fillRect(track_rect, bg_color)
 
+            # Highlight track lane if clip is currently being dragged over it
+            if spk_idx == active_drag_spk_idx:
+                painter.fillRect(track_rect, QColor(56, 189, 248, 25))
+                painter.setPen(QPen(QColor("#38BDF8"), 1.2))
+                painter.drawRect(track_rect)
+
             # Bottom separator line
-            painter.setPen(QPen(QColor("#242730"), 1))
+            painter.setPen(QPen(QColor("#2d2d2d"), 1))
             painter.drawLine(self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT), self.width(), int(y_top + self.TRACK_HEIGHT))
 
         # 3. Dynamic Ruler Ticks & Track Guidelines
@@ -315,11 +331,11 @@ class TimelineWidget(QWidget):
             if is_major:
                 # Downward subtle track guideline across all tracks
                 if t > 0:
-                    painter.setPen(QPen(QColor(255, 255, 255, 10), 1, Qt.PenStyle.DashLine))
+                    painter.setPen(QPen(QColor(255, 255, 255, 12), 1, Qt.PenStyle.DashLine))
                     painter.drawLine(int(x), self.RULER_HEIGHT, int(x), self.height())
 
                 # Major tick line on ruler
-                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                painter.setPen(QPen(QColor("#888888"), 1))
                 painter.drawLine(int(x), self.RULER_HEIGHT - 10, int(x), self.RULER_HEIGHT)
 
                 # Timecode text on ruler
@@ -327,11 +343,11 @@ class TimelineWidget(QWidget):
                 s = int(t % 60)
                 ms = int(round((t - int(t)) * 10))
                 tc_text = f"{m:02d}:{s:02d}.{ms:01d}" if major_step < 1.0 else f"{m:02d}:{s:02d}"
-                painter.setPen(QColor("#94A3B8"))
+                painter.setPen(QColor("#aaaaaa"))
                 painter.drawText(int(x) + 4, 16, tc_text)
             else:
                 # Minor tick line
-                painter.setPen(QPen(QColor("#475569"), 1))
+                painter.setPen(QPen(QColor("#444444"), 1))
                 painter.drawLine(int(x), self.RULER_HEIGHT - 5, int(x), self.RULER_HEIGHT)
 
             t = round(t + minor_step, 4)
@@ -362,19 +378,19 @@ class TimelineWidget(QWidget):
                     grad.setColorAt(0.0, base_color.lighter(135))
                     grad.setColorAt(1.0, base_color.lighter(105))
                 else:
-                    grad.setColorAt(0.0, base_color.lighter(112))
-                    grad.setColorAt(1.0, base_color.darker(110))
+                    grad.setColorAt(0.0, base_color.lighter(110))
+                    grad.setColorAt(1.0, base_color.darker(115))
 
                 painter.setBrush(QBrush(grad))
                 if is_sel:
-                    painter.setPen(QPen(QColor("#FFFFFF"), 1.8))
+                    painter.setPen(QPen(QColor("#FFFFFF"), 2.0))
                 else:
-                    painter.setPen(QPen(base_color.darker(145), 1.0))
+                    painter.setPen(QPen(base_color.darker(135), 1.0))
 
                 painter.drawRoundedRect(clip_rect, 4.0, 4.0)
 
                 # Top subtle highlight line
-                painter.setPen(QPen(QColor(255, 255, 255, 55 if is_sel else 30), 1.0))
+                painter.setPen(QPen(QColor(255, 255, 255, 55 if is_sel else 25), 1.0))
                 painter.drawLine(int(x1 + 4), int(y_top + 1), int(x1 + w - 5), int(y_top + 1))
 
                 # Stylized audio waveform in bottom half of clip
@@ -434,8 +450,8 @@ class TimelineWidget(QWidget):
 
         # 5. Ruler Header Background & Border
         ruler_rect = QRectF(0, 0, self.width(), self.RULER_HEIGHT)
-        painter.fillRect(ruler_rect, QColor("#181A20"))
-        painter.setPen(QPen(QColor("#2B2E38"), 1))
+        painter.fillRect(ruler_rect, QColor("#282828"))
+        painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(0, self.RULER_HEIGHT, self.width(), self.RULER_HEIGHT)
 
         # Re-draw ticks inside ruler area on top
@@ -447,31 +463,31 @@ class TimelineWidget(QWidget):
 
             is_major = (round(t / major_step) * major_step == round(t, 4))
             if is_major:
-                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                painter.setPen(QPen(QColor("#888888"), 1))
                 painter.drawLine(int(x), self.RULER_HEIGHT - 10, int(x), self.RULER_HEIGHT)
                 m = int(t // 60)
                 s = int(t % 60)
                 ms = int(round((t - int(t)) * 10))
                 tc_text = f"{m:02d}:{s:02d}.{ms:01d}" if major_step < 1.0 else f"{m:02d}:{s:02d}"
-                painter.setPen(QColor("#94A3B8"))
+                painter.setPen(QColor("#aaaaaa"))
                 painter.drawText(int(x) + 4, 16, tc_text)
             else:
-                painter.setPen(QPen(QColor("#475569"), 1))
+                painter.setPen(QPen(QColor("#444444"), 1))
                 painter.drawLine(int(x), self.RULER_HEIGHT - 5, int(x), self.RULER_HEIGHT)
             t = round(t + minor_step, 4)
 
         # 6. Left Track Header (Fixed Labels: A1, A2...)
         header_rect = QRectF(0, 0, self.HEADER_WIDTH, self.height())
-        painter.fillRect(header_rect, QColor("#16181D"))
-        painter.setPen(QPen(QColor("#2B2E38"), 1))
+        painter.fillRect(header_rect, QColor("#222222"))
+        painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(self.HEADER_WIDTH, 0, self.HEADER_WIDTH, self.height())
 
         # Top-left corner cell
         corner_rect = QRectF(0, 0, self.HEADER_WIDTH, self.RULER_HEIGHT)
-        painter.fillRect(corner_rect, QColor("#1C1E24"))
-        painter.setPen(QPen(QColor("#2B2E38"), 1))
+        painter.fillRect(corner_rect, QColor("#282828"))
+        painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(0, self.RULER_HEIGHT, self.HEADER_WIDTH, self.RULER_HEIGHT)
-        painter.setPen(QColor("#94A3B8"))
+        painter.setPen(QColor("#aaaaaa"))
         font_corner = QFont("Segoe UI", 8, QFont.Weight.Bold)
         painter.setFont(font_corner)
         painter.drawText(corner_rect, Qt.AlignmentFlag.AlignCenter, "AUDIO TRACKS")
@@ -481,8 +497,8 @@ class TimelineWidget(QWidget):
             row_rect = QRectF(0, y_top, self.HEADER_WIDTH, self.TRACK_HEIGHT)
 
             # Row background
-            painter.fillRect(row_rect, QColor("#181A20"))
-            painter.setPen(QPen(QColor("#242730"), 1))
+            painter.fillRect(row_rect, QColor("#262626"))
+            painter.setPen(QPen(QColor("#303030"), 1))
             painter.drawLine(0, int(y_top + self.TRACK_HEIGHT), self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT))
 
             color_hex = self.colors[spk_idx % len(self.colors)]
@@ -493,8 +509,8 @@ class TimelineWidget(QWidget):
 
             # Track badge (e.g. "A1", "A2")
             badge_rect = QRectF(10, y_top + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
-            painter.setBrush(QBrush(QColor("#232630")))
-            painter.setPen(QPen(track_color.lighter(120), 1))
+            painter.setBrush(QBrush(QColor("#1a1a1a")))
+            painter.setPen(QPen(track_color.lighter(115), 1.5))
             painter.drawRoundedRect(badge_rect, 4, 4)
 
             painter.setPen(QColor("#FFFFFF"))
@@ -505,7 +521,7 @@ class TimelineWidget(QWidget):
             # Speaker Name
             spk_name = self.state.get_speaker(spk_id).display_name if self.state else spk_id
             name_rect = QRectF(44, y_top + 6, self.HEADER_WIDTH - 48, 18)
-            painter.setPen(QColor("#E2E8F0"))
+            painter.setPen(QColor("#E0E0E0"))
             font_name = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
             painter.setFont(font_name)
             fm_name = QFontMetrics(font_name)
@@ -515,23 +531,23 @@ class TimelineWidget(QWidget):
             # Clip count subtitle
             count = sum(1 for d in (self.state.active_dialogues() if self.state else []) if d.speaker_id == spk_id)
             sub_rect = QRectF(44, y_top + 25, self.HEADER_WIDTH - 48, 14)
-            painter.setPen(QColor("#64748B"))
+            painter.setPen(QColor("#888888"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
             painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{count} clips")
 
-        # 7. Playhead line & handle (Modern DaVinci Resolve / Premiere style)
+        # 7. Playhead line & handle (Prominent studio cyan-blue matching video player seekbar)
         px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
         is_active = (self._dragging and self._dragging[0] == "playhead") or self._is_hovering_playhead
 
         # Background subtle glow line
         if is_active:
-            painter.setPen(QPen(QColor(255, 255, 255, 45), 4))
+            painter.setPen(QPen(QColor(56, 189, 248, 60), 4))
             painter.drawLine(int(px), 0, int(px), self.height())
 
         # Vertical tracking line
-        line_color = QColor("#FFFFFF") if is_active else QColor("#D1D5DB")
-        painter.setPen(QPen(line_color, 1.5))
+        line_color = QColor("#38BDF8") if is_active else QColor("#0EA5E9")
+        painter.setPen(QPen(line_color, 1.8 if is_active else 1.5))
         painter.drawLine(int(px), 0, int(px), self.height())
 
         # Playhead handle head on ruler
@@ -548,20 +564,77 @@ class TimelineWidget(QWidget):
 
         grad = QLinearGradient(px, 0, px, head_tip)
         if is_active:
-            grad.setColorAt(0.0, QColor("#FFFFFF"))
-            grad.setColorAt(1.0, QColor("#D1D5DB"))
+            grad.setColorAt(0.0, QColor("#38BDF8"))
+            grad.setColorAt(1.0, QColor("#0284C7"))
         else:
-            grad.setColorAt(0.0, QColor("#F3F4F6"))
-            grad.setColorAt(1.0, QColor("#9CA3AF"))
+            grad.setColorAt(0.0, QColor("#0EA5E9"))
+            grad.setColorAt(1.0, QColor("#0369A1"))
 
         painter.setBrush(QBrush(grad))
-        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#E5E7EB"), 1.2))
+        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#BAE6FD"), 1.2))
         painter.drawPolygon(head_poly)
 
         # Center indicator dot
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#1F2937" if is_active else "#374151")))
+        painter.setBrush(QBrush(QColor("#FFFFFF" if is_active else "#E0F2FE")))
         painter.drawEllipse(QPointF(px, 6.0), 1.5, 1.5)
+
+        # 8. Track Reordering Visual Feedback (Drag Ghost + Drop Target Insertion Line)
+        if self._dragging and self._dragging[0] == "track_header" and len(self._dragging) > 4:
+            drag_spk_id = self._dragging[1]
+            drag_y = self._dragging[4]
+
+            # Compute target slot line
+            raw_slot = (drag_y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP)
+            target_slot = max(0, min(len(speakers_list), int(round(raw_slot))))
+            line_y = self.RULER_HEIGHT + target_slot * (self.TRACK_HEIGHT + self.TRACK_GAP)
+
+            # Draw glowing insertion line across entire timeline width
+            painter.setPen(QPen(QColor("#38BDF8"), 2.5))
+            painter.drawLine(0, int(line_y), self.width(), int(line_y))
+
+            # Left indicator triangle pointing at insertion line
+            tri = [
+                QPointF(0, line_y - 5),
+                QPointF(8, line_y),
+                QPointF(0, line_y + 5),
+            ]
+            painter.setBrush(QBrush(QColor("#38BDF8")))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawPolygon(tri)
+
+            # Floating Ghost Track Header Card following mouse Y
+            ghost_y = drag_y - self.TRACK_HEIGHT / 2.0
+            ghost_rect = QRectF(2, ghost_y, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT)
+
+            # Drop shadow
+            painter.fillRect(QRectF(6, ghost_y + 4, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), QColor(0, 0, 0, 150))
+            # Card body
+            painter.fillRect(ghost_rect, QColor(36, 36, 36, 235))
+            painter.setPen(QPen(QColor("#38BDF8"), 1.8))
+            painter.drawRoundedRect(ghost_rect, 4, 4)
+
+            try:
+                g_spk_idx = speakers_list.index(drag_spk_id)
+            except ValueError:
+                g_spk_idx = 0
+            g_color = QColor(self.colors[g_spk_idx % len(self.colors)])
+            painter.fillRect(QRectF(2, ghost_y, 4, self.TRACK_HEIGHT), g_color)
+
+            g_badge_rect = QRectF(10, ghost_y + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
+            painter.setBrush(QBrush(QColor("#1a1a1a")))
+            painter.setPen(QPen(g_color.lighter(115), 1.5))
+            painter.drawRoundedRect(g_badge_rect, 4, 4)
+
+            painter.setPen(QColor("#FFFFFF"))
+            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            painter.drawText(g_badge_rect, Qt.AlignmentFlag.AlignCenter, f"A{g_spk_idx+1}")
+
+            g_name = self.state.get_speaker(drag_spk_id).display_name if self.state else drag_spk_id
+            g_name_rect = QRectF(44, ghost_y + (self.TRACK_HEIGHT - 18) / 2, self.HEADER_WIDTH - 50, 18)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+            painter.drawText(g_name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, g_name)
 
     # ── Mouse Interaction & Cursors ─────────────────────────────────────────────
 
@@ -657,11 +730,14 @@ class TimelineWidget(QWidget):
             track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
             speakers_list = self._get_speaker_list()
             if 0 <= track_idx < len(speakers_list):
-                self._dragging = ("track_header", speakers_list[track_idx], x, y)
+                self._dragging = ("track_header", speakers_list[track_idx], x, y, y)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                self.update()
         elif item:
             self.selected_index = item.index
             self.segment_selected.emit(item.index)
             self._dragging = (mode, item, x, item.start if mode != "end" else item.end)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor if mode == "body" else Qt.CursorShape.SizeHorCursor)
             self.seek_requested.emit(item.start)
 
         self.update()
@@ -705,7 +781,11 @@ class TimelineWidget(QWidget):
         if self._dragging:
             mode = self._dragging[0]
             if mode == "track_header":
-                self.setCursor(Qt.CursorShape.SizeVerCursor)
+                spk_id = self._dragging[1]
+                start_x = self._dragging[2]
+                start_y = self._dragging[3]
+                self._dragging = ("track_header", spk_id, start_x, start_y, y)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self.update()
                 return
 
@@ -728,7 +808,7 @@ class TimelineWidget(QWidget):
                 self.update()
                 return
 
-            _, item, start_x, start_val = self._dragging
+            _, item, start_x, start_val = self._dragging[:4]
             dx = (x - start_x) / max(1.0, self.pixels_per_second)
             if mode == "start":
                 raw = start_val + dx
@@ -741,6 +821,7 @@ class TimelineWidget(QWidget):
                 item.end = max(item.start + 0.1, min(self.duration, snapped))
                 self.seek_requested.emit(item.end)
             elif mode == "body":
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 raw_start = start_val + dx
                 snapped_start = self._snap_time(raw_start, ignore_item=item)
                 dur = item.duration
@@ -755,7 +836,8 @@ class TimelineWidget(QWidget):
                 target_spk_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
                 speakers_list = self._get_speaker_list()
                 if 0 <= target_spk_idx < len(speakers_list):
-                    item.speaker_id = speakers_list[target_spk_idx]
+                    if item.speaker_id != speakers_list[target_spk_idx]:
+                        item.speaker_id = speakers_list[target_spk_idx]
             self.update()
         else:
             px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
@@ -768,9 +850,9 @@ class TimelineWidget(QWidget):
             if mode in ("start", "end"):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)  # Trim Cursor
             elif mode == "body":
-                self.setCursor(Qt.CursorShape.SizeAllCursor)  # Move Cursor
+                self.setCursor(Qt.CursorShape.OpenHandCursor)  # Hand grab cursor for clip
             elif mode == "header":
-                self.setCursor(Qt.CursorShape.SizeVerCursor)  # Track Drag Cursor
+                self.setCursor(Qt.CursorShape.OpenHandCursor)  # Hand grab cursor for speaker track
             elif mode == "playhead":
                 self.setCursor(Qt.CursorShape.SizeHorCursor)  # Playhead Drag Cursor
             elif mode == "ruler":
@@ -798,16 +880,19 @@ class TimelineWidget(QWidget):
         if self._dragging:
             mode = self._dragging[0]
             if mode == "track_header":
-                _, spk_id, start_x, start_y = self._dragging
-                target_spk_idx = int((event.pos().y() - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
-                speakers_list = self._get_speaker_list()
-                if 0 <= target_spk_idx < len(speakers_list) and spk_id in speakers_list:
+                spk_id = self._dragging[1]
+                current_y = self._dragging[4] if len(self._dragging) > 4 else event.pos().y()
+                speakers_list = list(self._get_speaker_list())
+                if spk_id in speakers_list:
                     old_idx = speakers_list.index(spk_id)
+                    raw_slot = (current_y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP)
+                    target_spk_idx = max(0, min(len(speakers_list) - 1, int(round(raw_slot))))
                     if old_idx != target_spk_idx:
                         speakers_list.pop(old_idx)
                         speakers_list.insert(target_spk_idx, spk_id)
-                        self.state.speaker_order = speakers_list
-                        self.add_track_requested.emit()
+                        if self.state:
+                            self.state.speaker_order = speakers_list
+                        self.tracks_reordered.emit()
             elif mode in ("start", "end", "body"):
                 item = self._dragging[1]
                 self.segment_moved.emit(item.index, item.start, item.end)
