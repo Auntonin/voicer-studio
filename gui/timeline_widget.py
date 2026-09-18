@@ -522,8 +522,60 @@ class TimelineWidget(QWidget):
                 painter.drawLine(int(x), self.RULER_HEIGHT - 5, int(x), self.RULER_HEIGHT)
             t = round(t + minor_step, 4)
 
-        # 6. Left Track Header (Fixed Labels: A1, A2... or Sticky to Viewport Left Edge)
+        # 6. Playhead line & handle (Prominent studio cyan-blue matching video player seekbar)
+        px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
         header_x = self._get_header_x()
+        is_active = (self._dragging and self._dragging[0] == "playhead") or self._is_hovering_playhead
+
+        head_w = 7.0
+        if px + head_w >= header_x + self.HEADER_WIDTH:
+            painter.save()
+            # Clip playhead to visible timeline area to guarantee it never bleeds onto left character headers
+            clip_left = header_x + self.HEADER_WIDTH
+            clip_w = max(0.0, float(self.width() - clip_left))
+            painter.setClipRect(QRectF(clip_left, 0, clip_w, float(self.height())))
+
+            # Background subtle glow line
+            if is_active:
+                painter.setPen(QPen(QColor(56, 189, 248, 60), 4))
+                painter.drawLine(int(px), 0, int(px), self.height())
+
+            # Vertical tracking line
+            line_color = QColor("#38BDF8") if is_active else QColor("#0EA5E9")
+            painter.setPen(QPen(line_color, 1.8 if is_active else 1.5))
+            painter.drawLine(int(px), 0, int(px), self.height())
+
+            # Playhead handle head on ruler
+            head_h = 13.0
+            head_tip = 19.0
+            head_poly = [
+                QPointF(px - head_w, 0),
+                QPointF(px + head_w, 0),
+                QPointF(px + head_w, head_h),
+                QPointF(px, head_tip),
+                QPointF(px - head_w, head_h),
+            ]
+
+            grad = QLinearGradient(px, 0, px, head_tip)
+            if is_active:
+                grad.setColorAt(0.0, QColor("#38BDF8"))
+                grad.setColorAt(1.0, QColor("#0284C7"))
+            else:
+                grad.setColorAt(0.0, QColor("#0EA5E9"))
+                grad.setColorAt(1.0, QColor("#0369A1"))
+
+            painter.setBrush(QBrush(grad))
+            painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#BAE6FD"), 1.2))
+            painter.drawPolygon(head_poly)
+
+            # Center indicator dot
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#FFFFFF" if is_active else "#E0F2FE")))
+            painter.drawEllipse(QPointF(px, 6.0), 1.5, 1.5)
+
+            painter.restore()
+
+        # 7. Left Track Header (Fixed Labels: A1, A2... or Sticky to Viewport Left Edge - ALWAYS ON TOP of Playhead)
         header_rect = QRectF(header_x, 0, self.HEADER_WIDTH, self.height())
         painter.fillRect(header_rect, QColor("#222222"))
         painter.setPen(QPen(QColor("#383838"), 1))
@@ -627,52 +679,6 @@ class TimelineWidget(QWidget):
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
             painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{count} clips")
-
-        # 7. Playhead line & handle (Prominent studio cyan-blue matching video player seekbar)
-        px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
-        is_active = (self._dragging and self._dragging[0] == "playhead") or self._is_hovering_playhead
-
-        # Background subtle glow line
-        if is_active:
-            painter.setPen(QPen(QColor(56, 189, 248, 60), 4))
-            painter.drawLine(int(px), 0, int(px), self.height())
-
-        # Vertical tracking line
-        line_color = QColor("#38BDF8") if is_active else QColor("#0EA5E9")
-        painter.setPen(QPen(line_color, 1.8 if is_active else 1.5))
-        painter.drawLine(int(px), 0, int(px), self.height())
-
-        # Playhead handle head on ruler
-        head_w = 7.0
-        head_h = 13.0
-        head_tip = 19.0
-        head_poly = [
-            QPointF(px - head_w, 0),
-            QPointF(px + head_w, 0),
-            QPointF(px + head_w, head_h),
-            QPointF(px, head_tip),
-            QPointF(px - head_w, head_h),
-        ]
-
-        grad = QLinearGradient(px, 0, px, head_tip)
-        if is_active:
-            grad.setColorAt(0.0, QColor("#38BDF8"))
-            grad.setColorAt(1.0, QColor("#0284C7"))
-        else:
-            grad.setColorAt(0.0, QColor("#0EA5E9"))
-            grad.setColorAt(1.0, QColor("#0369A1"))
-
-        painter.setBrush(QBrush(grad))
-        painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#BAE6FD"), 1.2))
-        painter.drawPolygon(head_poly)
-
-        # Center indicator dot
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#FFFFFF" if is_active else "#E0F2FE")))
-        painter.drawEllipse(QPointF(px, 6.0), 1.5, 1.5)
-
-        # Reset brush to avoid leaking into subsequent drawing
-        painter.setBrush(Qt.BrushStyle.NoBrush)
 
         # 8. Track Reordering Visual Feedback (Drag Ghost + Drop Target Insertion Line)
         if self._dragging and self._dragging[0] == "track_header" and len(self._dragging) > 4:
