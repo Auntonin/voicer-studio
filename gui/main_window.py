@@ -1097,7 +1097,7 @@ class MainWindow(QMainWindow):
         sb = QStatusBar()
         self.setStatusBar(sb)
         self._status_video = QLabel("No video loaded")
-        self._status_save = QLabel("💾 Ready")
+        self._status_save = QLabel("[Ready]")
         self._status_save.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8.5pt; padding-right: 12px;")
         self._status_version = QLabel(f"v{APP_VERSION}  |  The Choice Voicer Dialogue Extractor")
         sb.addWidget(self._status_video)
@@ -1124,11 +1124,11 @@ class MainWindow(QMainWindow):
         if not hasattr(self, '_status_save'):
             return
         if self._is_dirty:
-            self._status_save.setText("💾 Unsaved changes*")
-            self._status_save.setStyleSheet("color: #f59e0b; font-size: 8.5pt; padding-right: 12px;")
+            self._status_save.setText("[Unsaved Changes*]")
+            self._status_save.setStyleSheet("color: #f59e0b; font-size: 8.5pt; font-weight: bold; padding-right: 12px;")
         else:
-            t = f" ({self._last_saved_time})" if self._last_saved_time else ""
-            self._status_save.setText(f"💾 Saved{t}")
+            t = f" {self._last_saved_time}" if self._last_saved_time else ""
+            self._status_save.setText(f"[Saved{t}]")
             self._status_save.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8.5pt; padding-right: 12px;")
 
     def _on_autosave_timer_tick(self):
@@ -1145,7 +1145,7 @@ class MainWindow(QMainWindow):
         )
         if as_path:
             t = datetime.now().strftime("%H:%M:%S")
-            self._status_save.setText(f"💾 Auto-saved ({t})*")
+            self._status_save.setText(f"[Auto-saved {t}*]")
             self._status_save.setStyleSheet("color: #38bdf8; font-size: 8.5pt; padding-right: 12px;")
 
     # ── State helpers ─────────────────────────────────────────────────────────
@@ -1692,7 +1692,7 @@ class MainWindow(QMainWindow):
         )
         if as_path:
             t = datetime.now().strftime("%H:%M:%S")
-            self._status_save.setText(f"💾 Auto-saved ({t})*")
+            self._status_save.setText(f"[Auto-saved {t}*]")
             self._status_save.setStyleSheet("color: #38bdf8; font-size: 8.5pt; padding-right: 12px;")
             self._log_message(f"Extraction results auto-saved to: {as_path.name}", "info")
 

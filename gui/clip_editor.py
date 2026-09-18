@@ -216,20 +216,15 @@ class ClipEditor(QWidget):
         self.btn_merge = QPushButton("Merge Next")
         self.btn_delete = QPushButton("Delete Clip")
         self.btn_delete.setObjectName("btn_danger")
-        self.btn_apply = QPushButton("Auto-saved ✓")
-        self.btn_apply.setToolTip("Changes are saved automatically in real-time. Click to force instant save.")
-        self.btn_apply.setStyleSheet("background-color: #18281d; color: #4ade80; border: 1px solid #22A05B; font-weight: bold; border-radius: 4px; padding: 5px 12px;")
 
         self.btn_split.clicked.connect(self.on_split)
         self.btn_merge.clicked.connect(self.on_merge)
         self.btn_delete.clicked.connect(self.on_delete)
-        self.btn_apply.clicked.connect(self.on_apply)
 
         btn_layout.addWidget(self.btn_split)
         btn_layout.addWidget(self.btn_merge)
         btn_layout.addWidget(self.btn_delete)
         btn_layout.addStretch()
-        btn_layout.addWidget(self.btn_apply)
 
         cc_layout.addLayout(btn_layout)
         main_layout.addWidget(cap_card, stretch=2)
@@ -289,21 +284,7 @@ class ClipEditor(QWidget):
         self._set_save_status("Auto-saved ✓")
 
     def _set_save_status(self, text: str):
-        if text == "Auto-saved ✓":
-            self.btn_apply.setText("Auto-saved ✓")
-            self.btn_apply.setStyleSheet(
-                "background-color: #18281d; color: #4ade80; border: 1px solid #22A05B; "
-                "font-weight: bold; border-radius: 4px; padding: 5px 12px;"
-            )
-        elif text == "Saving...":
-            self.btn_apply.setText("Saving...")
-            self.btn_apply.setStyleSheet(
-                "background-color: #2b2518; color: #facc15; border: 1px solid #ca8a04; "
-                "font-weight: bold; border-radius: 4px; padding: 5px 12px;"
-            )
-        else:
-            self.btn_apply.setText(text)
-            self.btn_apply.setStyleSheet("")
+        pass
 
     def _seek_frame_preview(self):
         if not self.state or not self.state.video_path:
