@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation
-from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette
+from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette, QKeySequence, QShortcut
 
 from config import (
     APP_NAME, APP_VERSION, COLORS, SETTINGS_FILE,
@@ -84,6 +84,10 @@ class MainWindow(QMainWindow):
         self._build_statusbar()
         self._update_toolbar_state()
         
+        # Global '?' shortcut to open Keyboard Shortcuts cheat sheet
+        self._sc_shortcuts = QShortcut(QKeySequence("?"), self)
+        self._sc_shortcuts.activated.connect(self._show_shortcuts_dialog)
+
         self._apply_dark_title_bar()
         
         # Professional Bottom-Right Toast Floating Card
@@ -279,6 +283,9 @@ class MainWindow(QMainWindow):
         self.act_redo.triggered.connect(self.on_redo)
 
         menu_edit.addSeparator()
+        act_kb_shortcuts = menu_edit.addAction("Keyboard Shortcuts...")
+        act_kb_shortcuts.triggered.connect(self._show_shortcuts_dialog)
+
         act_settings = menu_edit.addAction("Settings...")
         act_settings.triggered.connect(self.on_settings)
 
@@ -320,8 +327,19 @@ class MainWindow(QMainWindow):
 
         # Help Menu
         menu_help = menubar.addMenu("Help")
+        act_shortcuts_help = menu_help.addAction("⌨️ Keyboard Shortcuts...")
+        act_shortcuts_help.setShortcut("F1")
+        act_shortcuts_help.triggered.connect(self._show_shortcuts_dialog)
+
+        menu_help.addSeparator()
         act_about = menu_help.addAction("About")
         act_about.triggered.connect(self._show_about_dialog)
+
+    def _show_shortcuts_dialog(self):
+        """Open the modern Keyboard Shortcuts reference sheet dialog."""
+        from gui.shortcuts_dialog import ShortcutsDialog
+        dlg = ShortcutsDialog(self)
+        dlg.exec()
 
     def _toggle_fullscreen(self):
         """Toggle borderless fullscreen mode via F11."""
@@ -457,26 +475,6 @@ class MainWindow(QMainWindow):
         tl_layout.setContentsMargins(6, 6, 6, 6)
         tl_layout.setSpacing(4)
 
-        # Timeline Header Controls Bar
-        tl_header = QHBoxLayout()
-        tl_title = QLabel("MULTI-TRACK TIMELINE", objectName="section_title")
-        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
-        tl_header.addWidget(tl_title)
-
-        # Hotkey legend badges
-        legend_label = QLabel(
-            '<span style="color:#888;">Shortcuts: </span>'
-            '<b style="color:#58a6ff;">Space</b> <span style="color:#aaa;">Play</span> &nbsp;'
-            '<b style="color:#58a6ff;">Ctrl+Z</b> <span style="color:#aaa;">Undo</span> &nbsp;'
-            '<b style="color:#58a6ff;">S</b> <span style="color:#aaa;">Split</span> &nbsp;'
-            '<b style="color:#58a6ff;">Q</b> <span style="color:#aaa;">Trim Left</span> &nbsp;'
-            '<b style="color:#58a6ff;">W</b> <span style="color:#aaa;">Trim Right</span> &nbsp;'
-            '<b style="color:#58a6ff;">Del</b> <span style="color:#aaa;">Delete</span>'
-        )
-        legend_label.setStyleSheet("font-size: 8.5pt; padding-left: 14px; padding-right: 14px; margin-left: 8px;")
-        tl_header.addWidget(legend_label)
-        tl_header.addStretch()
-
         def v_sep():
             sep = QFrame()
             sep.setFrameShape(QFrame.Shape.VLine)
@@ -537,6 +535,37 @@ class MainWindow(QMainWindow):
                     }
                 """)
             return b
+
+        # Timeline Header Controls Bar
+        tl_header = QHBoxLayout()
+        tl_title = QLabel("MULTI-TRACK TIMELINE", objectName="section_title")
+        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px; margin-right: 4px;")
+        tl_header.addWidget(tl_title)
+
+        # Minimal info/keyboard shortcut button (hover shows clean cheat-sheet, click opens full shortcuts dialog)
+        btn_tl_shortcuts = capcut_btn("", "keyboard.svg", "", compact=True)
+        btn_tl_shortcuts.setToolTip(
+            '<div style="font-family: Segoe UI, sans-serif; padding: 4px;">'
+            '<b style="font-size: 9pt; color: #38BDF8;">⌨️ Timeline Shortcuts & Gestures</b><br/>'
+            '<hr style="border: none; border-top: 1px solid #444; margin: 4px 0;" />'
+            '<table cellpadding="1" cellspacing="0" style="font-size: 8.5pt; color: #e0e0e0;">'
+            '<tr><td><b style="color:#58a6ff;">Space</b></td><td style="color:#aaa;">&nbsp; Play / Pause Timeline</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">S</b> / <b style="color:#58a6ff;">Ctrl+B</b></td><td style="color:#aaa;">&nbsp; Split Clip at Playhead</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">Q</b></td><td style="color:#aaa;">&nbsp; Delete Left to Playhead</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">W</b></td><td style="color:#aaa;">&nbsp; Delete Right from Playhead</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">Del</b></td><td style="color:#aaa;">&nbsp; Delete Selected Clip</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">Ctrl+Z / Ctrl+Y</b></td><td style="color:#aaa;">&nbsp; Undo / Redo</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">Ctrl + Wheel</b></td><td style="color:#aaa;">&nbsp; Zoom at Cursor</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">Shift + Wheel</b></td><td style="color:#aaa;">&nbsp; Scroll Horizontally</td></tr>'
+            '<tr><td><b style="color:#58a6ff;">MMB Drag</b></td><td style="color:#aaa;">&nbsp; Pan Canvas 2D</td></tr>'
+            '</table>'
+            '<div style="margin-top: 6px; font-size: 7.5pt; color: #888888;">💡 Click to view all shortcuts (F1)</div>'
+            '</div>'
+        )
+        btn_tl_shortcuts.clicked.connect(self._show_shortcuts_dialog)
+        tl_header.addWidget(btn_tl_shortcuts)
+
+        tl_header.addStretch()
 
         # CapCut Style Quick Edit Tools:
         btn_tl_undo       = capcut_btn("", "undo.svg", "Undo (Ctrl+Z)", compact=True)
