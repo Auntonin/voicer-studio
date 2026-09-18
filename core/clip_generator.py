@@ -13,9 +13,10 @@ class ClipGenerator:
         output_path = output_dir / filename
         
         duration = max(0.05, item.end - item.start)
-        # Apply 5ms micro-fade in/out to prevent audio pops/clicks
-        fade_out_st = max(0.0, duration - 0.005)
-        afade_filter = f"afade=t=in:ss=0:d=0.005,afade=t=out:st={fade_out_st:.3f}:d=0.005"
+        # Apply 15ms micro-fade in/out to prevent audio pops/clicks at clip boundaries
+        fade_ms = 0.015
+        fade_out_st = max(0.0, duration - fade_ms)
+        afade_filter = f"afade=t=in:ss=0:d={fade_ms:.3f},afade=t=out:st={fade_out_st:.3f}:d={fade_ms:.3f}"
         
         cmd = [
             "ffmpeg", "-y",

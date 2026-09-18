@@ -21,14 +21,23 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from core.models import PipelineState, SpeakerInfo, DialogueItem
+from config import DIARIZATION_MAX_SPEAKERS, DIARIZATION_MIN_SPEAKERS
 
 logger = logging.getLogger(__name__)
 
 
 class SpeakerDiarizer:
-    def __init__(self, hf_token: str = '', device: str = 'auto'):
+    def __init__(
+        self,
+        hf_token: str = '',
+        device: str = 'auto',
+        min_speakers: int = DIARIZATION_MIN_SPEAKERS,
+        max_speakers: int = DIARIZATION_MAX_SPEAKERS
+    ):
         self.hf_token = hf_token
         self.device = 'cuda' if device == 'auto' else device
+        self.min_speakers = min_speakers
+        self.max_speakers = max_speakers
         self.available = False
         self.pipeline = None
 
@@ -53,18 +62,26 @@ class SpeakerDiarizer:
                     self.pipeline.to(torch.device("cuda"))
                 self.available = self.pipeline is not None
             except ImportError:
-                logger.warning("pyannote.audio not installed. Using energy clustering fallback.")
+                logger.warning("pyannote.audio not installed. Using acoustic clustering fallback.")
             except Exception as e:
-                logger.warning(f"Error loading pyannote: {e}. Using energy clustering fallback.")
+                logger.warning(f"Error loading pyannote: {e}. Using acoustic clustering fallback.")
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def diarize(self, audio_path: Path, state: PipelineState) -> None:
+    def diarize(
+        self,
+        audio_path: Path,
+        state: PipelineState,
+        min_speakers: Optional[int] = None,
+        max_speakers: Optional[int] = None
+    ) -> None:
+        min_spk = min_speakers or self.min_speakers
+        max_spk = max_speakers or self.max_speakers
         if self.available and self.pipeline:
-            self._pyannote_diarize(audio_path, state)
+            self._pyannote_diarize(audio_path, state, min_spk, max_spk)
         else:
-            logger.info("Using energy+spectral clustering for speaker separation (no HF token).")
-            self._cluster_diarize(audio_path, state)
+            logger.info("Using advanced acoustic clustering for speaker separation (no HF token).")
+            self._cluster_diarize(audio_path, state, min_spk, max_spk)
 
     def reassign_speaker(self, state: PipelineState, old_id: str, new_display_name: str):
         if old_id in state.speakers:
@@ -72,10 +89,13 @@ class SpeakerDiarizer:
 
     # ── Pyannote (requires HF token) ───────────────────────────────────────────
 
-    def _pyannote_diarize(self, audio_path: Path, state: PipelineState) -> None:
+    def _pyannote_diarize(self, audio_path: Path, state: PipelineState, min_speakers: int, max_speakers: int) -> None:
         try:
-            logger.info("Running pyannote diarization")
-            diarization = self.pipeline(str(audio_path))
+            logger.info(f"Running pyannote diarization (min={min_speakers}, max={max_speakers})")
+            try:
+                diarization = self.pipeline(str(audio_path), min_speakers=min_speakers, max_speakers=max_speakers)
+            except (TypeError, Exception):
+                diarization = self.pipeline(str(audio_path))
 
             segments: List[Tuple[float, float, str]] = []
             for turn, _, speaker in diarization.itertracks(yield_label=True):
@@ -83,20 +103,26 @@ class SpeakerDiarizer:
 
             mapping = self._match_segments(segments, state.active_dialogues())
 
-            unique_speakers = set()
+            # Chronological mapping so first speaker is SPEAKER_00
+            unique_in_order = []
             for i, item in enumerate(state.active_dialogues()):
-                speaker = mapping.get(i, "SPEAKER_00")
-                item.speaker_id = speaker
-                unique_speakers.add(speaker)
+                raw_spk = mapping.get(i, "SPEAKER_00")
+                if raw_spk not in unique_in_order:
+                    unique_in_order.append(raw_spk)
 
-            for spk in unique_speakers:
-                if spk not in state.speakers:
-                    state.speakers[spk] = SpeakerInfo(speaker_id=spk)
+            spk_remap = {raw: f"SPEAKER_{idx:02d}" for idx, raw in enumerate(unique_in_order)}
 
-            logger.info(f"Pyannote found {len(unique_speakers)} speakers")
+            state.speakers = {}
+            for i, item in enumerate(state.active_dialogues()):
+                final_spk = spk_remap.get(mapping.get(i, "SPEAKER_00"), "SPEAKER_00")
+                item.speaker_id = final_spk
+                if final_spk not in state.speakers:
+                    state.speakers[final_spk] = SpeakerInfo(speaker_id=final_spk)
+
+            logger.info(f"Pyannote identified {len(state.speakers)} speakers: {list(state.speakers.keys())}")
         except Exception as e:
             logger.error(f"Pyannote runtime error: {e}, falling back to clustering.")
-            self._cluster_diarize(audio_path, state)
+            self._cluster_diarize(audio_path, state, min_speakers, max_speakers)
 
     def _match_segments(self, diarization_output: List, dialogues: List[DialogueItem]) -> Dict[int, str]:
         mapping: Dict[int, str] = {}
@@ -111,19 +137,13 @@ class SpeakerDiarizer:
             mapping[i] = best_speaker
         return mapping
 
-    # ── Energy + Spectral Clustering Fallback ──────────────────────────────────
+    # ── Advanced Acoustic Clustering Fallback ──────────────────────────────────
 
-    def _cluster_diarize(self, audio_path: Path, state: PipelineState) -> None:
+    def _cluster_diarize(self, audio_path: Path, state: PipelineState, min_speakers: int = 2, max_speakers: int = 8) -> None:
         """
-        Offline speaker separation using audio features + k-means clustering.
-        Works without any API key or GPU.
-
-        Features per segment:
-          - Mean log energy
-          - Energy variance (dynamic range proxy)
-          - Spectral centroid mean (brightness / vocal register)
-          - Spectral centroid variance
-          - Zero-crossing rate (voiced vs unvoiced proxy)
+        Offline speaker separation using vocal tract timbre (MFCCs),
+        fundamental pitch (F0), and spectral contrast with Agglomerative Clustering.
+        Works offline without HF token or GPU.
         """
         dialogues = state.active_dialogues()
         if not dialogues:
@@ -135,32 +155,29 @@ class SpeakerDiarizer:
                 self._assign_single_speaker(state)
                 return
 
-            n_speakers = self._estimate_speaker_count(features, max_speakers=6)
-            labels = self._kmeans(features, n_speakers)
+            labels = self._cluster_features(features, min_speakers=min_speakers, max_speakers=max_speakers)
 
-            # Assign speaker IDs
-            unique_labels = sorted(set(labels))
-            speaker_map = {lbl: f"SPEAKER_{i:02d}" for i, lbl in enumerate(unique_labels)}
+            # Map clusters in chronological order of appearance (SPEAKER_00, SPEAKER_01, ...)
+            ordered_map = {}
+            for lbl in labels:
+                if lbl not in ordered_map:
+                    ordered_map[lbl] = f"SPEAKER_{len(ordered_map):02d}"
 
-            unique_ids = set()
+            state.speakers = {}
             for i, item in enumerate(dialogues):
-                spk_id = speaker_map.get(labels[i], "SPEAKER_00")
+                spk_id = ordered_map.get(labels[i], "SPEAKER_00")
                 item.speaker_id = spk_id
-                unique_ids.add(spk_id)
+                if spk_id not in state.speakers:
+                    state.speakers[spk_id] = SpeakerInfo(speaker_id=spk_id)
 
-            # Register speakers in state
-            state.speakers = {}  # reset; keep only detected speakers
-            for spk_id in sorted(unique_ids):
-                state.speakers[spk_id] = SpeakerInfo(speaker_id=spk_id)
-
-            logger.info(f"Clustering diarization: detected {len(unique_ids)} speaker(s): {sorted(unique_ids)}")
+            logger.info(f"Acoustic clustering: separated into {len(state.speakers)} speaker(s): {list(state.speakers.keys())}")
 
         except Exception as e:
-            logger.error(f"Clustering diarization failed: {e}")
+            logger.error(f"Acoustic clustering diarization failed: {e}", exc_info=True)
             self._assign_single_speaker(state)
 
     def _extract_features(self, audio_path: Path, dialogues: List[DialogueItem]) -> Optional[list]:
-        """Load WAV and extract feature vectors for each dialogue segment."""
+        """Load WAV and extract 52-dimensional vocal acoustic feature vectors for each dialogue segment."""
         try:
             import numpy as np
             import subprocess
@@ -179,16 +196,17 @@ class SpeakerDiarizer:
             import scipy.io.wavfile as wavfile
             sr, raw = wavfile.read(io.BytesIO(res.stdout))
             audio = raw.astype(np.float32)
-            if np.max(np.abs(audio)) > 0:
-                audio /= np.max(np.abs(audio))
+            max_val = np.max(np.abs(audio))
+            if max_val > 0:
+                audio /= max_val
 
             features = []
             for item in dialogues:
-                s = int(item.start * sr)
-                e = int(item.end * sr)
+                s = max(0, int(item.start * sr))
+                e = min(len(audio), int(item.end * sr))
                 seg = audio[s:e]
-                if len(seg) < 100:
-                    features.append([0.0, 0.0, 0.0, 0.0, 0.0])
+                if len(seg) < int(0.05 * sr):
+                    features.append(np.zeros(52, dtype=np.float32).tolist())
                     continue
                 features.append(self._compute_segment_features(seg, sr))
 
@@ -202,120 +220,132 @@ class SpeakerDiarizer:
             return None
 
     def _compute_segment_features(self, seg: "np.ndarray", sr: int) -> List[float]:
+        """
+        Extract rich vocal characteristics:
+        - 20 MFCC means (vocal tract formants & timbre)
+        - 20 MFCC stds (spectral dynamics)
+        - Pitch / F0 features (median, std, voicing ratio via librosa.yin)
+        - Spectral contrast (7 bands mean)
+        - Spectral centroid (mean & std)
+        """
         import numpy as np
 
-        # 1. Energy features
+        try:
+            import librosa
+
+            # 1. MFCCs (20 mean, 20 std = 40 features)
+            n_fft = min(1024, len(seg))
+            hop_length = n_fft // 2
+            mfcc = librosa.feature.mfcc(y=seg, sr=sr, n_mfcc=20, n_fft=n_fft, hop_length=hop_length)
+            mfcc_mean = np.mean(mfcc, axis=1)
+            mfcc_std = np.std(mfcc, axis=1)
+
+            # 2. Fundamental Frequency F0 (pitch median, pitch std, voicing ratio)
+            try:
+                # Yin pitch estimator (detects human vocal fundamental pitch between 65Hz and 450Hz)
+                f0 = librosa.yin(seg, fmin=65, fmax=450, sr=sr, frame_length=n_fft, hop_length=hop_length)
+                voiced = f0[(f0 >= 65) & (f0 <= 450)]
+                f0_med = float(np.median(voiced)) if len(voiced) > 0 else 0.0
+                f0_std = float(np.std(voiced)) if len(voiced) > 0 else 0.0
+                v_ratio = float(len(voiced) / max(1, len(f0)))
+            except Exception:
+                f0_med, f0_std, v_ratio = 0.0, 0.0, 0.0
+
+            # 3. Spectral Contrast (7 bands mean)
+            try:
+                contrast = librosa.feature.spectral_contrast(y=seg, sr=sr, n_bands=6, n_fft=n_fft, hop_length=hop_length)
+                contrast_mean = np.mean(contrast, axis=1)
+            except Exception:
+                contrast_mean = np.zeros(7, dtype=np.float32)
+
+            # 4. Spectral Centroid (mean & std)
+            sc = librosa.feature.spectral_centroid(y=seg, sr=sr, n_fft=n_fft, hop_length=hop_length)
+            sc_mean = float(np.mean(sc))
+            sc_std = float(np.std(sc))
+
+            feats = np.hstack([
+                mfcc_mean,
+                mfcc_std,
+                [f0_med, f0_std, v_ratio],
+                contrast_mean,
+                [sc_mean, sc_std]
+            ])
+            return feats.astype(np.float32).tolist()
+
+        except Exception:
+            return self._compute_numpy_fallback_features(seg, sr)
+
+    def _compute_numpy_fallback_features(self, seg: "np.ndarray", sr: int) -> List[float]:
+        import numpy as np
         energy = seg ** 2
         mean_log_energy = float(np.log1p(np.mean(energy) * 1000))
         energy_var = float(np.var(energy) * 1000)
-
-        # 2. Spectral centroid (brightness proxy)
-        frame_size = min(512, len(seg))
-        n_frames = max(1, len(seg) // frame_size)
-        centroids = []
-        for f in range(n_frames):
-            frame = seg[f * frame_size:(f + 1) * frame_size]
-            spectrum = np.abs(np.fft.rfft(frame * np.hanning(len(frame))))
-            freqs = np.fft.rfftfreq(len(frame), 1 / sr)
-            total = np.sum(spectrum)
-            centroid = float(np.sum(freqs * spectrum) / total) if total > 0 else 0.0
-            centroids.append(centroid)
-        sc_mean = float(np.mean(centroids))
-        sc_var = float(np.var(centroids))
-
-        # 3. Zero-crossing rate (voiced/unvoiced proxy)
         zcr = float(np.mean(np.abs(np.diff(np.sign(seg)))) / 2)
+        vec = np.zeros(52, dtype=np.float32)
+        vec[0] = mean_log_energy
+        vec[1] = energy_var
+        vec[2] = zcr
+        return vec.tolist()
 
-        return [mean_log_energy, energy_var, sc_mean / 8000.0, sc_var / 1e7, zcr]
-
-    def _estimate_speaker_count(self, features: list, max_speakers: int = 6) -> int:
-        """Estimate optimal k using silhouette-like gap heuristic."""
-        try:
-            import numpy as np
-            X = np.array(features, dtype=np.float32)
-            n = len(X)
-            if n < 4:
-                return min(n, 2)
-
-            best_k = 2
-            best_score = -1.0
-
-            for k in range(2, min(max_speakers + 1, n)):
-                labels = self._kmeans(features, k)
-                score = self._silhouette_approx(X, labels, k)
-                if score > best_score:
-                    best_score = score
-                    best_k = k
-
-            logger.info(f"Auto-detected {best_k} speaker(s) (silhouette={best_score:.3f})")
-            return best_k
-
-        except Exception:
-            return 2
-
-    def _silhouette_approx(self, X: "np.ndarray", labels: list, k: int) -> float:
-        """Fast approximate silhouette score."""
+    def _cluster_features(self, features: list, min_speakers: int = 2, max_speakers: int = 8) -> list:
+        """
+        Performs Agglomerative Hierarchical Clustering using Cosine Distance and Silhouette Scoring.
+        """
         import numpy as np
-        scores = []
-        label_arr = np.array(labels)
-        for i in range(len(X)):
-            same = X[label_arr == labels[i]]
-            if len(same) > 1:
-                a = np.mean(np.linalg.norm(same - X[i], axis=1))
-            else:
-                a = 0.0
-            b_vals = []
-            for c in range(k):
-                if c == labels[i]:
-                    continue
-                other = X[label_arr == c]
-                if len(other) > 0:
-                    b_vals.append(np.mean(np.linalg.norm(other - X[i], axis=1)))
-            b = min(b_vals) if b_vals else 0.0
-            denom = max(a, b)
-            scores.append((b - a) / denom if denom > 0 else 0.0)
-        return float(sum(scores) / len(scores)) if scores else 0.0
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.cluster import AgglomerativeClustering
+        from sklearn.metrics import silhouette_score
 
-    def _kmeans(self, features: list, k: int, max_iter: int = 50) -> list:
-        """Simple k-means clustering (no sklearn needed)."""
-        import numpy as np
         X = np.array(features, dtype=np.float32)
         n = len(X)
         if n == 0:
             return []
-        k = min(k, n)
+        if n == 1:
+            return [0]
+        if n == 2:
+            norm0 = np.linalg.norm(X[0])
+            norm1 = np.linalg.norm(X[1])
+            if norm0 > 0 and norm1 > 0:
+                cos_sim = np.dot(X[0], X[1]) / (norm0 * norm1)
+            else:
+                cos_sim = 1.0
+            return [0, 1] if cos_sim < 0.75 else [0, 0]
 
-        # Normalise features
-        std = X.std(axis=0)
-        std[std == 0] = 1.0
-        X = (X - X.mean(axis=0)) / std
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
 
-        # K-means++ initialisation
-        rng = np.random.RandomState(42)
-        centers = [X[rng.randint(n)]]
-        for _ in range(k - 1):
-            dists = np.array([min(np.linalg.norm(x - c) ** 2 for c in centers) for x in X])
-            probs = dists / dists.sum()
-            centers.append(X[rng.choice(n, p=probs)])
-        centers = np.array(centers)
+        max_k = min(max_speakers, n - 1)
+        min_k = min(min_speakers, max_k)
 
-        labels = np.zeros(n, dtype=int)
-        for _ in range(max_iter):
-            dists = np.linalg.norm(X[:, None] - centers[None, :], axis=2)
-            new_labels = np.argmin(dists, axis=1)
-            if np.all(new_labels == labels):
-                break
-            labels = new_labels
-            for c in range(k):
-                if np.any(labels == c):
-                    centers[c] = X[labels == c].mean(axis=0)
+        best_k = min_k
+        best_score = -2.0
+        best_labels = None
 
-        return labels.tolist()
+        for k in range(min_k, max_k + 1):
+            try:
+                clusterer = AgglomerativeClustering(n_clusters=k, metric="cosine", linkage="average")
+                labels = clusterer.fit_predict(X_scaled)
+                score = silhouette_score(X_scaled, labels, metric="cosine")
+                logger.debug(f"AHC k={k}: silhouette={score:.3f}")
+                if score > best_score:
+                    best_score = score
+                    best_k = k
+                    best_labels = labels
+            except Exception as err:
+                logger.debug(f"Clustering with k={k} skipped: {err}")
+                continue
+
+        if best_labels is None:
+            best_labels = np.zeros(n, dtype=int)
+        else:
+            logger.info(f"Optimal speaker clusters: {best_k} (silhouette={best_score:.3f})")
+
+        return best_labels.tolist()
 
     def _assign_single_speaker(self, state: PipelineState) -> None:
         """Last-resort: assign everything to SPEAKER_00."""
         spk = "SPEAKER_00"
         for item in state.active_dialogues():
             item.speaker_id = spk
-        state.speakers[spk] = SpeakerInfo(speaker_id=spk)
+        state.speakers = {spk: SpeakerInfo(speaker_id=spk)}
         logger.warning("Using single-speaker assignment (feature extraction failed).")

@@ -46,8 +46,10 @@ class VADDetector:
             segments = self._detect_scipy(audio_path, threshold, min_speech_ms, min_silence_ms)
 
         tot_dur = state.video_duration if state.video_duration > 0 else 999999.0
-        segments = self._add_padding(segments, padding_ms, tot_dur)
+        # 1. Merge micro-pauses within the same phrase first
         segments = self._merge_segments(segments, merge_gap_ms)
+        # 2. Apply smart pre-roll / post-roll padding with midpoint collision avoidance
+        segments = self._apply_smart_padding(segments, padding_ms, tot_dur)
         
         state.dialogues.clear()
         speaker_id = "SPEAKER_UNKNOWN"
@@ -141,12 +143,15 @@ class VADDetector:
         return segments
 
     def _merge_segments(self, segments: List[Tuple[float, float]], gap_ms: int) -> List[Tuple[float, float]]:
-        if not segments: return []
+        if not segments:
+            return []
         
+        # Ensure chronological order
+        sorted_segs = sorted(segments, key=lambda x: x[0])
         gap_sec = gap_ms / 1000.0
-        merged = [segments[0]]
+        merged = [sorted_segs[0]]
         
-        for current in segments[1:]:
+        for current in sorted_segs[1:]:
             prev = merged[-1]
             if current[0] - prev[1] <= gap_sec:
                 merged[-1] = (prev[0], max(prev[1], current[1]))
@@ -155,12 +160,56 @@ class VADDetector:
                 
         return merged
 
-    def _add_padding(self, segments: List[Tuple[float, float]], pad_ms: int, total_duration: float) -> List[Tuple[float, float]]:
-        pad_sec = pad_ms / 1000.0
+    def _apply_smart_padding(self, segments: List[Tuple[float, float]], pad_ms: int, total_duration: float) -> List[Tuple[float, float]]:
+        """
+        Applies lead-in and lead-out silence padding for voice dubbing.
+        To avoid clipping speech or creating overlaps, if adjacent segments are closer
+        than 2 * pad_sec, boundary points are clamped to the exact midpoint between them.
+        """
+        if not segments:
+            return []
+            
+        pad_sec = max(0.0, pad_ms / 1000.0)
         padded = []
-        for start, end in segments:
-            n_start = max(0.0, start - pad_sec)
-            n_end = min(total_duration, end + pad_sec)
-            padded.append((n_start, max(n_start + 0.1, n_end)))
+        n = len(segments)
+        
+        for i in range(n):
+            start, end = segments[i]
+            
+            # Left padding (pre-roll / lead-in breath)
+            if i == 0:
+                p_start = max(0.0, start - pad_sec)
+            else:
+                prev_end = segments[i - 1][1]
+                gap_prev = start - prev_end
+                if gap_prev <= 0:
+                    p_start = start
+                elif gap_prev < 2 * pad_sec:
+                    p_start = prev_end + (gap_prev / 2.0)
+                else:
+                    p_start = start - pad_sec
+            
+            # Right padding (post-roll / lead-out trailing silence)
+            if i == n - 1:
+                p_end = min(total_duration, end + pad_sec)
+            else:
+                next_start = segments[i + 1][0]
+                gap_next = next_start - end
+                if gap_next <= 0:
+                    p_end = end
+                elif gap_next < 2 * pad_sec:
+                    p_end = end + (gap_next / 2.0)
+                else:
+                    p_end = end + pad_sec
+                    
+            p_start = round(p_start, 3)
+            p_end = round(max(p_start + 0.1, p_end), 3)
+            padded.append((p_start, p_end))
+            
         return padded
+
+    def _add_padding(self, segments: List[Tuple[float, float]], pad_ms: int, total_duration: float) -> List[Tuple[float, float]]:
+        """Backward compatibility alias for _apply_smart_padding."""
+        return self._apply_smart_padding(segments, pad_ms, total_duration)
+
 

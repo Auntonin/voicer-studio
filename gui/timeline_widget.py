@@ -12,7 +12,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QCursor, QFontMetrics, QLinearGradient
 
 from core.models import PipelineState, DialogueItem
-from config import COLORS
+from config import COLORS, SPEAKER_PALETTE
 
 
 class TimelineWidget(QWidget):
@@ -48,17 +48,9 @@ class TimelineWidget(QWidget):
         self._pan_start_h = 0
         self._pan_start_v = 0
 
-        # Distinct colors for each speaker track (clearly separated on timeline)
-        self.colors = [
-            "#2563EB",  # Speaker 1: Royal Studio Blue
-            "#059669",  # Speaker 2: Emerald Green
-            "#D97706",  # Speaker 3: Warm Amber / Gold
-            "#7C3AED",  # Speaker 4: Studio Violet
-            "#E11D48",  # Speaker 5: Rose Crimson
-            "#0891B2",  # Speaker 6: Ocean Teal
-            "#4F46E5",  # Speaker 7: Deep Indigo
-            "#D946EF",  # Speaker 8: Vivid Magenta
-        ]
+        # Distinct colors for each speaker track (unified with speaker panel)
+        self.colors = list(SPEAKER_PALETTE)
+
 
         # Professional NLE Track layout parameters
         self.HEADER_WIDTH = 136

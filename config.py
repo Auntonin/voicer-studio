@@ -50,16 +50,20 @@ IMAGE_MOTION_BLUR_THRESHOLD = 100  # Laplacian variance threshold
 
 
 # ── VAD Defaults ─────────────────────────────────────────────────────────────
-# Tuned for game dubbing: aggressive splitting so each short phrase = one clip
+# Tuned for game dubbing: pre-roll lead-in and post-roll lead-out so speech is centered
 VAD_THRESHOLD = 0.3                # Tuned for game/anime dubbing: detect speech over BGM
 VAD_MIN_SPEECH_DURATION_MS = 200   # Minimum speech duration to keep (shorter = more splits)
 VAD_MIN_SILENCE_DURATION_MS = 200  # Silence gap that triggers a split (shorter = more clips)
-VAD_PADDING_MS = 80                # Padding before/after each segment (shorter = tighter clips)
+VAD_PADDING_MS = 350               # 350ms (0.35s) lead-in and lead-out padding for dubbing breathing space
 VAD_MERGE_GAP_MS = 120             # ONLY merge if gap < 120ms (breathing/pop sounds)
+
 # Note: raise VAD_MERGE_GAP_MS in Settings if you want longer sentences per clip
 
 # ── Diarization ────────────────────────────────────────────────────────────────
 DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+DIARIZATION_MAX_SPEAKERS = 8
+DIARIZATION_MIN_SPEAKERS = 2
+
 
 # ── Transcription & Thai Dubbing Defaults ──────────────────────────────────────
 WHISPER_MODEL_DEFAULT = "medium"
@@ -133,4 +137,20 @@ COLORS = {
     "timeline_seg":   "#1473E6",
     "timeline_bg":    "#1e1e1e",
 }
+
+# ── Unified Speaker Color Palette ─────────────────────────────────────────────
+# 1:1 color synchronization across Timeline tracks, Speaker List, and Dialogue cards
+SPEAKER_PALETTE = [
+    "#2563EB",  # A1: Royal Studio Blue
+    "#10B981",  # A2: Emerald Green
+    "#F59E0B",  # A3: Warm Amber / Gold
+    "#8B5CF6",  # A4: Studio Purple / Violet
+    "#EF4444",  # A5: Coral Red / Crimson
+    "#06B6D4",  # A6: Ocean Cyan / Teal
+    "#EC4899",  # A7: Vivid Pink / Magenta
+    "#84CC16",  # A8: Lime Green
+    "#F97316",  # A9: Bright Tangerine Orange
+    "#6366F1",  # A10: Deep Indigo
+]
+
 

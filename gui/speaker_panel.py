@@ -5,7 +5,8 @@ from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QIcon
 
 from core.models import PipelineState, SpeakerInfo
-from config import COLORS, ASSETS_DIR
+from config import COLORS, ASSETS_DIR, SPEAKER_PALETTE
+
 
 
 class SpeakerListWidget(QListWidget):
@@ -96,11 +97,9 @@ class SpeakerPanel(QWidget):
         self.list_widget.items_reordered.connect(self._on_items_reordered)
         self.layout.addWidget(self.list_widget)
         
-        # Color palette for speakers
-        self.colors = [
-            COLORS['accent'], "#10b981", "#f59e0b", "#ef4444", "#a855f7",
-            "#06b6d4", "#ec4899", "#84cc16", "#14b8a6", "#f97316"
-        ]
+        # Color palette for speakers (unified with timeline)
+        self.colors = list(SPEAKER_PALETTE)
+
 
     def populate(self, state: PipelineState):
         self.state = state

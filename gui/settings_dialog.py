@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from config import WHISPER_INITIAL_PROMPT_THAI
+from config import WHISPER_INITIAL_PROMPT_THAI, VAD_PADDING_MS, DIARIZATION_MAX_SPEAKERS
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -28,6 +28,12 @@ class SettingsDialog(QDialog):
         hf_layout.addWidget(self.edit_hf)
         hf_layout.addWidget(self.btn_test_hf)
         form_ai.addRow("Hugging Face Token:", hf_layout)
+
+        self.spin_max_speakers = QSpinBox()
+        self.spin_max_speakers.setRange(2, 16)
+        self.spin_max_speakers.setValue(DIARIZATION_MAX_SPEAKERS)
+        self.spin_max_speakers.setSuffix(" speakers")
+        form_ai.addRow("Max Speakers:", self.spin_max_speakers)
         
         self.combo_whisper = QComboBox()
         self.combo_whisper.addItems(["tiny", "base", "small", "medium", "large-v3"])
@@ -71,7 +77,7 @@ class SettingsDialog(QDialog):
         form_proc.addRow("VAD Threshold:", vad_layout)
         
         self.spin_pad = QSpinBox()
-        self.spin_pad.setRange(0, 500)
+        self.spin_pad.setRange(0, 1000)
         self.spin_pad.setSuffix(" ms")
         form_proc.addRow("VAD Padding:", self.spin_pad)
         
@@ -232,9 +238,10 @@ class SettingsDialog(QDialog):
         vad = int(settings.get("vad_threshold", 0.5) * 100)
         self.slider_vad.setValue(max(10, min(90, vad)))
         self.lbl_vad.setText(f"{vad/100:.2f}")
-        self.spin_pad.setValue(settings.get("vad_padding_ms", 80))
+        self.spin_pad.setValue(settings.get("vad_padding_ms", VAD_PADDING_MS))
         self.spin_gap.setValue(settings.get("vad_merge_gap_ms", 120))
         self.spin_img.setValue(settings.get("image_quality", 95))
+        self.spin_max_speakers.setValue(settings.get("max_speakers", DIARIZATION_MAX_SPEAKERS))
         
         bitrate = settings.get("audio_bitrate", "192k")
         br_idx = self.combo_bitrate.findText(bitrate)
@@ -282,6 +289,7 @@ class SettingsDialog(QDialog):
             "vad_threshold":          self.slider_vad.value() / 100.0,
             "vad_padding_ms":         self.spin_pad.value(),
             "vad_merge_gap_ms":       self.spin_gap.value(),
+            "max_speakers":           self.spin_max_speakers.value(),
             "image_quality":          self.spin_img.value(),
             "audio_bitrate":          self.combo_bitrate.currentText(),
             "thai_dubbing_opt":       self.chk_thai_opt.isChecked(),

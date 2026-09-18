@@ -183,8 +183,15 @@ class PipelineWorker(QThread):
             diarizer = SpeakerDiarizer(
                 hf_token=self.options.get("hf_token", ""),
                 device=self.options.get("device", "auto"),
+                min_speakers=self.options.get("min_speakers", 2),
+                max_speakers=self.options.get("max_speakers", 8),
             )
-            diarizer.diarize(self.state.work_audio_path, self.state)
+            diarizer.diarize(
+                self.state.work_audio_path,
+                self.state,
+                min_speakers=self.options.get("min_speakers", 2),
+                max_speakers=self.options.get("max_speakers", 8),
+            )
             n_speakers = len(self.state.speakers)
             speaker_list = ", ".join(sorted(self.state.speakers.keys()))
             self._log(f"Found {n_speakers} speaker(s): {speaker_list}", "ok")
@@ -619,7 +626,13 @@ class ExportWorker(QThread):
 
 def build_options_from_settings(settings: dict) -> dict:
     """Convert settings.json dict to pipeline options dict."""
-    from config import WHISPER_INITIAL_PROMPT_THAI
+    from config import (
+        WHISPER_INITIAL_PROMPT_THAI,
+        VAD_PADDING_MS,
+        VAD_MERGE_GAP_MS,
+        DIARIZATION_MAX_SPEAKERS,
+        DIARIZATION_MIN_SPEAKERS,
+    )
     return {
         "hf_token":                  settings.get("hf_token", ""),
         "whisper_model":             settings.get("whisper_model", WHISPER_MODEL_DEFAULT),
@@ -629,8 +642,10 @@ def build_options_from_settings(settings: dict) -> dict:
         "voice_sep_mode":            settings.get("voice_sep_mode", VoiceSepMode.ORIGINAL),
         "timestamp_mode":            settings.get("timestamp_mode", TIMESTAMP_MODE_DEFAULT),
         "vad_threshold":             settings.get("vad_threshold", 0.5),
-        "vad_padding_ms":            settings.get("vad_padding_ms", 80),
-        "vad_merge_gap_ms":          settings.get("vad_merge_gap_ms", 120),
+        "vad_padding_ms":            settings.get("vad_padding_ms", VAD_PADDING_MS),
+        "vad_merge_gap_ms":          settings.get("vad_merge_gap_ms", VAD_MERGE_GAP_MS),
+        "max_speakers":              settings.get("max_speakers", DIARIZATION_MAX_SPEAKERS),
+        "min_speakers":              settings.get("min_speakers", DIARIZATION_MIN_SPEAKERS),
         "include_dub_video":         settings.get("include_dub_video", True),
         "output_dir":                settings.get("output_dir", ""),
         "audio_bitrate":             settings.get("audio_bitrate", "256k"),
