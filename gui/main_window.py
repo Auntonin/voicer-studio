@@ -480,39 +480,80 @@ class MainWindow(QMainWindow):
         def v_sep():
             sep = QFrame()
             sep.setFrameShape(QFrame.Shape.VLine)
-            sep.setFrameShadow(QFrame.Shadow.Sunken)
-            sep.setStyleSheet("color: #444444; margin: 2px 4px;")
+            sep.setFixedWidth(1)
+            sep.setFixedHeight(18)
+            sep.setStyleSheet("background-color: #383838; border: none; margin: 4px 6px;")
             return sep
 
-        # Track & Clip manual management buttons with professional CapCut icons
-        def icon_btn(text: str, icon_file: str, tip: str = "", compact: bool = False) -> QPushButton:
+        # CapCut Style minimal flat toolbar buttons with clear hotkey tooltips
+        def capcut_btn(text: str, icon_file: str, tip: str = "", compact: bool = False) -> QPushButton:
             b = QPushButton(text if not compact else "")
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             path = ASSETS_DIR / "icons" / icon_file
             if path.exists():
                 b.setIcon(QIcon(str(path)))
-                b.setIconSize(QSize(14, 14))
+                b.setIconSize(QSize(18, 18) if compact else QSize(14, 14))
             if tip:
                 b.setToolTip(tip)
             if compact:
-                b.setFixedSize(30, 26)
+                b.setFixedSize(32, 28)
+                b.setStyleSheet("""
+                    QPushButton {
+                        background-color: transparent;
+                        border: none;
+                        border-radius: 5px;
+                        padding: 3px;
+                    }
+                    QPushButton:hover {
+                        background-color: rgba(255, 255, 255, 0.12);
+                    }
+                    QPushButton:pressed {
+                        background-color: rgba(255, 255, 255, 0.22);
+                    }
+                    QPushButton:disabled {
+                        background-color: transparent;
+                        opacity: 0.35;
+                    }
+                """)
+            else:
+                b.setFixedHeight(28)
+                b.setStyleSheet("""
+                    QPushButton {
+                        background-color: transparent;
+                        border: 1px solid #383838;
+                        border-radius: 5px;
+                        padding: 3px 10px;
+                        color: #cccccc;
+                        font-size: 8.5pt;
+                        font-weight: 500;
+                    }
+                    QPushButton:hover {
+                        background-color: rgba(255, 255, 255, 0.10);
+                        border-color: #555555;
+                        color: #ffffff;
+                    }
+                    QPushButton:pressed {
+                        background-color: rgba(255, 255, 255, 0.20);
+                    }
+                """)
             return b
 
         # CapCut Style Quick Edit Tools:
-        btn_tl_undo       = icon_btn("", "undo.svg", "Undo (Ctrl+Z)", compact=True)
-        btn_tl_redo       = icon_btn("", "redo.svg", "Redo (Ctrl+Y)", compact=True)
+        btn_tl_undo       = capcut_btn("", "undo.svg", "Undo (Ctrl+Z)", compact=True)
+        btn_tl_redo       = capcut_btn("", "redo.svg", "Redo (Ctrl+Y)", compact=True)
 
-        btn_tl_split      = icon_btn("", "split.svg", "Split clip at playhead (S / Ctrl+B)", compact=True)
-        btn_tl_trim_left  = icon_btn("", "trim-left.svg", "Delete left to playhead (Q)", compact=True)
-        btn_tl_trim_right = icon_btn("", "trim-right.svg", "Delete right from playhead (W)", compact=True)
-        btn_tl_del_clip   = icon_btn("", "trash.svg", "Delete selected clip (Del)", compact=True)
+        btn_tl_split      = capcut_btn("", "split.svg", "Split at Playhead (S / Ctrl+B)", compact=True)
+        btn_tl_trim_left  = capcut_btn("", "trim-left.svg", "Delete Left to Playhead (Q)", compact=True)
+        btn_tl_trim_right = capcut_btn("", "trim-right.svg", "Delete Right from Playhead (W)", compact=True)
+        btn_tl_del_clip   = capcut_btn("", "trash.svg", "Delete Selected Clip (Del)", compact=True)
 
-        btn_tl_add_track  = icon_btn("Add Track", "plus.svg", "Add new character track with custom name")
-        btn_tl_add_clip   = icon_btn("Add Clip", "clip.svg", "Add new audio clip at playhead")
+        btn_tl_add_track  = capcut_btn("Add Track", "plus.svg", "Add Character Track (+)")
+        btn_tl_add_clip   = capcut_btn("Add Clip", "clip.svg", "Add Dialogue Clip at Playhead")
 
-        btn_tl_play    = icon_btn("Play", "play.svg", "Play/Pause timeline audio (Space)")
-        btn_tl_stop    = icon_btn("Stop", "stop.svg", "Stop playback")
-        btn_tl_zoomin  = icon_btn("Zoom In", "zoom-in.svg", "Zoom In Timeline (+)")
-        btn_tl_zoomout = icon_btn("Zoom Out", "zoom-out.svg", "Zoom Out Timeline (-)")
+        btn_tl_play    = capcut_btn("Play", "play.svg", "Play / Pause Timeline (Space)")
+        btn_tl_stop    = capcut_btn("Stop", "stop.svg", "Stop Playback")
+        btn_tl_zoomin  = capcut_btn("Zoom In", "zoom-in.svg", "Zoom In Timeline (+ / =)")
+        btn_tl_zoomout = capcut_btn("Zoom Out", "zoom-out.svg", "Zoom Out Timeline (-)")
 
         tl_header.addWidget(btn_tl_undo)
         tl_header.addWidget(btn_tl_redo)
