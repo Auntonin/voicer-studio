@@ -8,10 +8,35 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QUrl, QTimer, QSize
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtGui import QPixmap, QImage, QIcon
+from PySide6.QtGui import QPixmap, QImage, QIcon, QTextCursor
 
 from core.models import DialogueItem, PipelineState
 from config import COLORS, ASSETS_DIR
+
+
+class CaptionTextEdit(QPlainTextEdit):
+    """QPlainTextEdit subclass that ensures Ctrl+Z, Ctrl+Y, and Ctrl+Shift+Z are reliably handled for caption undo/redo."""
+    def keyPressEvent(self, event):
+        mods = event.modifiers()
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Z:
+                if mods & Qt.KeyboardModifier.ShiftModifier:
+                    if self.document().isRedoAvailable():
+                        self.redo()
+                        event.accept()
+                        return
+                else:
+                    if self.document().isUndoAvailable():
+                        self.undo()
+                        event.accept()
+                        return
+            elif event.key() == Qt.Key.Key_Y:
+                if self.document().isRedoAvailable():
+                    self.redo()
+                    event.accept()
+                    return
+        super().keyPressEvent(event)
+
 
 class ClipEditor(QWidget):
     caption_changed = Signal(int, str)
@@ -229,8 +254,8 @@ class ClipEditor(QWidget):
         cap_header.addWidget(self.btn_regen_caption)
         cc_layout.addLayout(cap_header)
 
-        # Minimalist Adobe Dark Text Area
-        self.txt_caption = QPlainTextEdit()
+        # Minimalist Adobe Dark Text Area with full Undo/Redo support
+        self.txt_caption = CaptionTextEdit()
         self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
         self.txt_caption.setMinimumHeight(64)
         self.txt_caption.setMaximumHeight(74)
@@ -343,7 +368,13 @@ class ClipEditor(QWidget):
             QTimer.singleShot(1200, lambda: self.btn_copy.setText("Copy"))
 
     def _on_clear_caption(self):
-        self.txt_caption.clear()
+        text = self.txt_caption.toPlainText()
+        if not text:
+            return
+        cursor = self.txt_caption.textCursor()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.removeSelectedText()
+        self.txt_caption.setFocus()
         self._auto_save_caption()
 
     def _auto_save_caption(self):
@@ -351,8 +382,9 @@ class ClipEditor(QWidget):
             return
         new_text = self.txt_caption.toPlainText()
         if self.item.caption != new_text:
-            self.item.caption = new_text
+            # Emit signal first so MainWindow can snapshot the previous state for undo!
             self.caption_changed.emit(self.item.index, new_text)
+            self.item.caption = new_text
 
     def _on_speaker_changed(self, idx: int):
         if self._is_loading or not self.item:

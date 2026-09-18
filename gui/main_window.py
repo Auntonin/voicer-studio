@@ -770,12 +770,28 @@ class MainWindow(QMainWindow):
     # ── Undo / Redo Actions ──────────────────────────────────────────────────
 
     def on_undo(self):
+        # 1. Prioritize caption text editor undo if active or has pending text undo
+        if hasattr(self, '_clip_editor') and self._clip_editor.txt_caption.document().isUndoAvailable():
+            focus = QApplication.focusWidget()
+            if focus and (focus == self._clip_editor.txt_caption or self._clip_editor.isAncestorOf(focus)):
+                self._clip_editor.txt_caption.undo()
+                return
+
+        # 2. Global Pipeline / Project Undo
         if self._undo_manager.undo(self._state):
             self._mark_dirty(True)
             self._refresh_all_views()
             self._log_message("Undo executed", "info")
 
     def on_redo(self):
+        # 1. Prioritize caption text editor redo if active or has pending text redo
+        if hasattr(self, '_clip_editor') and self._clip_editor.txt_caption.document().isRedoAvailable():
+            focus = QApplication.focusWidget()
+            if focus and (focus == self._clip_editor.txt_caption or self._clip_editor.isAncestorOf(focus)):
+                self._clip_editor.txt_caption.redo()
+                return
+
+        # 2. Global Pipeline / Project Redo
         if self._undo_manager.redo(self._state):
             self._mark_dirty(True)
             self._refresh_all_views()
@@ -984,6 +1000,14 @@ class MainWindow(QMainWindow):
         self._pack_info_panel.populate(self._state)
         self._update_toolbar_state()
 
+        # Keep active clip in clip editor in sync with restored state
+        if hasattr(self, '_clip_editor') and self._clip_editor.item:
+            cur_idx = self._clip_editor.item.index
+            for d in self._state.active_dialogues():
+                if d.index == cur_idx:
+                    self._clip_editor.load_item(d, self._state)
+                    break
+
     def _on_dialogue_deleted(self, idx: int):
         self._push_undo()
         for item in self._state.dialogues:
@@ -1032,9 +1056,12 @@ class MainWindow(QMainWindow):
         self._refresh_all_views()
 
     def _on_caption_changed(self, idx: int, text: str):
-        self._push_undo()
         for d in self._state.active_dialogues():
             if d.index == idx:
+                if d.caption == text:
+                    return
+                # Push snapshot of previous state before mutating caption
+                self._push_undo()
                 d.caption = text
                 break
         self._mark_dirty(True)
