@@ -7,9 +7,14 @@ from pathlib import Path
 
 from core.models import PipelineState
 from config import COLORS
+from gui.ui_utils import apply_dark_title_bar
 
 class PreviewDialog(QDialog):
     export_confirmed = Signal(str)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        apply_dark_title_bar(self)
 
     def __init__(self, parent=None):
         super().__init__(parent)

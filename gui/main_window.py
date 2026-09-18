@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QSplitter, QLabel, QPushButton, QToolBar, QStatusBar,
     QFileDialog, QFrame, QSizePolicy, QTextEdit, QPlainTextEdit, QLineEdit,
     QProgressBar, QApplication, QTabWidget, QMenuBar, QMenu,
-    QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog
+    QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog,
+    QToolTip
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation
 from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette, QKeySequence, QShortcut
@@ -39,6 +40,7 @@ from gui.pack_info_panel import PackInfoPanel
 from gui.settings_dialog import SettingsDialog
 from gui.preview_dialog import PreviewDialog
 from gui.video_panel import VideoPanel
+from gui.ui_utils import apply_dark_title_bar
 
 
 class MainWindow(QMainWindow):
@@ -46,12 +48,24 @@ class MainWindow(QMainWindow):
     Top-level application window — fully connected to pipeline, timeline, and video player.
     """
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        apply_dark_title_bar(self)
+
+    def _apply_dark_title_bar(self):
+        apply_dark_title_bar(self)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.setStyleSheet(self._build_stylesheet())
         self.setAcceptDrops(True)
+
+        tip_pal = QToolTip.palette()
+        tip_pal.setColor(QPalette.ColorRole.ToolTipBase, QColor("#18181b"))
+        tip_pal.setColor(QPalette.ColorRole.ToolTipText, QColor("#e4e4e7"))
+        QToolTip.setPalette(tip_pal)
 
         ico_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.ico"
         png_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
@@ -327,7 +341,7 @@ class MainWindow(QMainWindow):
 
         # Help Menu
         menu_help = menubar.addMenu("Help")
-        act_shortcuts_help = menu_help.addAction("⌨️ Keyboard Shortcuts...")
+        act_shortcuts_help = menu_help.addAction("Keyboard Shortcuts...")
         act_shortcuts_help.setShortcut("F1")
         act_shortcuts_help.triggered.connect(self._show_shortcuts_dialog)
 
@@ -545,21 +559,20 @@ class MainWindow(QMainWindow):
         # Minimal info/keyboard shortcut button (hover shows clean cheat-sheet, click opens full shortcuts dialog)
         btn_tl_shortcuts = capcut_btn("", "keyboard.svg", "", compact=True)
         btn_tl_shortcuts.setToolTip(
-            '<div style="font-family: Segoe UI, sans-serif; padding: 4px;">'
-            '<b style="font-size: 9pt; color: #38BDF8;">⌨️ Timeline Shortcuts & Gestures</b><br/>'
-            '<hr style="border: none; border-top: 1px solid #444; margin: 4px 0;" />'
-            '<table cellpadding="1" cellspacing="0" style="font-size: 8.5pt; color: #e0e0e0;">'
-            '<tr><td><b style="color:#58a6ff;">Space</b></td><td style="color:#aaa;">&nbsp; Play / Pause Timeline</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">S</b> / <b style="color:#58a6ff;">Ctrl+B</b></td><td style="color:#aaa;">&nbsp; Split Clip at Playhead</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">Q</b></td><td style="color:#aaa;">&nbsp; Delete Left to Playhead</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">W</b></td><td style="color:#aaa;">&nbsp; Delete Right from Playhead</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">Del</b></td><td style="color:#aaa;">&nbsp; Delete Selected Clip</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">Ctrl+Z / Ctrl+Y</b></td><td style="color:#aaa;">&nbsp; Undo / Redo</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">Ctrl + Wheel</b></td><td style="color:#aaa;">&nbsp; Zoom at Cursor</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">Shift + Wheel</b></td><td style="color:#aaa;">&nbsp; Scroll Horizontally</td></tr>'
-            '<tr><td><b style="color:#58a6ff;">MMB Drag</b></td><td style="color:#aaa;">&nbsp; Pan Canvas 2D</td></tr>'
+            '<div style="background-color: #18181b; color: #e4e4e7; font-family: Segoe UI, system-ui, sans-serif; padding: 6px 10px; border-radius: 6px;">'
+            '<div style="font-size: 8.5pt; font-weight: bold; color: #ffffff; margin-bottom: 6px; letter-spacing: 0.3px;">TIMELINE SHORTCUTS &amp; GESTURES</div>'
+            '<table cellpadding="2" cellspacing="0" style="font-size: 8pt; color: #e4e4e7;">'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Space</span></td><td style="color:#a1a1aa;">Play / Pause Timeline</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">S</span> / <span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+B</span></td><td style="color:#a1a1aa;">Split Clip at Playhead</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Q</span></td><td style="color:#a1a1aa;">Delete Left to Playhead</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">W</span></td><td style="color:#a1a1aa;">Delete Right from Playhead</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Del</span></td><td style="color:#a1a1aa;">Delete Selected Clip</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+Z</span> / <span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+Y</span></td><td style="color:#a1a1aa;">Undo / Redo</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl + Wheel</span></td><td style="color:#a1a1aa;">Zoom at Cursor</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Shift + Wheel</span></td><td style="color:#a1a1aa;">Scroll Horizontally</td></tr>'
+            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Middle Drag</span></td><td style="color:#a1a1aa;">Pan Canvas 2D</td></tr>'
             '</table>'
-            '<div style="margin-top: 6px; font-size: 7.5pt; color: #888888;">💡 Click to view all shortcuts (F1)</div>'
+            '<div style="margin-top: 8px; border-top: 1px solid #27272a; padding-top: 6px; font-size: 7.5pt; color: #71717a;">Click to open full shortcuts reference (F1)</div>'
             '</div>'
         )
         btn_tl_shortcuts.clicked.connect(self._show_shortcuts_dialog)
@@ -2074,5 +2087,14 @@ class MainWindow(QMainWindow):
         QTableCornerButton::section {{
             background-color: #222222;
             border: 1px solid #333333;
+        }}
+        QToolTip {{
+            background-color: #18181b;
+            color: #e4e4e7;
+            border: 1px solid #3f3f46;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 8.5pt;
         }}
         """

@@ -6,8 +6,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from config import WHISPER_INITIAL_PROMPT_THAI, VAD_PADDING_MS, DIARIZATION_MAX_SPEAKERS
+from gui.ui_utils import apply_dark_title_bar
 
 class SettingsDialog(QDialog):
+    def showEvent(self, event):
+        super().showEvent(event)
+        apply_dark_title_bar(self)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")

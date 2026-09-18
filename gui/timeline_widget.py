@@ -884,13 +884,13 @@ class TimelineWidget(QWidget):
                 if 0 <= track_idx < len(speakers_list) and self.state:
                     spk_id = speakers_list[track_idx]
                     spk_info = self.state.get_speaker(spk_id)
-                    act_rename = menu.addAction(f"✏️ Rename Character ('{spk_info.display_name}')...")
+                    act_rename = menu.addAction(f"Rename Character ('{spk_info.display_name}')...")
                     act_rename.triggered.connect(lambda s=spk_id: self._prompt_rename_track(s))
-                    act_del = menu.addAction(f"🗑️ Delete Track '{spk_info.display_name}'...")
+                    act_del = menu.addAction(f"Delete Track '{spk_info.display_name}'...")
                     act_del.triggered.connect(lambda s=spk_id: self.delete_track_requested.emit(s))
                     menu.addSeparator()
 
-                act_pin = menu.addAction("📌 Pin Tracks to Edge (Sticky / ตรึงติดขอบ)")
+                act_pin = menu.addAction("Pin Tracks to Edge (Sticky)")
                 act_pin.setCheckable(True)
                 act_pin.setChecked(self.sticky_headers)
                 act_pin.triggered.connect(self.toggle_sticky_headers)
@@ -906,17 +906,17 @@ class TimelineWidget(QWidget):
                     self.update()
 
                     menu = QMenu(self)
-                    act_split = menu.addAction("✂️ Split at Playhead (S)")
+                    act_split = menu.addAction("Split at Playhead (S)")
                     act_split.triggered.connect(lambda: self.split_at_playhead_requested.emit())
 
-                    act_tl = menu.addAction("⬅️ Delete Left to Playhead (Q)")
+                    act_tl = menu.addAction("Delete Left to Playhead (Q)")
                     act_tl.triggered.connect(lambda: self.trim_left_requested.emit())
 
-                    act_tr = menu.addAction("➡️ Delete Right to Playhead (W)")
+                    act_tr = menu.addAction("Delete Right to Playhead (W)")
                     act_tr.triggered.connect(lambda: self.trim_right_requested.emit())
 
                     menu.addSeparator()
-                    act_del = menu.addAction("🗑️ Delete Clip (Del)")
+                    act_del = menu.addAction("Delete Clip (Del)")
                     act_del.triggered.connect(lambda: self.delete_requested.emit(item.index))
 
                     menu.exec(event.globalPosition().toPoint())

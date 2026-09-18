@@ -393,7 +393,7 @@ class ClipEditor(QWidget):
         if new_spk and new_spk != self.item.speaker_id:
             self.item.speaker_id = new_spk
             self.speaker_changed.emit(self.item.index, new_spk)
-            self._set_save_status("Auto-saved ✓")
+            self._set_save_status("Saved")
 
     def _auto_save_timing(self):
         if self._is_loading or not self.item:
@@ -404,7 +404,7 @@ class ClipEditor(QWidget):
             self.item.start = s
             self.item.end = e
             self.timestamps_changed.emit(self.item.index, s, e)
-        self._set_save_status("Auto-saved ✓")
+        self._set_save_status("Saved")
 
     def _set_save_status(self, text: str):
         pass
@@ -554,4 +554,4 @@ class ClipEditor(QWidget):
             self.caption_changed.emit(self.item.index, self.txt_caption.toPlainText())
             self.speaker_changed.emit(self.item.index, self.combo_speaker.currentData())
             self.timestamps_changed.emit(self.item.index, self.spin_start.value(), self.spin_end.value())
-            self._set_save_status("Auto-saved ✓")
+            self._set_save_status("Saved")

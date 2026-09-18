@@ -31,6 +31,7 @@ from config import COLORS, ASSETS_DIR, SUBPROCESS_FLAGS
 from core.models import PipelineState
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker
+from gui.ui_utils import apply_dark_title_bar
 
 
 class FullExportWorker(QThread):
@@ -97,6 +98,10 @@ class ExportDialog(QDialog):
     Modern Adobe-style Export Dialog.
     """
     SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        apply_dark_title_bar(self)
 
     def __init__(self, parent, state: PipelineState, settings: dict):
         super().__init__(parent)
@@ -266,7 +271,7 @@ class ExportDialog(QDialog):
         if pix:
             lbl_thumb.setPixmap(pix)
         else:
-            lbl_thumb.setText("🎬 Video")
+            lbl_thumb.setText("Video")
             lbl_thumb.setStyleSheet("background-color: #141414; border: 1px solid #282828; border-radius: 6px; color: #777777; font-weight: bold;")
         preview_row.addWidget(lbl_thumb)
 
@@ -469,7 +474,7 @@ class ExportDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
-        lbl_header = QLabel("✔ Export Completed Successfully!")
+        lbl_header = QLabel("Export Completed Successfully!")
         lbl_header.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
         lbl_header.setStyleSheet("color: #10B981;")
         lbl_sub = QLabel("Your dialogue pack is ready for game engine import or distribution.")
@@ -541,7 +546,7 @@ class ExportDialog(QDialog):
         if pix:
             self.lbl_prog_thumb.setPixmap(pix)
         else:
-            self.lbl_prog_thumb.setText("🎬")
+            self.lbl_prog_thumb.setText("Video")
             self.lbl_prog_thumb.setStyleSheet("background-color: #141414; border: 1px solid #282828; border-radius: 4px; color: #777777;")
         pack_title = self.state.pack_info.title or (self.state.video_path.stem if self.state.video_path else "Dialogue_Pack")
         self.lbl_prog_title.setText(pack_title)
