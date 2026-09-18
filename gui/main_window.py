@@ -517,6 +517,9 @@ class MainWindow(QMainWindow):
         self._timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         tl_layout.addWidget(self._timeline_scroll)
 
+        self._timeline.set_sticky_headers(self._settings.get("timeline_sticky_headers", True))
+        self._timeline.sticky_headers_toggled.connect(self._on_timeline_sticky_toggled)
+
         self._main_v_splitter.addWidget(self._timeline_container)
 
         # Connect Timeline Header buttons
@@ -1586,6 +1589,11 @@ class MainWindow(QMainWindow):
         if dlg.exec_():
             self._settings = dlg.get_settings()
             self._save_settings(self._settings)
+            self._timeline.set_sticky_headers(self._settings.get("timeline_sticky_headers", True))
+
+    def _on_timeline_sticky_toggled(self, is_sticky: bool):
+        self._settings["timeline_sticky_headers"] = is_sticky
+        self._save_settings(self._settings)
 
     def _load_settings(self) -> dict:
         if SETTINGS_FILE.exists():

@@ -100,6 +100,10 @@ class SettingsDialog(QDialog):
         self.combo_bitrate = QComboBox()
         self.combo_bitrate.addItems(["128k", "192k", "256k", "320k"])
         form_proc.addRow("Audio Bitrate:", self.combo_bitrate)
+
+        self.chk_sticky_headers = QCheckBox("Pin Speaker Track Headers (Sticky / ตรึงรายชื่อตัวละครติดขอบซ้าย)")
+        self.chk_sticky_headers.setChecked(True)
+        form_proc.addRow("Timeline:", self.chk_sticky_headers)
         
         self.tabs.addTab(tab_proc, "Processing")
 
@@ -171,6 +175,8 @@ class SettingsDialog(QDialog):
         if self.parent():
             self.parent()._settings = settings
             self.parent()._save_settings(settings)
+            if hasattr(self.parent(), "_timeline"):
+                self.parent()._timeline.set_sticky_headers(settings.get("timeline_sticky_headers", True))
 
     def _test_hf_token(self):
         token = self.edit_hf.text().strip()
@@ -248,6 +254,8 @@ class SettingsDialog(QDialog):
         if br_idx >= 0:
             self.combo_bitrate.setCurrentIndex(br_idx)
 
+        self.chk_sticky_headers.setChecked(settings.get("timeline_sticky_headers", True))
+
         # Thai Dubbing settings
         self.chk_thai_opt.setChecked(settings.get("thai_dubbing_opt", True))
         self.chk_clean_hallucinations.setChecked(settings.get("clean_hallucinations", True))
@@ -290,6 +298,7 @@ class SettingsDialog(QDialog):
             "vad_padding_ms":         self.spin_pad.value(),
             "vad_merge_gap_ms":       self.spin_gap.value(),
             "max_speakers":           self.spin_max_speakers.value(),
+            "timeline_sticky_headers": self.chk_sticky_headers.isChecked(),
             "image_quality":          self.spin_img.value(),
             "audio_bitrate":          self.combo_bitrate.currentText(),
             "thai_dubbing_opt":       self.chk_thai_opt.isChecked(),

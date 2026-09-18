@@ -26,6 +26,7 @@ class TimelineWidget(QWidget):
     delete_track_requested = Signal(str)
     add_clip_requested = Signal(str, float)
     tracks_reordered = Signal()
+    sticky_headers_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,6 +35,9 @@ class TimelineWidget(QWidget):
         self.current_time = 0.0
         self.pixels_per_second = 50.0
         self.selected_index = -1
+        self.sticky_headers = True
+        self._is_hovering_pin = False
+        self._scroll_connected = False
 
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -90,12 +94,48 @@ class TimelineWidget(QWidget):
                 return parent
         return None
 
-    def ensure_playhead_visible(self, margin: int = 60):
-        """Keep playhead in view when scrubbing near viewport edges."""
+    def set_sticky_headers(self, enabled: bool):
+        if self.sticky_headers != enabled:
+            self.sticky_headers = enabled
+            self.update()
+
+    def toggle_sticky_headers(self):
+        self.sticky_headers = not self.sticky_headers
+        self.sticky_headers_toggled.emit(self.sticky_headers)
+        self.update()
+
+    def _get_header_x(self) -> int:
+        if not self.sticky_headers:
+            return 0
         scroll_area = self._get_scroll_area()
         if scroll_area:
+            return scroll_area.horizontalScrollBar().value()
+        return 0
+
+    def _ensure_scroll_connected(self):
+        scroll_area = self._get_scroll_area()
+        if scroll_area and not self._scroll_connected:
+            scroll_area.horizontalScrollBar().valueChanged.connect(self._on_horizontal_scroll)
+            self._scroll_connected = True
+
+    def _on_horizontal_scroll(self, val: int):
+        if self.sticky_headers:
+            self.update()
+
+    def ensure_playhead_visible(self, margin: int = 60):
+        """Keep playhead in horizontal view when scrubbing near viewport edges without altering vertical scroll."""
+        scroll_area = self._get_scroll_area()
+        if scroll_area:
+            h_bar = scroll_area.horizontalScrollBar()
+            vp_w = scroll_area.viewport().width()
             px = int(self.HEADER_WIDTH + self.current_time * self.pixels_per_second)
-            scroll_area.ensureVisible(px, int(self.height() / 2), margin, 0)
+            cur_scroll_x = h_bar.value()
+
+            # Strictly adjust horizontal scroll ONLY; never disturb vertical Y scroll position!
+            if px < cur_scroll_x + margin:
+                h_bar.setValue(max(0, px - margin))
+            elif px > cur_scroll_x + vp_w - margin:
+                h_bar.setValue(min(h_bar.maximum(), px - vp_w + margin))
 
     def set_duration(self, d: float):
         self.duration = max(1.0, d)
@@ -249,6 +289,7 @@ class TimelineWidget(QWidget):
     # ── Painting ───────────────────────────────────────────────────────────────
 
     def paintEvent(self, event):
+        self._ensure_scroll_connected()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -472,25 +513,65 @@ class TimelineWidget(QWidget):
                 painter.drawLine(int(x), self.RULER_HEIGHT - 5, int(x), self.RULER_HEIGHT)
             t = round(t + minor_step, 4)
 
-        # 6. Left Track Header (Fixed Labels: A1, A2...)
-        header_rect = QRectF(0, 0, self.HEADER_WIDTH, self.height())
+        # 6. Left Track Header (Fixed Labels: A1, A2... or Sticky to Viewport Left Edge)
+        header_x = self._get_header_x()
+        header_rect = QRectF(header_x, 0, self.HEADER_WIDTH, self.height())
         painter.fillRect(header_rect, QColor("#222222"))
         painter.setPen(QPen(QColor("#383838"), 1))
-        painter.drawLine(self.HEADER_WIDTH, 0, self.HEADER_WIDTH, self.height())
+        painter.drawLine(int(header_x + self.HEADER_WIDTH), 0, int(header_x + self.HEADER_WIDTH), self.height())
+
+        # Subtle drop-shadow on right edge when sticky headers are scrolled
+        if self.sticky_headers and header_x > 0:
+            shadow_grad = QLinearGradient(header_x + self.HEADER_WIDTH, 0, header_x + self.HEADER_WIDTH + 8, 0)
+            shadow_grad.setColorAt(0.0, QColor(0, 0, 0, 130))
+            shadow_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+            painter.fillRect(QRectF(header_x + self.HEADER_WIDTH, 0, 8, self.height()), QBrush(shadow_grad))
 
         # Top-left corner cell
-        corner_rect = QRectF(0, 0, self.HEADER_WIDTH, self.RULER_HEIGHT)
+        corner_rect = QRectF(header_x, 0, self.HEADER_WIDTH, self.RULER_HEIGHT)
         painter.fillRect(corner_rect, QColor("#282828"))
         painter.setPen(QPen(QColor("#383838"), 1))
-        painter.drawLine(0, self.RULER_HEIGHT, self.HEADER_WIDTH, self.RULER_HEIGHT)
+        painter.drawLine(int(header_x), self.RULER_HEIGHT, int(header_x + self.HEADER_WIDTH), self.RULER_HEIGHT)
+        
         painter.setPen(QColor("#aaaaaa"))
         font_corner = QFont("Segoe UI", 8, QFont.Weight.Bold)
         painter.setFont(font_corner)
-        painter.drawText(corner_rect, Qt.AlignmentFlag.AlignCenter, "AUDIO TRACKS")
+        title_rect = QRectF(header_x + 8, 0, self.HEADER_WIDTH - 36, self.RULER_HEIGHT)
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "AUDIO TRACKS")
+
+        # Discreet Pin Button in Corner Cell
+        pin_btn_rect = QRectF(header_x + self.HEADER_WIDTH - 24, 4, 18, 20)
+        if getattr(self, "_is_hovering_pin", False):
+            painter.fillRect(pin_btn_rect, QColor(255, 255, 255, 30))
+            painter.setPen(QPen(QColor(255, 255, 255, 70), 1))
+            painter.drawRoundedRect(pin_btn_rect, 3, 3)
+
+        # Draw Pin Vector Icon
+        pin_center_x = header_x + self.HEADER_WIDTH - 15
+        pin_center_y = 14
+        painter.save()
+        painter.translate(pin_center_x, pin_center_y)
+        if self.sticky_headers:
+            # Active Sticky Pin (sleek studio cyan)
+            painter.setPen(QPen(QColor("#38BDF8"), 1.4))
+            painter.setBrush(QBrush(QColor("#0284C7")))
+            painter.rotate(30)
+            painter.drawRoundedRect(-4, -6, 8, 4, 1, 1)
+            painter.drawRect(-2, -2, 4, 3)
+            painter.drawLine(0, 1, 0, 6)
+        else:
+            # Inactive Pin (subtle muted outline)
+            painter.setPen(QPen(QColor("#666666"), 1.2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.rotate(30)
+            painter.drawRoundedRect(-4, -6, 8, 4, 1, 1)
+            painter.drawRect(-2, -2, 4, 3)
+            painter.drawLine(0, 1, 0, 6)
+        painter.restore()
 
         for spk_idx, spk_id in enumerate(speakers_list):
             y_top = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
-            row_rect = QRectF(0, y_top, self.HEADER_WIDTH, self.TRACK_HEIGHT)
+            row_rect = QRectF(header_x, y_top, self.HEADER_WIDTH, self.TRACK_HEIGHT)
 
             # Row background
             is_lifted = (spk_id == dragged_track_spk_id)
@@ -501,16 +582,16 @@ class TimelineWidget(QWidget):
             else:
                 painter.fillRect(row_rect, QColor("#242424"))
                 painter.setPen(QPen(QColor("#303030"), 1))
-                painter.drawLine(0, int(y_top + self.TRACK_HEIGHT), self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT))
+                painter.drawLine(int(header_x), int(y_top + self.TRACK_HEIGHT), int(header_x + self.HEADER_WIDTH), int(y_top + self.TRACK_HEIGHT))
 
             color_hex = self.colors[spk_idx % len(self.colors)]
             track_color = QColor(color_hex)
 
             # Left color indicator bar
-            painter.fillRect(QRectF(0, y_top, 4, self.TRACK_HEIGHT), track_color if not is_lifted else track_color.darker(160))
+            painter.fillRect(QRectF(header_x, y_top, 4, self.TRACK_HEIGHT), track_color if not is_lifted else track_color.darker(160))
 
             # Track badge (e.g. "A1", "A2")
-            badge_rect = QRectF(10, y_top + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
+            badge_rect = QRectF(header_x + 10, y_top + (self.TRACK_HEIGHT - 22) / 2, 28, 22)
             painter.setBrush(QBrush(QColor("#1a1a1a")))
             painter.setPen(QPen(track_color.lighter(115) if not is_lifted else track_color.darker(140), 1.5))
             painter.drawRoundedRect(badge_rect, 4, 4)
@@ -522,7 +603,7 @@ class TimelineWidget(QWidget):
 
             # Speaker Name
             spk_name = self.state.get_speaker(spk_id).display_name if self.state else spk_id
-            name_rect = QRectF(44, y_top + 6, self.HEADER_WIDTH - 48, 18)
+            name_rect = QRectF(header_x + 44, y_top + 6, self.HEADER_WIDTH - 48, 18)
             painter.setPen(QColor("#E0E0E0" if not is_lifted else "#555555"))
             font_name = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
             painter.setFont(font_name)
@@ -532,7 +613,7 @@ class TimelineWidget(QWidget):
 
             # Clip count subtitle
             count = sum(1 for d in (self.state.active_dialogues() if self.state else []) if d.speaker_id == spk_id)
-            sub_rect = QRectF(44, y_top + 25, self.HEADER_WIDTH - 48, 14)
+            sub_rect = QRectF(header_x + 44, y_top + 25, self.HEADER_WIDTH - 48, 14)
             painter.setPen(QColor("#888888" if not is_lifted else "#444444"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
@@ -612,14 +693,14 @@ class TimelineWidget(QWidget):
             min_ghost_y = float(self.RULER_HEIGHT)
             max_ghost_y = float(self.RULER_HEIGHT + max(0, len(speakers_list) - 1) * (self.TRACK_HEIGHT + self.TRACK_GAP))
             ghost_y = max(min_ghost_y, min(max_ghost_y, drag_y - self.TRACK_HEIGHT / 2.0))
-            ghost_rect = QRectF(2, ghost_y, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT)
+            ghost_rect = QRectF(header_x + 2, ghost_y, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT)
 
             # Multi-layer soft drop shadow (realistic 3D elevation indicating it is grabbed)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(QColor(0, 0, 0, 70)))
-            painter.drawRoundedRect(QRectF(4, ghost_y + 4, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), 6, 6)
+            painter.drawRoundedRect(QRectF(header_x + 4, ghost_y + 4, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), 6, 6)
             painter.setBrush(QBrush(QColor(0, 0, 0, 140)))
-            painter.drawRoundedRect(QRectF(3, ghost_y + 2, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), 6, 6)
+            painter.drawRoundedRect(QRectF(header_x + 3, ghost_y + 2, self.HEADER_WIDTH - 4, self.TRACK_HEIGHT), 6, 6)
 
             try:
                 g_spk_idx = speakers_list.index(drag_spk_id)
@@ -638,19 +719,19 @@ class TimelineWidget(QWidget):
             # Left color indicator strip (rounded corners on the left)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(g_color))
-            painter.drawRoundedRect(QRectF(2, ghost_y, 4, self.TRACK_HEIGHT), 2, 2)
+            painter.drawRoundedRect(QRectF(header_x + 2, ghost_y, 4, self.TRACK_HEIGHT), 2, 2)
 
             # Subtle Grip Handle Dots (6 dots: 2 columns x 3 rows) showing it is grabbed
             painter.setBrush(QBrush(QColor(180, 180, 180, 200)))
-            grip_x1 = 9.0
-            grip_x2 = 13.0
+            grip_x1 = header_x + 9.0
+            grip_x2 = header_x + 13.0
             for dot_row in range(3):
                 dot_y = ghost_y + (self.TRACK_HEIGHT / 2.0) - 5.0 + (dot_row * 5.0)
                 painter.drawEllipse(QPointF(grip_x1, dot_y), 1.1, 1.1)
                 painter.drawEllipse(QPointF(grip_x2, dot_y), 1.1, 1.1)
 
             # Track badge (A1, A2...)
-            g_badge_rect = QRectF(18, ghost_y + (self.TRACK_HEIGHT - 22) / 2, 26, 22)
+            g_badge_rect = QRectF(header_x + 18, ghost_y + (self.TRACK_HEIGHT - 22) / 2, 26, 22)
             painter.setBrush(QBrush(QColor("#161616")))
             painter.setPen(QPen(g_color.lighter(115), 1.5))
             painter.drawRoundedRect(g_badge_rect, 4, 4)
@@ -661,7 +742,7 @@ class TimelineWidget(QWidget):
 
             # Speaker Name
             g_name = self.state.get_speaker(drag_spk_id).display_name if self.state else drag_spk_id
-            g_name_rect = QRectF(48, ghost_y + 7, self.HEADER_WIDTH - 52, 16)
+            g_name_rect = QRectF(header_x + 48, ghost_y + 7, self.HEADER_WIDTH - 52, 16)
             painter.setPen(QColor("#FFFFFF"))
             painter.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
             fm_gname = QFontMetrics(painter.font())
@@ -669,7 +750,7 @@ class TimelineWidget(QWidget):
             painter.drawText(g_name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_gname)
 
             # Subtitle
-            sub_rect = QRectF(48, ghost_y + 24, self.HEADER_WIDTH - 52, 14)
+            sub_rect = QRectF(header_x + 48, ghost_y + 24, self.HEADER_WIDTH - 52, 14)
             painter.setPen(QColor("#9E9E9E"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
@@ -681,24 +762,36 @@ class TimelineWidget(QWidget):
         if self._is_hovering_playhead:
             self._is_hovering_playhead = False
             self.update()
+        if self._is_hovering_pin:
+            self._is_hovering_pin = False
+            self.update()
         super().leaveEvent(event)
 
     def _hit_test(self, x: float, y: float) -> Tuple[Optional[str], Optional[DialogueItem]]:
-        """Returns (mode, dialogue_item) where mode in ['playhead', 'ruler', 'start', 'end', 'body', 'track', 'header']"""
-        if x < self.HEADER_WIDTH:
+        """Returns (mode, dialogue_item) where mode in ['playhead', 'ruler', 'start', 'end', 'body', 'track', 'header', 'pin_button']"""
+        header_x = self._get_header_x()
+
+        # 0. Check Pin Button in AUDIO TRACKS corner
+        if header_x + self.HEADER_WIDTH - 24 <= x <= header_x + self.HEADER_WIDTH - 4 and 4 <= y <= self.RULER_HEIGHT - 4:
+            return "pin_button", None
+
+        # 1. Left Track Header zone (or area behind sticky header)
+        if x < header_x + self.HEADER_WIDTH:
+            if y < self.RULER_HEIGHT:
+                return "header_corner", None
             return "header", None
 
         px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
 
-        # 1. Playhead handle grab zone (on ruler or top edge)
+        # 2. Playhead handle grab zone (on ruler or top edge)
         if abs(x - px) <= 8 and y <= self.RULER_HEIGHT + 4:
             return "playhead", None
 
-        # 2. Ruler area (clicking/dragging anywhere on ruler scrubs playhead)
+        # 3. Ruler area (clicking/dragging anywhere on ruler scrubs playhead)
         if y < self.RULER_HEIGHT:
             return "ruler", None
 
-        # 3. Clips on track lanes
+        # 4. Clips on track lanes
         speakers_list = self._get_speaker_list()
         t = (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)
 
@@ -719,17 +812,34 @@ class TimelineWidget(QWidget):
                     else:
                         return "body", item
 
-        # 4. Playhead vertical line over empty space
+        # 5. Playhead vertical line over empty space
         if abs(x - px) <= 6:
             return "playhead", None
 
-        # 5. Empty track area
+        # 6. Empty track area
         return "track", None
 
     def mousePressEvent(self, event):
         self.setFocus()
         if not self.state:
             return
+
+        x = event.pos().x()
+        y = event.pos().y()
+
+        # ── Right Click on Track Header: Context Menu with Sticky Pin toggle ──
+        if event.button() == Qt.MouseButton.RightButton:
+            header_x = self._get_header_x()
+            if header_x <= x < header_x + self.HEADER_WIDTH:
+                from PySide6.QtWidgets import QMenu
+                menu = QMenu(self)
+                act_pin = menu.addAction("📌 Pin Tracks to Edge (Sticky / ตรึงติดขอบ)")
+                act_pin.setCheckable(True)
+                act_pin.setChecked(self.sticky_headers)
+                act_pin.triggered.connect(self.toggle_sticky_headers)
+                menu.exec(event.globalPosition().toPoint())
+                event.accept()
+                return
 
         # ── Middle Mouse Button (MMB) 2D Pan ─────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -746,10 +856,11 @@ class TimelineWidget(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
-        x = event.pos().x()
-        y = event.pos().y()
-
         mode, item = self._hit_test(x, y)
+
+        if mode == "pin_button":
+            self.toggle_sticky_headers()
+            return
 
         if mode in ("playhead", "ruler", "track"):
             # Pause playback while scrubbing so it does not fight mouse dragging
@@ -883,30 +994,45 @@ class TimelineWidget(QWidget):
                         item.speaker_id = speakers_list[target_spk_idx]
             self.update()
         else:
+            header_x = self._get_header_x()
             px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
-            is_near_playhead = (abs(x - px) <= 8 and y <= self.RULER_HEIGHT + 6) or (abs(x - px) <= 5)
+            is_near_playhead = (px >= header_x + self.HEADER_WIDTH) and (
+                (abs(x - px) <= 8 and y <= self.RULER_HEIGHT + 6) or (abs(x - px) <= 5)
+            )
             if is_near_playhead != self._is_hovering_playhead:
                 self._is_hovering_playhead = is_near_playhead
                 self.update()
 
             mode, item = self._hit_test(x, y)
-            if mode in ("start", "end"):
-                self.setCursor(Qt.CursorShape.SizeHorCursor)  # Trim Cursor
-            elif mode == "body":
-                self.setCursor(Qt.CursorShape.OpenHandCursor)  # Hand grab cursor for clip
-            elif mode == "header":
-                self.setCursor(Qt.CursorShape.OpenHandCursor)  # Hand grab cursor for speaker track
-            elif mode == "playhead":
-                self.setCursor(Qt.CursorShape.SizeHorCursor)  # Playhead Drag Cursor
-            elif mode == "ruler":
-                self.setCursor(Qt.CursorShape.PointingHandCursor)  # Ruler Scrub Cursor
+            if mode == "pin_button":
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                tip_text = "Sticky Tracks: ON (Click to unpin) / ตรึงรายชื่อตัวละคร" if self.sticky_headers else "Sticky Tracks: OFF (Click to pin) / ตรึงรายชื่อตัวละคร"
+                QToolTip.showText(event.globalPosition().toPoint(), tip_text, self)
+                if not self._is_hovering_pin:
+                    self._is_hovering_pin = True
+                    self.update()
             else:
-                self.setCursor(Qt.CursorShape.ArrowCursor)
+                if self._is_hovering_pin:
+                    self._is_hovering_pin = False
+                    self.update()
+
+                if mode in ("start", "end"):
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)  # Trim Cursor
+                elif mode == "body":
+                    self.setCursor(Qt.CursorShape.OpenHandCursor)  # Hand grab cursor for clip
+                elif mode == "header":
+                    self.setCursor(Qt.CursorShape.OpenHandCursor)  # Hand grab cursor for speaker track
+                elif mode == "playhead":
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)  # Playhead Drag Cursor
+                elif mode == "ruler":
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)  # Ruler Scrub Cursor
+                else:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
 
             if item:
                 spk_name = self.state.get_speaker_safe_name(item.speaker_id)
                 QToolTip.showText(
-                    event.globalPos(),
+                    event.globalPosition().toPoint(),
                     f"Clip #{item.index:03d} — {spk_name}\nStart: {item.format_start()}  End: {item.format_end()}  (Duration: {item.duration:.2f}s)",
                     self
                 )
