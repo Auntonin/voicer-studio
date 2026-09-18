@@ -3,14 +3,15 @@ import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QComboBox, QPlainTextEdit, QDoubleSpinBox, QGridLayout, QFrame
+    QComboBox, QPlainTextEdit, QDoubleSpinBox, QGridLayout, QFrame,
+    QApplication
 )
-from PySide6.QtCore import Qt, Signal, QUrl, QTimer
+from PySide6.QtCore import Qt, Signal, QUrl, QTimer, QSize
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap, QImage, QIcon
 
 from core.models import DialogueItem, PipelineState
-from config import COLORS
+from config import COLORS, ASSETS_DIR
 
 class ClipEditor(QWidget):
     caption_changed = Signal(int, str)
@@ -192,30 +193,87 @@ class ClipEditor(QWidget):
         cap_card = QFrame()
         cap_card.setObjectName("editor_card")
         cc_layout = QVBoxLayout(cap_card)
-        cc_layout.setContentsMargins(10, 10, 10, 10)
-        cc_layout.setSpacing(6)
+        cc_layout.setContentsMargins(12, 10, 12, 10)
+        cc_layout.setSpacing(8)
 
+        # Header with title, active clip badge, live metrics, and AI Re-Transcribe
         cap_header = QHBoxLayout()
-        cap_header.addWidget(QLabel("DIALOGUE CAPTION TEXT", objectName="section_title"))
+        cap_header.setContentsMargins(0, 0, 0, 0)
+        cap_header.setSpacing(8)
+
+        lbl_title = QLabel("DIALOGUE CAPTION", objectName="section_title")
+        cap_header.addWidget(lbl_title)
+
+        self.lbl_clip_badge = QLabel("No Selection")
+        self.lbl_clip_badge.setStyleSheet(
+            "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #132338; "
+            "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
+        )
+        cap_header.addWidget(self.lbl_clip_badge)
+
         cap_header.addStretch()
+
+        self.lbl_caption_stats = QLabel("0 chars")
+        self.lbl_caption_stats.setStyleSheet(
+            "font-size: 8pt; color: #888888; margin-right: 4px;"
+        )
+        cap_header.addWidget(self.lbl_caption_stats)
+
         self.btn_regen_caption = QPushButton("Re-Transcribe")
+        self.btn_regen_caption.setToolTip("Re-transcribe this clip audio using Whisper AI")
+        sparkles_icon = ASSETS_DIR / "icons" / "sparkles.svg"
+        if sparkles_icon.exists():
+            self.btn_regen_caption.setIcon(QIcon(str(sparkles_icon)))
+            self.btn_regen_caption.setIconSize(QSize(13, 13))
         self.btn_regen_caption.clicked.connect(self.on_regen_caption)
         cap_header.addWidget(self.btn_regen_caption)
         cc_layout.addLayout(cap_header)
 
+        # Minimalist Adobe Dark Text Area
         self.txt_caption = QPlainTextEdit()
         self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
-        self.txt_caption.setMaximumHeight(62)
+        self.txt_caption.setMinimumHeight(64)
+        self.txt_caption.setMaximumHeight(74)
+        self.txt_caption.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: #171717;
+                color: #f3f4f6;
+                border: 1px solid #333333;
+                border-radius: 5px;
+                padding: 6px 8px;
+                font-size: 9.5pt;
+                line-height: 1.4;
+            }}
+            QPlainTextEdit:focus {{
+                border-color: {COLORS['accent']};
+                background-color: #141414;
+            }}
+        """)
         self.txt_caption.textChanged.connect(self._on_caption_text_changed)
         cc_layout.addWidget(self.txt_caption)
 
-        # Action Buttons row
+        # Balanced 2-Sided Action Buttons Row
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(0, 0, 0, 0)
         btn_layout.setSpacing(6)
-        self.btn_split = QPushButton("Split Clip")
-        self.btn_merge = QPushButton("Merge Next")
-        self.btn_delete = QPushButton("Delete Clip")
-        self.btn_delete.setObjectName("btn_danger")
+
+        def _make_btn(text: str, icon_name: str = "", tip: str = "", is_danger: bool = False) -> QPushButton:
+            b = QPushButton(text)
+            if icon_name:
+                p = ASSETS_DIR / "icons" / icon_name
+                if p.exists():
+                    b.setIcon(QIcon(str(p)))
+                    b.setIconSize(QSize(13, 13))
+            if tip:
+                b.setToolTip(tip)
+            if is_danger:
+                b.setObjectName("btn_danger")
+            return b
+
+        # Left Group: Clip operations
+        self.btn_split = _make_btn("Split Clip", "split.svg", "Split clip at playhead or midpoint")
+        self.btn_merge = _make_btn("Merge Next", "", "Merge dialogue line with the next clip")
+        self.btn_delete = _make_btn("Delete Clip", "trash.svg", "Delete this clip (Del)", is_danger=True)
 
         self.btn_split.clicked.connect(self.on_split)
         self.btn_merge.clicked.connect(self.on_merge)
@@ -224,7 +282,21 @@ class ClipEditor(QWidget):
         btn_layout.addWidget(self.btn_split)
         btn_layout.addWidget(self.btn_merge)
         btn_layout.addWidget(self.btn_delete)
+
         btn_layout.addStretch()
+
+        # Right Group: Utilities & Audio Tools
+        self.btn_copy = _make_btn("Copy", "copy.svg", "Copy dialogue caption to clipboard")
+        self.btn_clear = _make_btn("Clear", "", "Clear caption text")
+        self.btn_regen_audio = _make_btn("Re-slice Audio", "wave.svg", "Re-extract audio slice for this clip from source")
+
+        self.btn_copy.clicked.connect(self._on_copy_caption)
+        self.btn_clear.clicked.connect(self._on_clear_caption)
+        self.btn_regen_audio.clicked.connect(self.on_regen_audio)
+
+        btn_layout.addWidget(self.btn_copy)
+        btn_layout.addWidget(self.btn_clear)
+        btn_layout.addWidget(self.btn_regen_audio)
 
         cc_layout.addLayout(btn_layout)
         main_layout.addWidget(cap_card, stretch=2)
@@ -249,10 +321,30 @@ class ClipEditor(QWidget):
             QTimer.singleShot(150, self._seek_frame_preview)
 
     def _on_caption_text_changed(self):
+        self._update_caption_stats()
         if self._is_loading or not self.item:
             return
-        self._set_save_status("Saving...")
         self._caption_timer.start()
+
+    def _update_caption_stats(self):
+        text = self.txt_caption.toPlainText().strip()
+        chars = len(text)
+        words = len(text.split()) if text else 0
+        if chars > 0:
+            self.lbl_caption_stats.setText(f"{chars} chars • {words} words")
+        else:
+            self.lbl_caption_stats.setText("0 chars")
+
+    def _on_copy_caption(self):
+        text = self.txt_caption.toPlainText().strip()
+        if text:
+            QApplication.clipboard().setText(text)
+            self.btn_copy.setText("Copied!")
+            QTimer.singleShot(1200, lambda: self.btn_copy.setText("Copy"))
+
+    def _on_clear_caption(self):
+        self.txt_caption.clear()
+        self._auto_save_caption()
 
     def _auto_save_caption(self):
         if self._is_loading or not self.item:
@@ -261,7 +353,6 @@ class ClipEditor(QWidget):
         if self.item.caption != new_text:
             self.item.caption = new_text
             self.caption_changed.emit(self.item.index, new_text)
-        self._set_save_status("Auto-saved ✓")
 
     def _on_speaker_changed(self, idx: int):
         if self._is_loading or not self.item:
@@ -333,6 +424,9 @@ class ClipEditor(QWidget):
         self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
         self.txt_caption.blockSignals(False)
 
+        self.lbl_clip_badge.setText(f"Clip #{item.index}")
+        self._update_caption_stats()
+
         self.spin_start.blockSignals(False)
         self.spin_end.blockSignals(False)
 
@@ -343,7 +437,6 @@ class ClipEditor(QWidget):
         else:
             self._seek_frame_preview()
 
-        self._set_save_status("Auto-saved ✓")
         self._is_loading = False
 
     def play_audio(self):
@@ -391,10 +484,11 @@ class ClipEditor(QWidget):
         self.txt_caption.clear()
         self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
         self.txt_caption.blockSignals(False)
+        self.lbl_clip_badge.setText("No Selection")
+        self.lbl_caption_stats.setText("0 chars")
         self.image_preview.setText("No Video Frame")
         self.lbl_duration.setText("Duration: 0.000s")
         self.player.stop()
-        self._set_save_status("Auto-saved ✓")
         self._is_loading = False
 
     def on_change_image(self):
