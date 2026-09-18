@@ -451,12 +451,20 @@ class PipelineState:
             speakers_dict[k] = SpeakerInfo.from_dict(v)
         state.speakers = speakers_dict
         state.speaker_order = list(data.get("speaker_order", list(speakers_dict.keys())))
+        if not state.speakers:
+            state.speakers = {"SPEAKER_00": SpeakerInfo(speaker_id="SPEAKER_00", display_name="Speaker 1")}
+            state.speaker_order = ["SPEAKER_00"]
 
         # Dialogues
         state.dialogues = [
             DialogueItem.from_dict(d, base_dir)
             for d in data.get("dialogues", [])
         ]
+        for d in state.dialogues:
+            if d.speaker_id not in state.speakers:
+                state.speakers[d.speaker_id] = SpeakerInfo(speaker_id=d.speaker_id, display_name=d.speaker_id)
+                if d.speaker_id not in state.speaker_order:
+                    state.speaker_order.append(d.speaker_id)
 
         # Pack Info
         if "pack_info" in data:

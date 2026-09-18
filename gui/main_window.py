@@ -1469,37 +1469,43 @@ class MainWindow(QMainWindow):
 
     def _start_preview_proxy_generation(self, path: Path):
         """Generate or load low-res fast-seek proxy video in background for smooth playback."""
-        proxy_enabled = self._settings.get("preview_proxy_enabled", True)
-        if not proxy_enabled:
-            return
+        try:
+            proxy_enabled = self._settings.get("preview_proxy_enabled", True)
+            if not proxy_enabled:
+                return
 
-        from core.proxy_generator import ProxyGenerator, ProxyWorker
-        proxy_path = ProxyGenerator.get_default_proxy_path(path)
-        if proxy_path.exists():
-            self._state.preview_proxy_path = proxy_path
-            self._video_panel.set_proxy_video(proxy_path)
-            self._log_message(f"Loaded fast-seek preview proxy: {proxy_path.name}", "ok")
-            return
+            from core.proxy_generator import ProxyGenerator, ProxyWorker
+            proxy_path = ProxyGenerator.get_default_proxy_path(path)
+            if proxy_path.exists():
+                self._state.preview_proxy_path = proxy_path
+                self._video_panel.set_proxy_video(proxy_path)
+                self._log_message(f"Loaded fast-seek preview proxy: {proxy_path.name}", "ok")
+                return
 
-        target_height = self._settings.get("preview_proxy_height", 540)
-        self._log_message("Generating fast-seek preview proxy (540p) in background...", "info")
-        self._status_label.setText("Creating preview proxy video...")
+            target_height = self._settings.get("preview_proxy_height", 540)
+            self._log_message("Generating fast-seek preview proxy (540p) in background...", "info")
+            if self.statusBar():
+                self.statusBar().showMessage("Creating preview proxy video...", 5000)
 
-        self._proxy_worker = ProxyWorker(path, target_height=target_height)
+            self._proxy_worker = ProxyWorker(path, target_height=target_height)
 
-        def on_proxy_finished(out_path: Path):
-            self._state.preview_proxy_path = out_path
-            self._video_panel.set_proxy_video(out_path)
-            self._status_label.setText("Ready")
-            self._log_message(f"Preview proxy ready: {out_path.name}", "ok")
+            def on_proxy_finished(out_path: Path):
+                self._state.preview_proxy_path = out_path
+                self._video_panel.set_proxy_video(out_path)
+                if self.statusBar():
+                    self.statusBar().showMessage("Preview proxy ready", 4000)
+                self._log_message(f"Preview proxy ready: {out_path.name}", "ok")
 
-        def on_proxy_failed(err: str):
-            self._status_label.setText("Ready")
-            self._log_message(f"Preview proxy skipped: {err}", "warn")
+            def on_proxy_failed(err: str):
+                if self.statusBar():
+                    self.statusBar().showMessage("Preview proxy skipped", 4000)
+                self._log_message(f"Preview proxy skipped: {err}", "warn")
 
-        self._proxy_worker.finished.connect(on_proxy_finished)
-        self._proxy_worker.failed.connect(on_proxy_failed)
-        self._proxy_worker.start()
+            self._proxy_worker.finished.connect(on_proxy_finished)
+            self._proxy_worker.failed.connect(on_proxy_failed)
+            self._proxy_worker.start()
+        except Exception as e:
+            self._log_message(f"Preview proxy error: {e}", "warn")
 
     def on_open_export_folder(self):
         """Open the output pack folder in Windows File Explorer."""
