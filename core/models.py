@@ -312,6 +312,7 @@ class PipelineState:
     Passed between steps and exposed to the GUI.
     """
     video_path: Optional[Path] = None
+    preview_proxy_path: Optional[Path] = None    # Fast-seek low-res proxy for smooth preview
     work_audio_path: Optional[Path] = None       # Full extracted WAV
     separated_vocals_path: Optional[Path] = None  # Demucs vocals
     separated_bg_path: Optional[Path] = None      # Demucs background
@@ -398,6 +399,7 @@ class PipelineState:
         return {
             "version": 1,
             "video_path": _rel_or_abs(self.video_path),
+            "preview_proxy_path": _rel_or_abs(self.preview_proxy_path),
             "work_audio_path": _rel_or_abs(self.work_audio_path),
             "separated_vocals_path": _rel_or_abs(self.separated_vocals_path),
             "separated_bg_path": _rel_or_abs(self.separated_bg_path),
@@ -431,6 +433,7 @@ class PipelineState:
 
         state = cls()
         state.video_path = _resolve_path(data.get("video_path"))
+        state.preview_proxy_path = _resolve_path(data.get("preview_proxy_path"))
         state.work_audio_path = _resolve_path(data.get("work_audio_path"))
         state.separated_vocals_path = _resolve_path(data.get("separated_vocals_path"))
         state.separated_bg_path = _resolve_path(data.get("separated_bg_path"))

@@ -29,6 +29,18 @@ class ClipEditor(QWidget):
         self.item = None
         self.state = None
         self._temp_audio_file = None
+        self._is_loading = False
+
+        # Auto-save debounce timers
+        self._caption_timer = QTimer(self)
+        self._caption_timer.setSingleShot(True)
+        self._caption_timer.setInterval(300)
+        self._caption_timer.timeout.connect(self._auto_save_caption)
+
+        self._timing_timer = QTimer(self)
+        self._timing_timer.setSingleShot(True)
+        self._timing_timer.setInterval(200)
+        self._timing_timer.timeout.connect(self._auto_save_timing)
 
         self.setStyleSheet(f"""
             QWidget {{
@@ -148,6 +160,7 @@ class ClipEditor(QWidget):
 
         grid.addWidget(QLabel("Character:"), 0, 0)
         self.combo_speaker = QComboBox()
+        self.combo_speaker.currentIndexChanged.connect(self._on_speaker_changed)
         grid.addWidget(self.combo_speaker, 0, 1)
 
         grid.addWidget(QLabel("Start (s):"), 1, 0)
@@ -193,6 +206,7 @@ class ClipEditor(QWidget):
         self.txt_caption = QPlainTextEdit()
         self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
         self.txt_caption.setMaximumHeight(62)
+        self.txt_caption.textChanged.connect(self._on_caption_text_changed)
         cc_layout.addWidget(self.txt_caption)
 
         # Action Buttons row
@@ -202,8 +216,9 @@ class ClipEditor(QWidget):
         self.btn_merge = QPushButton("Merge Next")
         self.btn_delete = QPushButton("Delete Clip")
         self.btn_delete.setObjectName("btn_danger")
-        self.btn_apply = QPushButton("Apply Changes")
-        self.btn_apply.setObjectName("btn_primary")
+        self.btn_apply = QPushButton("Auto-saved ✓")
+        self.btn_apply.setToolTip("Changes are saved automatically in real-time. Click to force instant save.")
+        self.btn_apply.setStyleSheet("background-color: #18281d; color: #4ade80; border: 1px solid #22A05B; font-weight: bold; border-radius: 4px; padding: 5px 12px;")
 
         self.btn_split.clicked.connect(self.on_split)
         self.btn_merge.clicked.connect(self.on_merge)
@@ -231,9 +246,64 @@ class ClipEditor(QWidget):
     def _on_time_changed(self):
         dur = max(0.0, self.spin_end.value() - self.spin_start.value())
         self.lbl_duration.setText(f"Duration: {dur:.3f}s")
+        if not self._is_loading and self.item:
+            self._set_save_status("Saving...")
+            self._timing_timer.start()
         # Seek frame preview to updated start timestamp
         if self.state and self.state.video_path and self.state.video_path.exists():
             QTimer.singleShot(150, self._seek_frame_preview)
+
+    def _on_caption_text_changed(self):
+        if self._is_loading or not self.item:
+            return
+        self._set_save_status("Saving...")
+        self._caption_timer.start()
+
+    def _auto_save_caption(self):
+        if self._is_loading or not self.item:
+            return
+        new_text = self.txt_caption.toPlainText()
+        if self.item.caption != new_text:
+            self.item.caption = new_text
+            self.caption_changed.emit(self.item.index, new_text)
+        self._set_save_status("Auto-saved ✓")
+
+    def _on_speaker_changed(self, idx: int):
+        if self._is_loading or not self.item:
+            return
+        new_spk = self.combo_speaker.currentData()
+        if new_spk and new_spk != self.item.speaker_id:
+            self.item.speaker_id = new_spk
+            self.speaker_changed.emit(self.item.index, new_spk)
+            self._set_save_status("Auto-saved ✓")
+
+    def _auto_save_timing(self):
+        if self._is_loading or not self.item:
+            return
+        s = self.spin_start.value()
+        e = max(s + 0.05, self.spin_end.value())
+        if abs(self.item.start - s) > 0.001 or abs(self.item.end - e) > 0.001:
+            self.item.start = s
+            self.item.end = e
+            self.timestamps_changed.emit(self.item.index, s, e)
+        self._set_save_status("Auto-saved ✓")
+
+    def _set_save_status(self, text: str):
+        if text == "Auto-saved ✓":
+            self.btn_apply.setText("Auto-saved ✓")
+            self.btn_apply.setStyleSheet(
+                "background-color: #18281d; color: #4ade80; border: 1px solid #22A05B; "
+                "font-weight: bold; border-radius: 4px; padding: 5px 12px;"
+            )
+        elif text == "Saving...":
+            self.btn_apply.setText("Saving...")
+            self.btn_apply.setStyleSheet(
+                "background-color: #2b2518; color: #facc15; border: 1px solid #ca8a04; "
+                "font-weight: bold; border-radius: 4px; padding: 5px 12px;"
+            )
+        else:
+            self.btn_apply.setText(text)
+            self.btn_apply.setStyleSheet("")
 
     def _seek_frame_preview(self):
         if not self.state or not self.state.video_path:
@@ -254,6 +324,7 @@ class ClipEditor(QWidget):
             pass
 
     def load_item(self, item: DialogueItem, state: PipelineState):
+        self._is_loading = True
         self.item = item
         self.state = state
 
@@ -261,6 +332,7 @@ class ClipEditor(QWidget):
         self.spin_start.blockSignals(True)
         self.spin_end.blockSignals(True)
 
+        self.combo_speaker.blockSignals(True)
         self.combo_speaker.clear()
         for spk_id, spk in state.speakers.items():
             self.combo_speaker.addItem(spk.display_name, spk_id)
@@ -268,11 +340,17 @@ class ClipEditor(QWidget):
         idx = self.combo_speaker.findData(item.speaker_id)
         if idx >= 0:
             self.combo_speaker.setCurrentIndex(idx)
+        self.combo_speaker.blockSignals(False)
 
         self.spin_start.setValue(item.start)
         self.spin_end.setValue(item.end)
         self.lbl_duration.setText(f"Duration: {item.duration:.3f}s")
-        self.txt_caption.setPlainText(item.caption)
+        
+        # User requested: show placeholder text when caption is empty, don't fill dummy text
+        self.txt_caption.blockSignals(True)
+        self.txt_caption.setPlainText(item.caption if item.caption else "")
+        self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
+        self.txt_caption.blockSignals(False)
 
         self.spin_start.blockSignals(False)
         self.spin_end.blockSignals(False)
@@ -283,6 +361,9 @@ class ClipEditor(QWidget):
             self.image_preview.setPixmap(pix)
         else:
             self._seek_frame_preview()
+
+        self._set_save_status("Auto-saved ✓")
+        self._is_loading = False
 
     def play_audio(self):
         if not self.item:
@@ -316,6 +397,7 @@ class ClipEditor(QWidget):
                 print(f"Error previewing audio: {e}")
 
     def clear(self):
+        self._is_loading = True
         self.item = None
         self.combo_speaker.clear()
         self.spin_start.blockSignals(True)
@@ -324,10 +406,15 @@ class ClipEditor(QWidget):
         self.spin_end.setValue(0)
         self.spin_start.blockSignals(False)
         self.spin_end.blockSignals(False)
+        self.txt_caption.blockSignals(True)
         self.txt_caption.clear()
+        self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
+        self.txt_caption.blockSignals(False)
         self.image_preview.setText("No Video Frame")
         self.lbl_duration.setText("Duration: 0.000s")
         self.player.stop()
+        self._set_save_status("Auto-saved ✓")
+        self._is_loading = False
 
     def on_change_image(self):
         if self.item:
@@ -360,3 +447,4 @@ class ClipEditor(QWidget):
             self.caption_changed.emit(self.item.index, self.txt_caption.toPlainText())
             self.speaker_changed.emit(self.item.index, self.combo_speaker.currentData())
             self.timestamps_changed.emit(self.item.index, self.spin_start.value(), self.spin_end.value())
+            self._set_save_status("Auto-saved ✓")

@@ -37,7 +37,9 @@ class VideoPanel(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._video_path: Path | None = None
+        self._proxy_path: Path | None = None
         self._is_user_seeking = False
+        self._last_slider_seek_time = 0.0
 
         # ── QMediaPlayer Setup ─────────────────────────────────────────
         self.player = QMediaPlayer()
@@ -62,6 +64,13 @@ class VideoPanel(QFrame):
         lbl_title.setObjectName("section_title")
         lbl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
         header.addWidget(lbl_title)
+
+        self.lbl_proxy_badge = QLabel("[ORIGINAL]")
+        self.lbl_proxy_badge.setStyleSheet(
+            "font-size: 7.5pt; font-weight: bold; color: #888888; background: #222222; "
+            "border: 1px solid #444444; border-radius: 3px; padding: 1px 6px; margin-left: 6px;"
+        )
+        header.addWidget(self.lbl_proxy_badge)
         header.addStretch()
 
         self.lbl_time_code = QLabel("00:00.000 / 00:00.000")
@@ -183,6 +192,7 @@ class VideoPanel(QFrame):
         self.seek_slider.setRange(0, 1000)
         self.seek_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.seek_slider.sliderPressed.connect(self._on_slider_pressed)
+        self.seek_slider.sliderMoved.connect(self._on_slider_moved)
         self.seek_slider.sliderReleased.connect(self._on_slider_released)
         controls.addWidget(self.seek_slider, stretch=1)
 
@@ -215,13 +225,46 @@ class VideoPanel(QFrame):
             path = Path(urls[0].toLocalFile())
             self.video_dropped.emit(path)
 
-    # ── Player Actions ─────────────────────────────────────────────────
+    # ── Player Actions & Proxy ─────────────────────────────────────────
 
     def load_video(self, path: Path):
         self._video_path = path
+        self._proxy_path = None
+        self._update_badge("ORIGINAL")
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self._stack_layout.setCurrentIndex(1)
         self.btn_play.setText("Play")
+
+    def set_proxy_video(self, proxy_path: Path):
+        """Seamlessly hot-swap to the lightweight fast-seek proxy video."""
+        if not proxy_path.exists():
+            return
+        self._proxy_path = proxy_path
+        cur_pos = self.player.position()
+        was_playing = self.is_playing()
+
+        self.player.setSource(QUrl.fromLocalFile(str(proxy_path)))
+        self.player.setPosition(cur_pos)
+        if was_playing:
+            self.player.play()
+
+        self._update_badge("PROXY")
+
+    def _update_badge(self, status: str):
+        if status == "PROXY":
+            self.lbl_proxy_badge.setText("[PROXY 540p]")
+            self.lbl_proxy_badge.setStyleSheet(
+                "font-size: 7.5pt; font-weight: bold; color: #4ade80; background: #142a1b; "
+                "border: 1px solid #22A05B; border-radius: 3px; padding: 1px 6px; margin-left: 6px;"
+            )
+            self.lbl_proxy_badge.setToolTip("Fast-Seek 540p Proxy is active for smooth playback & scrubbing.")
+        else:
+            self.lbl_proxy_badge.setText("[ORIGINAL]")
+            self.lbl_proxy_badge.setStyleSheet(
+                "font-size: 7.5pt; font-weight: bold; color: #888888; background: #222222; "
+                "border: 1px solid #444444; border-radius: 3px; padding: 1px 6px; margin-left: 6px;"
+            )
+            self.lbl_proxy_badge.setToolTip("Original video is active. (Proxy will auto-activate when ready)")
 
     def show_video_info(self, state: PipelineState):
         name = state.video_path.name if state.video_path else "—"
@@ -232,16 +275,26 @@ class VideoPanel(QFrame):
             f"Resolution: {state.video_width}x{state.video_height} @ {state.video_fps:.2f} fps"
         )
 
+    def sync_master_time(self, audio_sec: float):
+        """
+        Authoritative clock sync driven by Timeline Audio.
+        Checks drift between audio master clock and video player.
+        If drift exceeds 80ms (~2.5 frames), re-aligns video immediately.
+        """
+        target_ms = int(audio_sec * 1000)
+        if self.is_playing():
+            cur_ms = self.player.position()
+            drift_ms = abs(target_ms - cur_ms)
+            if drift_ms > 80:
+                self.player.setPosition(target_ms)
+        else:
+            if not self._is_user_seeking:
+                self.player.setPosition(target_ms)
+        self._update_time_code(target_ms, self.player.duration())
+
     def set_position(self, sec: float):
         """Seek player position without triggering recursive signals."""
-        pos_ms = int(sec * 1000)
-        if self.is_playing():
-            # Do NOT force player.setPosition during playback — player advances naturally!
-            self._update_time_code(pos_ms, self.player.duration())
-            return
-        if not self._is_user_seeking:
-            self.player.setPosition(pos_ms)
-            self._update_time_code(pos_ms, self.player.duration())
+        self.sync_master_time(sec)
 
     def toggle_playback(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -250,7 +303,8 @@ class VideoPanel(QFrame):
             self.start_playback()
 
     def start_playback(self):
-        if self._video_path and self._video_path.exists():
+        active_src = self._proxy_path or self._video_path
+        if active_src and active_src.exists():
             # Mute video player audio stream so master timeline audio is the single source
             self.audio_output.setMuted(True)
             self.player.play()
@@ -280,17 +334,27 @@ class VideoPanel(QFrame):
             val = int((pos_ms / dur_ms) * 1000)
             self.seek_slider.setValue(val)
             self.seek_slider.blockSignals(False)
-            if self.is_playing():
-                self.position_changed.emit(pos_ms / 1000.0)
-        elif self._is_user_seeking and dur_ms > 0:
-            self.seek_requested.emit(pos_ms / 1000.0)
-
+            # NOTE: During playback, we do NOT emit position_changed to alter timeline!
+            # Timeline Audio is the authoritative master clock.
 
     def _on_player_duration_changed(self, dur_ms: int):
         self._update_time_code(self.player.position(), dur_ms)
 
     def _on_slider_pressed(self):
         self._is_user_seeking = True
+
+    def _on_slider_moved(self, val: int):
+        """Throttled seeking while actively dragging the slider (30ms rate limiter)."""
+        import time
+        now = time.monotonic()
+        if now - self._last_slider_seek_time >= 0.030:
+            dur_ms = self.player.duration()
+            if dur_ms > 0:
+                target_ms = int((val / 1000.0) * dur_ms)
+                self.player.setPosition(target_ms)
+                self.seek_requested.emit(target_ms / 1000.0)
+                self._update_time_code(target_ms, dur_ms)
+            self._last_slider_seek_time = now
 
     def _on_slider_released(self):
         self._is_user_seeking = False
@@ -300,6 +364,7 @@ class VideoPanel(QFrame):
             target_ms = int((val / 1000.0) * dur_ms)
             self.player.setPosition(target_ms)
             self.seek_requested.emit(target_ms / 1000.0)
+            self._update_time_code(target_ms, dur_ms)
 
     def _update_time_code(self, pos_ms: int, dur_ms: int):
         pos_s = pos_ms / 1000.0
@@ -315,4 +380,6 @@ class VideoPanel(QFrame):
         self.player.setSource(QUrl())
         self._stack_layout.setCurrentIndex(0)
         self._info_label.setText("")
+        self._update_badge("ORIGINAL")
         self.btn_play.setText("Play")
+

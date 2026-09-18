@@ -153,4 +153,7 @@ SPEAKER_PALETTE = [
     "#6366F1",  # A10: Deep Indigo
 ]
 
-
+# ── Video Preview Proxy Defaults ──────────────────────────────────────────────
+PREVIEW_PROXY_ENABLED = True
+PREVIEW_PROXY_HEIGHT = 540          # 540p proxy (e.g. 960x540) for buttery-smooth scrubbing & playback
+PREVIEW_PROXY_GOP = 15              # Short GOP (keyframe every 15 frames ~0.5s) for instant seeking

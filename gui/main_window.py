@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QSplitter, QLabel, QPushButton, QToolBar, QStatusBar,
     QFileDialog, QFrame, QSizePolicy, QTextEdit, QPlainTextEdit, QLineEdit,
     QProgressBar, QApplication, QTabWidget, QMenuBar, QMenu,
-    QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea
+    QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation
 from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette
@@ -466,42 +466,72 @@ class MainWindow(QMainWindow):
         # Hotkey legend badges
         legend_label = QLabel(
             '<span style="color:#888;">Shortcuts: </span>'
-            '<b style="color:#58a6ff;">Space</b> <span style="color:#aaa;">Play/Pause</span> &nbsp;'
+            '<b style="color:#58a6ff;">Space</b> <span style="color:#aaa;">Play</span> &nbsp;'
             '<b style="color:#58a6ff;">Ctrl+Z</b> <span style="color:#aaa;">Undo</span> &nbsp;'
             '<b style="color:#58a6ff;">S</b> <span style="color:#aaa;">Split</span> &nbsp;'
-            '<b style="color:#58a6ff;">M</b> <span style="color:#aaa;">Merge</span> &nbsp;'
+            '<b style="color:#58a6ff;">Q</b> <span style="color:#aaa;">Trim Left</span> &nbsp;'
+            '<b style="color:#58a6ff;">W</b> <span style="color:#aaa;">Trim Right</span> &nbsp;'
             '<b style="color:#58a6ff;">Del</b> <span style="color:#aaa;">Delete</span>'
         )
-        legend_label.setStyleSheet("font-size: 8.5pt; padding-left: 16px; padding-right: 16px; margin-left: 12px;")
+        legend_label.setStyleSheet("font-size: 8.5pt; padding-left: 14px; padding-right: 14px; margin-left: 8px;")
         tl_header.addWidget(legend_label)
         tl_header.addStretch()
 
-        # Track & Clip manual management buttons with professional icons
-        def icon_btn(text: str, icon_file: str, tip: str = "") -> QPushButton:
-            b = QPushButton(text)
+        def v_sep():
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.VLine)
+            sep.setFrameShadow(QFrame.Shadow.Sunken)
+            sep.setStyleSheet("color: #444444; margin: 2px 4px;")
+            return sep
+
+        # Track & Clip manual management buttons with professional CapCut icons
+        def icon_btn(text: str, icon_file: str, tip: str = "", compact: bool = False) -> QPushButton:
+            b = QPushButton(text if not compact else "")
             path = ASSETS_DIR / "icons" / icon_file
             if path.exists():
                 b.setIcon(QIcon(str(path)))
-                b.setIconSize(QSize(13, 13))
+                b.setIconSize(QSize(14, 14))
             if tip:
                 b.setToolTip(tip)
+            if compact:
+                b.setFixedSize(30, 26)
             return b
 
-        btn_tl_add_track = icon_btn("Add Track", "plus.svg", "Add new character track")
-        btn_tl_del_track = icon_btn("Delete Track", "minus.svg", "Delete last character track")
-        btn_tl_add_clip  = icon_btn("Add Clip", "clip.svg", "Add new audio clip on selected track")
-        
-        btn_tl_play    = icon_btn("Play", "play.svg", "Play overall timeline audio (Space)")
+        # CapCut Style Quick Edit Tools:
+        btn_tl_undo       = icon_btn("", "undo.svg", "Undo (Ctrl+Z)", compact=True)
+        btn_tl_redo       = icon_btn("", "redo.svg", "Redo (Ctrl+Y)", compact=True)
+
+        btn_tl_split      = icon_btn("", "split.svg", "Split clip at playhead (S / Ctrl+B)", compact=True)
+        btn_tl_trim_left  = icon_btn("", "trim-left.svg", "Delete left to playhead (Q)", compact=True)
+        btn_tl_trim_right = icon_btn("", "trim-right.svg", "Delete right from playhead (W)", compact=True)
+        btn_tl_del_clip   = icon_btn("", "trash.svg", "Delete selected clip (Del)", compact=True)
+
+        btn_tl_add_track  = icon_btn("Add Track", "plus.svg", "Add new character track with custom name")
+        btn_tl_add_clip   = icon_btn("Add Clip", "clip.svg", "Add new audio clip at playhead")
+
+        btn_tl_play    = icon_btn("Play", "play.svg", "Play/Pause timeline audio (Space)")
         btn_tl_stop    = icon_btn("Stop", "stop.svg", "Stop playback")
         btn_tl_zoomin  = icon_btn("Zoom In", "zoom-in.svg", "Zoom In Timeline (+)")
         btn_tl_zoomout = icon_btn("Zoom Out", "zoom-out.svg", "Zoom Out Timeline (-)")
 
+        tl_header.addWidget(btn_tl_undo)
+        tl_header.addWidget(btn_tl_redo)
+        tl_header.addWidget(v_sep())
+
+        tl_header.addWidget(btn_tl_split)
+        tl_header.addWidget(btn_tl_trim_left)
+        tl_header.addWidget(btn_tl_trim_right)
+        tl_header.addWidget(btn_tl_del_clip)
+        tl_header.addWidget(v_sep())
+
         tl_header.addWidget(btn_tl_add_track)
-        tl_header.addWidget(btn_tl_del_track)
         tl_header.addWidget(btn_tl_add_clip)
-        tl_header.addSpacing(12)
+        tl_header.addWidget(v_sep())
+
         tl_header.addWidget(btn_tl_play)
         tl_header.addWidget(btn_tl_stop)
+        tl_header.addWidget(v_sep())
+
         tl_header.addWidget(btn_tl_zoomin)
         tl_header.addWidget(btn_tl_zoomout)
 
@@ -523,8 +553,14 @@ class MainWindow(QMainWindow):
         self._main_v_splitter.addWidget(self._timeline_container)
 
         # Connect Timeline Header buttons
+        btn_tl_undo.clicked.connect(self.on_undo)
+        btn_tl_redo.clicked.connect(self.on_redo)
+        btn_tl_split.clicked.connect(self._on_split_at_playhead)
+        btn_tl_trim_left.clicked.connect(self._on_trim_left)
+        btn_tl_trim_right.clicked.connect(self._on_trim_right)
+        btn_tl_del_clip.clicked.connect(self._on_delete_selected_clip)
+
         btn_tl_add_track.clicked.connect(self._on_add_track)
-        btn_tl_del_track.clicked.connect(self._on_delete_last_track)
         btn_tl_add_clip.clicked.connect(self._on_add_clip)
 
         btn_tl_play.clicked.connect(self._toggle_global_playback)
@@ -563,8 +599,14 @@ class MainWindow(QMainWindow):
         self._timeline.segment_selected.connect(self._select_dialogue_by_idx)
         self._timeline.segment_moved.connect(self._on_timeline_segment_moved)
         self._timeline.seek_requested.connect(self._on_timeline_seek)
-        self._timeline.playhead_tick.connect(self._video_panel.set_position)
-        self._video_panel.position_changed.connect(self._timeline.set_current_time)
+        self._timeline.playhead_tick.connect(self._video_panel.sync_master_time)
+        self._timeline.split_at_playhead_requested.connect(self._on_split_at_playhead)
+        self._timeline.trim_left_requested.connect(self._on_trim_left)
+        self._timeline.trim_right_requested.connect(self._on_trim_right)
+        self._timeline.delete_track_requested.connect(self._on_delete_track)
+        self._timeline.track_renamed.connect(self._on_speaker_renamed)
+        self._timeline.undo_requested.connect(self.on_undo)
+        self._timeline.redo_requested.connect(self.on_redo)
         self._timeline.split_requested.connect(self._on_split)
         self._timeline.merge_requested.connect(self._on_merge_next)
         self._timeline.delete_requested.connect(self._on_dialogue_deleted)
@@ -610,6 +652,8 @@ class MainWindow(QMainWindow):
         # Stop any active clip preview audio first to avoid overlapping sounds
         if hasattr(self, '_clip_editor'):
             self._clip_editor.player.stop()
+        cur_t = self._timeline.current_time
+        self._video_panel.set_position(cur_t)
         self._timeline.start_playback()
         self._video_panel.start_playback()
 
@@ -673,7 +717,6 @@ class MainWindow(QMainWindow):
     # ── Manual Track & Speaker Handlers ──────────────────────────────────────
 
     def _on_add_track(self):
-        self._push_undo()
         existing_indices = []
         for sid in self._state.speakers.keys():
             if sid.startswith("SPEAKER_"):
@@ -683,18 +726,30 @@ class MainWindow(QMainWindow):
                     pass
         next_idx = max(existing_indices, default=-1) + 1
         new_spk_id = f"SPEAKER_{next_idx:02d}"
-        
+        default_name = f"Speaker {next_idx + 1}"
+
+        name, ok = QInputDialog.getText(
+            self,
+            "Add Character Track",
+            "Enter character name for new track:",
+            text=default_name
+        )
+        if not ok:
+            return
+        display_name = name.strip() if name.strip() else default_name
+
+        self._push_undo()
         self._state.speakers[new_spk_id] = SpeakerInfo(
             speaker_id=new_spk_id,
-            display_name=f"Speaker {next_idx + 1}"
+            display_name=display_name
         )
         if new_spk_id not in self._state.speaker_order:
             self._state.speaker_order.append(new_spk_id)
-            
+
         self._active_speaker_id = new_spk_id
         self._mark_dirty(True)
         self._refresh_all_views()
-        self._log_message(f"Added track '{new_spk_id}'", "ok")
+        self._log_message(f"Added track '{display_name}' ({new_spk_id})", "ok")
 
     def _on_delete_last_track(self):
         if len(self._state.speakers) <= 1:
@@ -709,10 +764,12 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Delete Speaker", "Cannot delete the last remaining speaker track.")
                 return
             spk_info = self._state.speakers[spk_id]
+            clip_count = sum(1 for d in self._state.active_dialogues() if d.speaker_id == spk_id)
             reply = QMessageBox.question(
                 self,
-                "Confirm Delete Speaker",
-                f"Are you sure you want to delete speaker '{spk_info.display_name}' ({spk_id})?\n"
+                "Confirm Delete Track",
+                f"Are you sure you want to delete character track '{spk_info.display_name}' ({spk_id})?\n"
+                f"This track currently contains {clip_count} dialogue clip(s).\n\n"
                 "All dialogue clips on this track will be reassigned to the default track.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
@@ -745,13 +802,86 @@ class MainWindow(QMainWindow):
             speaker_id=spk_id,
             start=cur_t,
             end=cur_t + 1.5,
-            caption="New Dialogue"
+            caption=""
         )
         self._state.dialogues.append(new_d)
         self._state.renumber()
         self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(f"Added new dialogue clip #{new_d.index} for speaker {spk_id}", "ok")
+
+    def _on_delete_selected_clip(self):
+        idx = self._timeline.selected_index
+        if idx >= 0:
+            self._on_dialogue_deleted(idx)
+        else:
+            item = self._timeline._get_clip_at_time(self._timeline.current_time)
+            if item:
+                self._on_dialogue_deleted(item.index)
+
+    def _on_split_at_playhead(self):
+        cur_t = self._timeline.current_time
+        target = self._timeline._get_clip_at_time(cur_t)
+        if not target:
+            self._log_message("Split: No clip under playhead to split.", "warn")
+            return
+        if cur_t <= target.start + 0.05 or cur_t >= target.end - 0.05:
+            self._log_message("Split: Playhead too close to clip boundary.", "warn")
+            return
+        self._push_undo()
+        for d in self._state.active_dialogues():
+            if d.index == target.index:
+                old_end = d.end
+                d.end = cur_t
+                new_d = DialogueItem(
+                    index=len(self._state.dialogues) + 1,
+                    speaker_id=d.speaker_id,
+                    start=cur_t,
+                    end=old_end,
+                    caption="",
+                )
+                self._state.dialogues.append(new_d)
+                break
+        self._state.renumber()
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(f"Split clip #{target.index} at {cur_t:.2f}s", "ok")
+
+    def _on_trim_left(self):
+        cur_t = self._timeline.current_time
+        target = self._timeline._get_clip_at_time(cur_t)
+        if not target:
+            self._log_message("Trim Left: No clip under playhead.", "warn")
+            return
+        if cur_t >= target.end - 0.05:
+            self._log_message("Trim Left: Playhead at or past clip end.", "warn")
+            return
+        self._push_undo()
+        for d in self._state.active_dialogues():
+            if d.index == target.index:
+                d.start = cur_t
+                break
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(f"Trimmed start of clip #{target.index} to {cur_t:.2f}s (Q)", "ok")
+
+    def _on_trim_right(self):
+        cur_t = self._timeline.current_time
+        target = self._timeline._get_clip_at_time(cur_t)
+        if not target:
+            self._log_message("Trim Right: No clip under playhead.", "warn")
+            return
+        if cur_t <= target.start + 0.05:
+            self._log_message("Trim Right: Playhead at or before clip start.", "warn")
+            return
+        self._push_undo()
+        for d in self._state.active_dialogues():
+            if d.index == target.index:
+                d.end = cur_t
+                break
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(f"Trimmed end of clip #{target.index} to {cur_t:.2f}s (W)", "ok")
 
     def _on_speaker_added(self, spk_id: str):
         self._push_undo()
@@ -1124,6 +1254,10 @@ class MainWindow(QMainWindow):
                 self._video_panel.show_video_info(state)
                 self._status_video.setText(f"File: {state.video_path.name}")
                 self._timeline.set_duration(state.video_duration)
+                if state.preview_proxy_path and state.preview_proxy_path.exists():
+                    self._video_panel.set_proxy_video(state.preview_proxy_path)
+                else:
+                    self._start_preview_proxy_generation(state.video_path)
             else:
                 self._status_video.setText(f"Project: {path.name} (No video file)")
 
@@ -1331,6 +1465,41 @@ class MainWindow(QMainWindow):
         self._mark_dirty(True)
         self._update_toolbar_state()
         self._log_message(f"Video loaded: {path.name}", "ok")
+        self._start_preview_proxy_generation(path)
+
+    def _start_preview_proxy_generation(self, path: Path):
+        """Generate or load low-res fast-seek proxy video in background for smooth playback."""
+        proxy_enabled = self._settings.get("preview_proxy_enabled", True)
+        if not proxy_enabled:
+            return
+
+        from core.proxy_generator import ProxyGenerator, ProxyWorker
+        proxy_path = ProxyGenerator.get_default_proxy_path(path)
+        if proxy_path.exists():
+            self._state.preview_proxy_path = proxy_path
+            self._video_panel.set_proxy_video(proxy_path)
+            self._log_message(f"Loaded fast-seek preview proxy: {proxy_path.name}", "ok")
+            return
+
+        target_height = self._settings.get("preview_proxy_height", 540)
+        self._log_message("Generating fast-seek preview proxy (540p) in background...", "info")
+        self._status_label.setText("Creating preview proxy video...")
+
+        self._proxy_worker = ProxyWorker(path, target_height=target_height)
+
+        def on_proxy_finished(out_path: Path):
+            self._state.preview_proxy_path = out_path
+            self._video_panel.set_proxy_video(out_path)
+            self._status_label.setText("Ready")
+            self._log_message(f"Preview proxy ready: {out_path.name}", "ok")
+
+        def on_proxy_failed(err: str):
+            self._status_label.setText("Ready")
+            self._log_message(f"Preview proxy skipped: {err}", "warn")
+
+        self._proxy_worker.finished.connect(on_proxy_finished)
+        self._proxy_worker.failed.connect(on_proxy_failed)
+        self._proxy_worker.start()
 
     def on_open_export_folder(self):
         """Open the output pack folder in Windows File Explorer."""

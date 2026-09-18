@@ -104,6 +104,14 @@ class SettingsDialog(QDialog):
         self.chk_sticky_headers = QCheckBox("Pin Speaker Track Headers (Sticky / ตรึงรายชื่อตัวละครติดขอบซ้าย)")
         self.chk_sticky_headers.setChecked(True)
         form_proc.addRow("Timeline:", self.chk_sticky_headers)
+
+        self.chk_preview_proxy = QCheckBox("Generate Fast-Seek Preview Proxy (สร้างวิดีโอย่อส่วนเพื่อให้พรีวิวและเลื่อนไทม์ไลน์ได้ลื่นไหล)")
+        self.chk_preview_proxy.setChecked(True)
+        form_proc.addRow("Preview Proxy:", self.chk_preview_proxy)
+
+        self.combo_proxy_res = QComboBox()
+        self.combo_proxy_res.addItems(["540p (Fastest, Highly Recommended)", "720p (HD Proxy)", "Original (No Proxy)"])
+        form_proc.addRow("Proxy Resolution:", self.combo_proxy_res)
         
         self.tabs.addTab(tab_proc, "Processing")
 
@@ -255,6 +263,14 @@ class SettingsDialog(QDialog):
             self.combo_bitrate.setCurrentIndex(br_idx)
 
         self.chk_sticky_headers.setChecked(settings.get("timeline_sticky_headers", True))
+        self.chk_preview_proxy.setChecked(settings.get("preview_proxy_enabled", True))
+        proxy_h = settings.get("preview_proxy_height", 540)
+        if proxy_h == 540:
+            self.combo_proxy_res.setCurrentIndex(0)
+        elif proxy_h == 720:
+            self.combo_proxy_res.setCurrentIndex(1)
+        else:
+            self.combo_proxy_res.setCurrentIndex(2)
 
         # Thai Dubbing settings
         self.chk_thai_opt.setChecked(settings.get("thai_dubbing_opt", True))
@@ -287,6 +303,9 @@ class SettingsDialog(QDialog):
         authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
         if not authors:
             authors = ["unknown"]
+
+        proxy_h_map = {0: 540, 1: 720, 2: 0}
+        proxy_h = proxy_h_map.get(self.combo_proxy_res.currentIndex(), 540)
             
         return {
             "hf_token":               self.edit_hf.text().strip(),
@@ -299,6 +318,8 @@ class SettingsDialog(QDialog):
             "vad_merge_gap_ms":       self.spin_gap.value(),
             "max_speakers":           self.spin_max_speakers.value(),
             "timeline_sticky_headers": self.chk_sticky_headers.isChecked(),
+            "preview_proxy_enabled":   self.chk_preview_proxy.isChecked(),
+            "preview_proxy_height":    proxy_h,
             "image_quality":          self.spin_img.value(),
             "audio_bitrate":          self.combo_bitrate.currentText(),
             "thai_dubbing_opt":       self.chk_thai_opt.isChecked(),

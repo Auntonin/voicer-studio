@@ -20,10 +20,16 @@ class TimelineWidget(QWidget):
     segment_selected = Signal(int)
     seek_requested = Signal(float)
     split_requested = Signal(int)
+    split_at_playhead_requested = Signal()
+    trim_left_requested = Signal()
+    trim_right_requested = Signal()
     merge_requested = Signal(int)
     delete_requested = Signal(int)
     add_track_requested = Signal()
     delete_track_requested = Signal(str)
+    track_renamed = Signal(str, str)
+    undo_requested = Signal()
+    redo_requested = Signal()
     add_clip_requested = Signal(str, float)
     tracks_reordered = Signal()
     sticky_headers_toggled = Signal(bool)
@@ -38,6 +44,7 @@ class TimelineWidget(QWidget):
         self.sticky_headers = True
         self._is_hovering_pin = False
         self._scroll_connected = False
+        self._last_scrub_seek_time = 0.0
 
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -265,7 +272,9 @@ class TimelineWidget(QWidget):
         if not audio_src or not audio_src.exists():
             return
 
-        self.player.setSource(QUrl.fromLocalFile(str(audio_src)))
+        target_url = QUrl.fromLocalFile(str(audio_src))
+        if self.player.source() != target_url:
+            self.player.setSource(target_url)
         self.player.setPosition(int(self.current_time * 1000))
         self.player.play()
         self.play_timer.start()
@@ -819,6 +828,36 @@ class TimelineWidget(QWidget):
         # 6. Empty track area
         return "track", None
 
+    def mouseDoubleClickEvent(self, event):
+        """Double-click on a character track header to rename it immediately."""
+        if event.button() == Qt.MouseButton.LeftButton and self.state:
+            x = event.pos().x()
+            y = event.pos().y()
+            header_x = self._get_header_x()
+            if header_x <= x < header_x + self.HEADER_WIDTH and y >= self.RULER_HEIGHT:
+                speakers_list = self._get_speaker_list()
+                track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
+                if 0 <= track_idx < len(speakers_list):
+                    spk_id = speakers_list[track_idx]
+                    self._prompt_rename_track(spk_id)
+                    event.accept()
+                    return
+        super().mouseDoubleClickEvent(event)
+
+    def _prompt_rename_track(self, spk_id: str):
+        if not self.state or spk_id not in self.state.speakers:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        spk_info = self.state.get_speaker(spk_id)
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Character",
+            f"Enter character / speaker name for '{spk_info.display_name}':",
+            text=spk_info.display_name
+        )
+        if ok and new_name.strip():
+            self.track_renamed.emit(spk_id, new_name.strip())
+
     def mousePressEvent(self, event):
         self.setFocus()
         if not self.state:
@@ -827,12 +866,24 @@ class TimelineWidget(QWidget):
         x = event.pos().x()
         y = event.pos().y()
 
-        # ── Right Click on Track Header: Context Menu with Sticky Pin toggle ──
+        # ── Right Click Context Menus (Track Header or Clip) ──
         if event.button() == Qt.MouseButton.RightButton:
+            from PySide6.QtWidgets import QMenu
             header_x = self._get_header_x()
             if header_x <= x < header_x + self.HEADER_WIDTH:
-                from PySide6.QtWidgets import QMenu
+                # Right-click on Track Header
+                speakers_list = self._get_speaker_list()
+                track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
                 menu = QMenu(self)
+                if 0 <= track_idx < len(speakers_list) and self.state:
+                    spk_id = speakers_list[track_idx]
+                    spk_info = self.state.get_speaker(spk_id)
+                    act_rename = menu.addAction(f"✏️ Rename Character ('{spk_info.display_name}')...")
+                    act_rename.triggered.connect(lambda s=spk_id: self._prompt_rename_track(s))
+                    act_del = menu.addAction(f"🗑️ Delete Track '{spk_info.display_name}'...")
+                    act_del.triggered.connect(lambda s=spk_id: self.delete_track_requested.emit(s))
+                    menu.addSeparator()
+
                 act_pin = menu.addAction("📌 Pin Tracks to Edge (Sticky / ตรึงติดขอบ)")
                 act_pin.setCheckable(True)
                 act_pin.setChecked(self.sticky_headers)
@@ -840,6 +891,31 @@ class TimelineWidget(QWidget):
                 menu.exec(event.globalPosition().toPoint())
                 event.accept()
                 return
+            else:
+                # Right-click on Clip / Track Lane
+                mode, item = self._hit_test(x, y)
+                if item:
+                    self.selected_index = item.index
+                    self.segment_selected.emit(item.index)
+                    self.update()
+
+                    menu = QMenu(self)
+                    act_split = menu.addAction("✂️ Split at Playhead (S)")
+                    act_split.triggered.connect(lambda: self.split_at_playhead_requested.emit())
+
+                    act_tl = menu.addAction("⬅️ Delete Left to Playhead (Q)")
+                    act_tl.triggered.connect(lambda: self.trim_left_requested.emit())
+
+                    act_tr = menu.addAction("➡️ Delete Right to Playhead (W)")
+                    act_tr.triggered.connect(lambda: self.trim_right_requested.emit())
+
+                    menu.addSeparator()
+                    act_del = menu.addAction("🗑️ Delete Clip (Del)")
+                    act_del.triggered.connect(lambda: self.delete_requested.emit(item.index))
+
+                    menu.exec(event.globalPosition().toPoint())
+                    event.accept()
+                    return
 
         # ── Middle Mouse Button (MMB) 2D Pan ─────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -946,7 +1022,11 @@ class TimelineWidget(QWidget):
             if mode == "playhead":
                 t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
                 self.set_current_time(t)
-                self.seek_requested.emit(t)
+                import time
+                now = time.monotonic()
+                if now - self._last_scrub_seek_time >= 0.030:
+                    self.seek_requested.emit(t)
+                    self._last_scrub_seek_time = now
                 self.ensure_playhead_visible(margin=60)
 
                 # Show dynamic time badge while scrubbing
@@ -1081,29 +1161,66 @@ class TimelineWidget(QWidget):
 
     # ── Keyboard Shortcuts ─────────────────────────────────────────────────────
 
+    def _get_clip_at_time(self, t: float) -> Optional[DialogueItem]:
+        """Find the dialogue clip at timestamp t, prioritizing selected item."""
+        if not self.state:
+            return None
+        # First priority: if selected clip contains t
+        for d in self.state.active_dialogues():
+            if d.index == self.selected_index and d.start <= t <= d.end:
+                return d
+        # Second priority: any clip containing t
+        for d in self.state.active_dialogues():
+            if d.start <= t <= d.end:
+                return d
+        # Third priority: selected clip even if playhead is slightly off
+        if self.selected_index >= 0:
+            for d in self.state.active_dialogues():
+                if d.index == self.selected_index:
+                    return d
+        return None
+
     def keyPressEvent(self, event):
         key = event.key()
+        modifiers = event.modifiers()
+        has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
         if key == Qt.Key.Key_Space:
             self.toggle_playback()
         elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             if self.selected_index >= 0:
                 self.delete_requested.emit(self.selected_index)
-        elif key == Qt.Key.Key_S:
-            if self.selected_index >= 0:
-                self.split_requested.emit(self.selected_index)
+            else:
+                item = self._get_clip_at_time(self.current_time)
+                if item:
+                    self.delete_requested.emit(item.index)
+        elif key == Qt.Key.Key_Q:
+            self.trim_left_requested.emit()
+        elif key == Qt.Key.Key_W:
+            self.trim_right_requested.emit()
+        elif key == Qt.Key.Key_S or (key == Qt.Key.Key_B and has_ctrl):
+            self.split_at_playhead_requested.emit()
         elif key == Qt.Key.Key_M:
             if self.selected_index >= 0:
                 self.merge_requested.emit(self.selected_index)
+        elif key == Qt.Key.Key_Z and has_ctrl:
+            if has_shift:
+                self.redo_requested.emit()
+            else:
+                self.undo_requested.emit()
+        elif key == Qt.Key.Key_Y and has_ctrl:
+            self.redo_requested.emit()
         elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self.zoom_in()
         elif key == Qt.Key.Key_Minus:
             self.zoom_out()
         elif key == Qt.Key.Key_Left:
-            step = 1.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 0.1
+            step = 1.0 if has_shift else 0.1
             self.set_current_time(self.current_time - step)
             self.seek_requested.emit(self.current_time)
         elif key == Qt.Key.Key_Right:
-            step = 1.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 0.1
+            step = 1.0 if has_shift else 0.1
             self.set_current_time(self.current_time + step)
             self.seek_requested.emit(self.current_time)
         else:
