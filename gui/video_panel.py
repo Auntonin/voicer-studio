@@ -28,6 +28,7 @@ class VideoPanel(QFrame):
     video_dropped = Signal(Path)
     playback_toggled = Signal(bool)
     browse_requested = Signal()
+    toggle_proxy_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,6 +39,8 @@ class VideoPanel(QFrame):
 
         self._video_path: Path | None = None
         self._proxy_path: Path | None = None
+        self._is_using_proxy: bool = False
+        self._proxy_height: int = 540
         self._is_user_seeking = False
         self._last_slider_seek_time = 0.0
 
@@ -65,11 +68,12 @@ class VideoPanel(QFrame):
         lbl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
         header.addWidget(lbl_title)
 
-        self.lbl_proxy_badge = QLabel("[ORIGINAL]")
-        self.lbl_proxy_badge.setStyleSheet(
-            "font-size: 7.5pt; font-weight: bold; color: #888888; background: #222222; "
-            "border: 1px solid #444444; border-radius: 3px; padding: 1px 6px; margin-left: 6px;"
-        )
+        self.lbl_proxy_badge = QPushButton("[ORIGINAL]")
+        self.lbl_proxy_badge.setObjectName("proxy_badge")
+        self.lbl_proxy_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_proxy_badge.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.lbl_proxy_badge.clicked.connect(self._on_proxy_badge_clicked)
+        self._update_badge("ORIGINAL")
         header.addWidget(self.lbl_proxy_badge)
         header.addStretch()
 
@@ -230,16 +234,23 @@ class VideoPanel(QFrame):
     def load_video(self, path: Path):
         self._video_path = path
         self._proxy_path = None
+        self._is_using_proxy = False
         self._update_badge("ORIGINAL")
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self._stack_layout.setCurrentIndex(1)
         self.btn_play.setText("Play")
 
-    def set_proxy_video(self, proxy_path: Path):
+    def set_status_generating(self):
+        """Show that the proxy is being actively created in background."""
+        self._update_badge("GENERATING")
+
+    def set_proxy_video(self, proxy_path: Path, height: int = 540):
         """Seamlessly hot-swap to the lightweight fast-seek proxy video."""
         if not proxy_path.exists():
             return
         self._proxy_path = proxy_path
+        self._proxy_height = height
+        self._is_using_proxy = True
         cur_pos = self.player.position()
         was_playing = self.is_playing()
 
@@ -248,23 +259,75 @@ class VideoPanel(QFrame):
         if was_playing:
             self.player.play()
 
-        self._update_badge("PROXY")
+        self._update_badge("PROXY", height)
 
-    def _update_badge(self, status: str):
+    def switch_to_original(self):
+        """Switch video player back to the full-resolution original video."""
+        if not self._video_path or not self._video_path.exists():
+            return
+        self._is_using_proxy = False
+        cur_pos = self.player.position()
+        was_playing = self.is_playing()
+
+        self.player.setSource(QUrl.fromLocalFile(str(self._video_path)))
+        self.player.setPosition(cur_pos)
+        if was_playing:
+            self.player.play()
+
+        self._update_badge("ORIGINAL")
+
+    def _on_proxy_badge_clicked(self):
+        """Toggle between Proxy and Original when clicking the player badge."""
+        if not self._video_path:
+            return
+        if self._is_using_proxy:
+            self.switch_to_original()
+        else:
+            if self._proxy_path and self._proxy_path.exists():
+                self.set_proxy_video(self._proxy_path, self._proxy_height)
+            else:
+                self.toggle_proxy_requested.emit()
+
+    def _update_badge(self, status: str, height: int = 540):
         if status == "PROXY":
-            self.lbl_proxy_badge.setText("[PROXY 540p]")
-            self.lbl_proxy_badge.setStyleSheet(
-                "font-size: 7.5pt; font-weight: bold; color: #4ade80; background: #142a1b; "
-                "border: 1px solid #22A05B; border-radius: 3px; padding: 1px 6px; margin-left: 6px;"
-            )
-            self.lbl_proxy_badge.setToolTip("Fast-Seek 540p Proxy is active for smooth playback & scrubbing.")
+            self.lbl_proxy_badge.setText(f"[PROXY {height}p]")
+            self.lbl_proxy_badge.setStyleSheet("""
+                QPushButton#proxy_badge {
+                    font-size: 7.5pt; font-weight: bold; color: #4ade80; background: #142a1b;
+                    border: 1px solid #22A05B; border-radius: 3px; padding: 1px 7px; margin-left: 6px;
+                }
+                QPushButton#proxy_badge:hover {
+                    background: #1c3d27; border-color: #4ade80;
+                }
+            """)
+            self.lbl_proxy_badge.setToolTip(f"Active: Fast-Seek {height}p Proxy for smooth scrubbing. Click to switch to Original video.")
+        elif status == "GENERATING":
+            self.lbl_proxy_badge.setText("[CREATING PROXY...]")
+            self.lbl_proxy_badge.setStyleSheet("""
+                QPushButton#proxy_badge {
+                    font-size: 7.5pt; font-weight: bold; color: #f59e0b; background: #261a06;
+                    border: 1px solid #b45309; border-radius: 3px; padding: 1px 7px; margin-left: 6px;
+                }
+                QPushButton#proxy_badge:hover {
+                    background: #382408;
+                }
+            """)
+            self.lbl_proxy_badge.setToolTip("Creating lightweight fast-seek proxy video in background with NVENC/CPU...")
         else:
             self.lbl_proxy_badge.setText("[ORIGINAL]")
-            self.lbl_proxy_badge.setStyleSheet(
-                "font-size: 7.5pt; font-weight: bold; color: #888888; background: #222222; "
-                "border: 1px solid #444444; border-radius: 3px; padding: 1px 6px; margin-left: 6px;"
-            )
-            self.lbl_proxy_badge.setToolTip("Original video is active. (Proxy will auto-activate when ready)")
+            self.lbl_proxy_badge.setStyleSheet("""
+                QPushButton#proxy_badge {
+                    font-size: 7.5pt; font-weight: bold; color: #a1a1aa; background: #222222;
+                    border: 1px solid #444444; border-radius: 3px; padding: 1px 7px; margin-left: 6px;
+                }
+                QPushButton#proxy_badge:hover {
+                    background: #2a2a2a; border-color: #666666; color: #ffffff;
+                }
+            """)
+            if self._proxy_path and self._proxy_path.exists():
+                self.lbl_proxy_badge.setToolTip("Active: Full-resolution Original video. Click to switch to Fast-Seek Proxy.")
+            else:
+                self.lbl_proxy_badge.setToolTip("Active: Full-resolution Original video. Click to generate Fast-Seek Proxy.")
 
     def show_video_info(self, state: PipelineState):
         name = state.video_path.name if state.video_path else "—"

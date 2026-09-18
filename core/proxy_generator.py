@@ -150,14 +150,15 @@ class ProxyWorker(QThread):
     proxy_ready = Signal(str)      # Emits str path to proxy video
     proxy_failed = Signal(str)     # Emits error message
 
-    def __init__(self, video_path: Path, target_height: int = PREVIEW_PROXY_HEIGHT, parent=None):
+    def __init__(self, video_path: Path, target_height: int = PREVIEW_PROXY_HEIGHT, force: bool = False, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.target_height = target_height
+        self.force = force
 
     def run(self):
         try:
-            proxy_path = ProxyGenerator.generate_proxy(self.video_path, self.target_height)
+            proxy_path = ProxyGenerator.generate_proxy(self.video_path, self.target_height, force=self.force)
             self.proxy_ready.emit(str(proxy_path))
         except Exception as e:
             logger.error(f"Background proxy worker failed: {e}", exc_info=True)

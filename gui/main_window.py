@@ -460,6 +460,7 @@ class MainWindow(QMainWindow):
         self._video_panel.browse_requested.connect(self.on_import_video)
         self._video_panel.seek_requested.connect(self._on_video_seek)
         self._video_panel.playback_toggled.connect(self._on_video_playback_toggled)
+        self._video_panel.toggle_proxy_requested.connect(self._on_toggle_proxy_requested)
 
         top_h_splitter.addWidget(self._video_panel)
 
@@ -1365,7 +1366,8 @@ class MainWindow(QMainWindow):
                 self._status_video.setText(f"File: {state.video_path.name}")
                 self._timeline.set_duration(state.video_duration)
                 if state.preview_proxy_path and state.preview_proxy_path.exists():
-                    self._video_panel.set_proxy_video(state.preview_proxy_path)
+                    proxy_h = self._settings.get("preview_proxy_height", 540)
+                    self._video_panel.set_proxy_video(state.preview_proxy_path, proxy_h)
                 else:
                     self._start_preview_proxy_generation(state.video_path)
             else:
@@ -1397,6 +1399,7 @@ class MainWindow(QMainWindow):
                 self._video_panel.show_video_info(state)
                 self._status_video.setText(f"File: {state.video_path.name}")
                 self._timeline.set_duration(state.video_duration)
+                self._start_preview_proxy_generation(state.video_path)
             else:
                 self._status_video.setText(f"Pack: {pack_dir.name}")
 
@@ -1577,44 +1580,54 @@ class MainWindow(QMainWindow):
         self._log_message(f"Video loaded: {path.name}", "ok")
         self._start_preview_proxy_generation(path)
 
-    def _start_preview_proxy_generation(self, path: Path):
+    def _on_toggle_proxy_requested(self):
+        """User clicked badge to request proxy generation or recreate."""
+        if self._state.video_path:
+            self._start_preview_proxy_generation(self._state.video_path, force=True)
+
+    def _start_preview_proxy_generation(self, path: Path, force: bool = False):
         """Generate or load low-res fast-seek proxy video in background for smooth playback."""
         try:
             proxy_enabled = self._settings.get("preview_proxy_enabled", True)
-            if not proxy_enabled:
+            target_height = self._settings.get("preview_proxy_height", 540)
+            if not proxy_enabled or target_height == 0:
+                self._video_panel.switch_to_original()
                 return
 
             from core.proxy_generator import ProxyGenerator, ProxyWorker
-            proxy_path = ProxyGenerator.get_default_proxy_path(path)
-            if proxy_path.exists():
+            proxy_path = ProxyGenerator.get_proxy_path(path, target_height)
+            if not force and proxy_path.exists() and proxy_path.stat().st_size > 1024:
                 self._state.preview_proxy_path = proxy_path
-                self._video_panel.set_proxy_video(proxy_path)
-                self._log_message(f"Loaded fast-seek preview proxy: {proxy_path.name}", "ok")
+                self._video_panel.set_proxy_video(proxy_path, target_height)
+                self._log_message(f"Loaded fast-seek preview proxy ({target_height}p): {proxy_path.name}", "ok")
                 return
 
-            target_height = self._settings.get("preview_proxy_height", 540)
-            self._log_message("Generating fast-seek preview proxy (540p) in background...", "info")
+            self._video_panel.set_status_generating()
+            self._log_message(f"Generating fast-seek preview proxy ({target_height}p) in background...", "info")
             if self.statusBar():
-                self.statusBar().showMessage("Creating preview proxy video...", 5000)
+                self.statusBar().showMessage(f"Creating {target_height}p preview proxy video...", 5000)
 
-            self._proxy_worker = ProxyWorker(path, target_height=target_height)
+            self._proxy_worker = ProxyWorker(path, target_height=target_height, force=force)
 
-            def on_proxy_finished(out_path: Path):
+            def on_proxy_ready(out_path_str: str):
+                out_path = Path(out_path_str)
                 self._state.preview_proxy_path = out_path
-                self._video_panel.set_proxy_video(out_path)
+                self._video_panel.set_proxy_video(out_path, target_height)
                 if self.statusBar():
-                    self.statusBar().showMessage("Preview proxy ready", 4000)
+                    self.statusBar().showMessage(f"Preview proxy ({target_height}p) ready", 4000)
                 self._log_message(f"Preview proxy ready: {out_path.name}", "ok")
 
             def on_proxy_failed(err: str):
+                self._video_panel.switch_to_original()
                 if self.statusBar():
                     self.statusBar().showMessage("Preview proxy skipped", 4000)
                 self._log_message(f"Preview proxy skipped: {err}", "warn")
 
-            self._proxy_worker.finished.connect(on_proxy_finished)
-            self._proxy_worker.failed.connect(on_proxy_failed)
+            self._proxy_worker.proxy_ready.connect(on_proxy_ready)
+            self._proxy_worker.proxy_failed.connect(on_proxy_failed)
             self._proxy_worker.start()
         except Exception as e:
+            self._video_panel.switch_to_original()
             self._log_message(f"Preview proxy error: {e}", "warn")
 
     def on_open_export_folder(self):
@@ -1872,9 +1885,21 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self)
         dlg.load_settings(self._settings)
         if dlg.exec_():
+            old_proxy_enabled = self._settings.get("preview_proxy_enabled", True)
+            old_proxy_h = self._settings.get("preview_proxy_height", 540)
+
             self._settings = dlg.get_settings()
             self._save_settings(self._settings)
             self._timeline.set_sticky_headers(self._settings.get("timeline_sticky_headers", True))
+
+            new_proxy_enabled = self._settings.get("preview_proxy_enabled", True)
+            new_proxy_h = self._settings.get("preview_proxy_height", 540)
+            if self._state.video_path and (old_proxy_enabled != new_proxy_enabled or old_proxy_h != new_proxy_h):
+                if not new_proxy_enabled or new_proxy_h == 0:
+                    self._video_panel.switch_to_original()
+                    self._state.preview_proxy_path = None
+                else:
+                    self._start_preview_proxy_generation(self._state.video_path)
 
     def _on_timeline_sticky_toggled(self, is_sticky: bool):
         self._settings["timeline_sticky_headers"] = is_sticky
