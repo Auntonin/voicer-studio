@@ -1,4 +1,5 @@
 {
+  "app_language": "en",
   "hf_token": "",
   "whisper_model": "large-v3",
   "whisper_language": null,

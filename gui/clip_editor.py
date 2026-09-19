@@ -12,6 +12,7 @@ from PySide6.QtGui import QPixmap, QImage, QIcon, QTextCursor
 
 from core.models import DialogueItem, PipelineState
 from config import COLORS, ASSETS_DIR
+from core.i18n import tr
 
 
 class CaptionTextEdit(QPlainTextEdit):
@@ -160,7 +161,7 @@ class ClipEditor(QWidget):
         fc_layout.setContentsMargins(10, 10, 10, 10)
         fc_layout.setSpacing(6)
 
-        self.image_preview = QLabel("No Video Frame")
+        self.image_preview = QLabel(tr("ed_no_frame"))
         self.image_preview.setFixedSize(160, 90)
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview.setStyleSheet(
@@ -170,13 +171,14 @@ class ClipEditor(QWidget):
 
         play_layout = QHBoxLayout()
         play_layout.setSpacing(4)
-        self.btn_play = QPushButton("Play Audio")
-        self.btn_stop = QPushButton("Stop")
+        self.btn_play = QPushButton(tr("ed_play_audio"))
+        self.btn_stop = QPushButton(tr("ed_stop_audio"))
         play_layout.addWidget(self.btn_play)
         play_layout.addWidget(self.btn_stop)
         fc_layout.addLayout(play_layout)
 
-        self.btn_change_image = QPushButton("Recapture Frame")
+        self.btn_change_image = QPushButton(tr("ed_recapture_frame"))
+        self.btn_change_image.setToolTip(tr("ed_recapture_frame_tip"))
         self.btn_change_image.clicked.connect(self.on_change_image)
         fc_layout.addWidget(self.btn_change_image)
 
@@ -189,18 +191,21 @@ class ClipEditor(QWidget):
         tc_layout.setContentsMargins(10, 10, 10, 10)
         tc_layout.setSpacing(6)
 
-        tc_layout.addWidget(QLabel("CHARACTER & TIMING", objectName="section_title"))
+        self.lbl_title_timing = QLabel(tr("ed_timing_title"), objectName="section_title")
+        tc_layout.addWidget(self.lbl_title_timing)
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(6)
 
-        grid.addWidget(QLabel("Character:"), 0, 0)
+        self.lbl_spk = QLabel(tr("ed_speaker_label"))
+        grid.addWidget(self.lbl_spk, 0, 0)
         self.combo_speaker = QComboBox()
         self.combo_speaker.currentIndexChanged.connect(self._on_speaker_changed)
         grid.addWidget(self.combo_speaker, 0, 1)
 
-        grid.addWidget(QLabel("Start (s):"), 1, 0)
+        self.lbl_start = QLabel(tr("ed_start_label"))
+        grid.addWidget(self.lbl_start, 1, 0)
         self.spin_start = QDoubleSpinBox()
         self.spin_start.setDecimals(3)
         self.spin_start.setRange(0, 99999)
@@ -208,7 +213,8 @@ class ClipEditor(QWidget):
         self.spin_start.valueChanged.connect(self._on_time_changed)
         grid.addWidget(self.spin_start, 1, 1)
 
-        grid.addWidget(QLabel("End (s):"), 2, 0)
+        self.lbl_end = QLabel(tr("ed_end_label"))
+        grid.addWidget(self.lbl_end, 2, 0)
         self.spin_end = QDoubleSpinBox()
         self.spin_end.setDecimals(3)
         self.spin_end.setRange(0, 99999)
@@ -237,10 +243,10 @@ class ClipEditor(QWidget):
         cap_header.setContentsMargins(0, 0, 0, 0)
         cap_header.setSpacing(8)
 
-        lbl_title = QLabel("DIALOGUE CAPTION", objectName="section_title")
-        cap_header.addWidget(lbl_title)
+        self.lbl_title_cap = QLabel(tr("ed_caption_title"), objectName="section_title")
+        cap_header.addWidget(self.lbl_title_cap)
 
-        self.lbl_clip_badge = QLabel("No Selection")
+        self.lbl_clip_badge = QLabel(tr("ed_no_selection"))
         self.lbl_clip_badge.setStyleSheet(
             "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #132338; "
             "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
@@ -255,8 +261,8 @@ class ClipEditor(QWidget):
         )
         cap_header.addWidget(self.lbl_caption_stats)
 
-        self.btn_regen_caption = QPushButton("Re-Transcribe")
-        self.btn_regen_caption.setToolTip("Re-transcribe this clip audio using Whisper AI")
+        self.btn_regen_caption = QPushButton(tr("ed_retranscribe"))
+        self.btn_regen_caption.setToolTip(tr("ed_retranscribe_tip"))
         sparkles_icon = ASSETS_DIR / "icons" / "sparkles.svg"
         if sparkles_icon.exists():
             self.btn_regen_caption.setIcon(QIcon(str(sparkles_icon)))
@@ -267,7 +273,7 @@ class ClipEditor(QWidget):
 
         # Minimalist Adobe Dark Text Area with full Undo/Redo support
         self.txt_caption = CaptionTextEdit()
-        self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
+        self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
         self.txt_caption.setMinimumHeight(64)
         self.txt_caption.setMaximumHeight(74)
         self.txt_caption.setStyleSheet(f"""
@@ -307,9 +313,9 @@ class ClipEditor(QWidget):
             return b
 
         # Left Group: Clip operations
-        self.btn_split = _make_btn("Split Clip", "split.svg", "Split clip at playhead or midpoint")
-        self.btn_merge = _make_btn("Merge Next", "merge.svg", "Merge dialogue line with the next clip")
-        self.btn_delete = _make_btn("Delete Clip", "trash.svg", "Delete this clip (Del)", is_danger=True)
+        self.btn_split = _make_btn(tr("ed_split_clip"), "split.svg", tr("ed_split_clip_tip"))
+        self.btn_merge = _make_btn(tr("ed_merge_next"), "merge.svg", tr("ed_merge_next_tip"))
+        self.btn_delete = _make_btn(tr("ed_delete_clip"), "trash.svg", tr("ed_delete_clip_tip"), is_danger=True)
 
         self.btn_split.clicked.connect(self.on_split)
         self.btn_merge.clicked.connect(self.on_merge)
@@ -322,9 +328,9 @@ class ClipEditor(QWidget):
         btn_layout.addStretch()
 
         # Right Group: Utilities & Audio Tools
-        self.btn_copy = _make_btn("Copy", "copy.svg", "Copy dialogue caption to clipboard")
-        self.btn_clear = _make_btn("Clear", "clear.svg", "Clear caption text")
-        self.btn_regen_audio = _make_btn("Re-slice Audio", "wave.svg", "Re-extract audio slice for this clip from source")
+        self.btn_copy = _make_btn(tr("ed_copy"), "copy.svg", tr("ed_copy_tip"))
+        self.btn_clear = _make_btn(tr("ed_clear"), "clear.svg", tr("ed_clear_tip"))
+        self.btn_regen_audio = _make_btn(tr("ed_reslice_audio"), "wave.svg", tr("ed_reslice_audio_tip"))
 
         self.btn_copy.clicked.connect(self._on_copy_caption)
         self.btn_clear.clicked.connect(self._on_clear_caption)
@@ -604,3 +610,41 @@ class ClipEditor(QWidget):
             self.speaker_changed.emit(self.item.index, self.combo_speaker.currentData())
             self.timestamps_changed.emit(self.item.index, self.spin_start.value(), self.spin_end.value())
             self._set_save_status("Saved")
+
+    def retranslate_ui(self):
+        """Refreshes all labels and button texts in the Clip Editor."""
+        self.btn_play.setText(tr("ed_play_audio"))
+        self.btn_stop.setText(tr("ed_stop_audio"))
+        self.btn_change_image.setText(tr("ed_recapture_frame"))
+        self.btn_change_image.setToolTip(tr("ed_recapture_frame_tip"))
+
+        self.lbl_title_timing.setText(tr("ed_timing_title"))
+        self.lbl_spk.setText(tr("ed_speaker_label"))
+        self.lbl_start.setText(tr("ed_start_label"))
+        self.lbl_end.setText(tr("ed_end_label"))
+
+        self.lbl_title_cap.setText(tr("ed_caption_title"))
+        if not self.item:
+            self.lbl_clip_badge.setText(tr("ed_no_selection"))
+            self.image_preview.setText(tr("ed_no_frame"))
+        else:
+            self.lbl_clip_badge.setText(tr("ed_clip_badge", index=self.item.index))
+
+        self.btn_regen_caption.setText(tr("ed_retranscribe"))
+        self.btn_regen_caption.setToolTip(tr("ed_retranscribe_tip"))
+        self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
+
+        self.btn_split.setText(tr("ed_split_clip"))
+        self.btn_split.setToolTip(tr("ed_split_clip_tip"))
+        self.btn_merge.setText(tr("ed_merge_next"))
+        self.btn_merge.setToolTip(tr("ed_merge_next_tip"))
+        self.btn_delete.setText(tr("ed_delete_clip"))
+        self.btn_delete.setToolTip(tr("ed_delete_clip_tip"))
+
+        self.btn_copy.setText(tr("ed_copy"))
+        self.btn_copy.setToolTip(tr("ed_copy_tip"))
+        self.btn_clear.setText(tr("ed_clear"))
+        self.btn_clear.setToolTip(tr("ed_clear_tip"))
+        self.btn_regen_audio.setText(tr("ed_reslice_audio"))
+        self.btn_regen_audio.setToolTip(tr("ed_reslice_audio_tip"))
+

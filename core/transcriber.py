@@ -217,7 +217,7 @@ class Transcriber:
                 new_dialogues.append(item)
 
                 if progress_cb:
-                    progress_cb(idx, -1, f"แยกประโยค [{idx}] {start:.1f}s–{end:.1f}s: {raw_text[:30]}...")
+                    progress_cb(idx, -1, f"Segment [{idx}] {start:.1f}s–{end:.1f}s: {raw_text[:30]}...")
                 idx += 1
 
             if not new_dialogues:

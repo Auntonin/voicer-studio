@@ -13,6 +13,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QCursor, QFontM
 
 from core.models import PipelineState, DialogueItem
 from config import COLORS, SPEAKER_PALETTE
+from core.i18n import tr
 
 
 class TimelineWidget(QWidget):
@@ -1216,7 +1217,7 @@ class TimelineWidget(QWidget):
             mode, item = self._hit_test(x, y)
             if mode == "pin_button":
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
-                tip_text = "Sticky Tracks: ON (Click to unpin) / ตรึงรายชื่อตัวละคร" if self.sticky_headers else "Sticky Tracks: OFF (Click to pin) / ตรึงรายชื่อตัวละคร"
+                tip_text = tr("tl_sticky_on") if self.sticky_headers else tr("tl_sticky_off")
                 QToolTip.showText(event.globalPosition().toPoint(), tip_text, self)
                 if not self._is_hovering_pin:
                     self._is_hovering_pin = True

@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QFont
 
 from config import ASSETS_DIR
+from core.i18n import tr
 from gui.ui_utils import apply_dark_title_bar
 
 
@@ -80,7 +81,7 @@ class ShortcutsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Keyboard Shortcuts")
+        self.setWindowTitle(tr("sc_dialog_title"))
         self.resize(880, 600)
         self.setMinimumSize(720, 480)
 
@@ -99,12 +100,12 @@ class ShortcutsDialog(QDialog):
                 border: 1px solid #333333;
                 border-radius: 5px;
                 padding: 6px 12px;
-                color: #ffffff;
+                color: #f4f4f5;
                 font-size: 8.5pt;
             }
             QLineEdit:focus {
-                border-color: #1473E6;
-                background-color: #141414;
+                border: 1px solid #0078d4;
+                background-color: #181818;
             }
             QScrollArea {
                 border: none;
@@ -124,9 +125,9 @@ class ShortcutsDialog(QDialog):
                 background: #484848;
             }
             QPushButton#close_btn {
-                background-color: #242424;
-                border: 1px solid #383838;
-                border-radius: 5px;
+                background-color: #262626;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
                 padding: 6px 20px;
                 color: #ffffff;
                 font-size: 8.5pt;
@@ -150,7 +151,7 @@ class ShortcutsDialog(QDialog):
         header_text = QVBoxLayout()
         header_text.setSpacing(2)
 
-        title_lbl = QLabel("Keyboard Shortcuts")
+        title_lbl = QLabel(tr("sc_dialog_title"))
         title_lbl.setStyleSheet("font-size: 13pt; font-weight: bold; color: #ffffff; letter-spacing: -0.2px;")
         sub_lbl = QLabel("Quick reference guide for Voicer Studio editing controls and keybindings")
         sub_lbl.setStyleSheet("font-size: 8.5pt; color: #888888;")
@@ -162,7 +163,7 @@ class ShortcutsDialog(QDialog):
 
         # Search Filter Box
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search shortcuts... (e.g. split, zoom, Q, S)")
+        self.search_box.setPlaceholderText(tr("sc_search_placeholder"))
         self.search_box.setFixedWidth(240)
         self.search_box.textChanged.connect(self._filter_shortcuts)
         top_bar.addWidget(self.search_box)
@@ -220,7 +221,14 @@ class ShortcutsDialog(QDialog):
             card_layout.setContentsMargins(14, 12, 14, 14)
             card_layout.setSpacing(8)
 
-            cat_title = QLabel(cat_data["category"])
+            cat_map = {
+                "TIMELINE NAVIGATION & PLAYBACK": "sc_cat_timeline",
+                "CLIP EDITING & TRIMMING": "sc_cat_editing",
+                "TRACKS & CHARACTERS": "sc_cat_tracks",
+                "PROJECT & APPLICATION": "sc_cat_project",
+            }
+            cat_text = tr(cat_map.get(cat_data["category"], cat_data["category"]))
+            cat_title = QLabel(cat_text)
             cat_title.setStyleSheet("""
                 font-size: 8pt;
                 font-weight: bold;

@@ -31,6 +31,7 @@ from config import (
 from core.models import PipelineState, PipelineStep, UndoManager, SpeakerInfo, DialogueItem, PackInfo
 from core.project_manager import ProjectManager, PROJECT_FILE_EXTENSION
 from core.pipeline import PipelineWorker, ExportWorker, build_options_from_settings
+from core.i18n import i18n, tr
 from gui.dialogue_table import DialogueTable
 from gui.clip_editor import ClipEditor
 from gui.timeline_widget import TimelineWidget
@@ -81,6 +82,9 @@ class MainWindow(QMainWindow):
         self._worker: PipelineWorker | None = None
         self._export_worker: ExportWorker | None = None
         self._settings: dict = self._load_settings()
+        # Initialize UI language (defaults to 100% English)
+        app_lang = self._settings.get("app_language", "en")
+        i18n.set_language(app_lang)
         self._output_dir: Path | None = None
         self._current_project_path: Path | None = None
         self._is_dirty: bool = False
@@ -239,115 +243,115 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         # File Menu
-        menu_file = menubar.addMenu("File")
+        self._menu_file = menubar.addMenu(tr("menu_file"))
 
-        act_new_proj = menu_file.addAction("New Project")
-        act_new_proj.setShortcut("Ctrl+N")
-        act_new_proj.triggered.connect(self.on_new_project)
+        self._act_new_proj = self._menu_file.addAction(tr("menu_new_proj"))
+        self._act_new_proj.setShortcut("Ctrl+N")
+        self._act_new_proj.triggered.connect(self.on_new_project)
 
-        act_open_proj = menu_file.addAction("Open Project...")
-        act_open_proj.setShortcut("Ctrl+O")
-        act_open_proj.triggered.connect(self.on_open_project)
+        self._act_open_proj = self._menu_file.addAction(tr("menu_open_proj"))
+        self._act_open_proj.setShortcut("Ctrl+O")
+        self._act_open_proj.triggered.connect(self.on_open_project)
 
-        act_open_pack = menu_file.addAction("Open Pack Folder...")
-        act_open_pack.triggered.connect(self.on_open_pack_folder)
+        self._act_open_pack = self._menu_file.addAction(tr("menu_open_pack"))
+        self._act_open_pack.triggered.connect(self.on_open_pack_folder)
 
-        self._menu_recent_projects = menu_file.addMenu("Open Recent Project")
+        self._menu_recent_projects = self._menu_file.addMenu(tr("menu_recent_proj"))
         self._rebuild_recent_projects_menu()
 
-        menu_file.addSeparator()
+        self._menu_file.addSeparator()
 
-        act_save_proj = menu_file.addAction("Save Project")
-        act_save_proj.setShortcut("Ctrl+S")
-        act_save_proj.triggered.connect(self.on_save_project)
+        self._act_save_proj = self._menu_file.addAction(tr("menu_save_proj"))
+        self._act_save_proj.setShortcut("Ctrl+S")
+        self._act_save_proj.triggered.connect(self.on_save_project)
 
-        act_save_proj_as = menu_file.addAction("Save Project As...")
-        act_save_proj_as.setShortcut("Ctrl+Shift+S")
-        act_save_proj_as.triggered.connect(self.on_save_project_as)
+        self._act_save_proj_as = self._menu_file.addAction(tr("menu_save_proj_as"))
+        self._act_save_proj_as.setShortcut("Ctrl+Shift+S")
+        self._act_save_proj_as.triggered.connect(self.on_save_project_as)
 
-        menu_file.addSeparator()
+        self._menu_file.addSeparator()
 
-        act_import = menu_file.addAction("Import Video...")
-        act_import.setShortcut("Ctrl+I")
-        act_import.triggered.connect(self.on_import_video)
+        self._act_import_menu = self._menu_file.addAction(tr("menu_import_video"))
+        self._act_import_menu.setShortcut("Ctrl+I")
+        self._act_import_menu.triggered.connect(self.on_import_video)
 
-        self._menu_recent_videos = menu_file.addMenu("Open Recent Video")
+        self._menu_recent_videos = self._menu_file.addMenu(tr("menu_recent_videos"))
         self._rebuild_recent_videos_menu()
 
-        menu_file.addSeparator()
+        self._menu_file.addSeparator()
 
-        act_export = menu_file.addAction("Export Pack ZIP...")
-        act_export.setShortcut("Ctrl+E")
-        act_export.triggered.connect(self.on_export)
+        self._act_export_menu = self._menu_file.addAction(tr("menu_export_pack"))
+        self._act_export_menu.setShortcut("Ctrl+E")
+        self._act_export_menu.triggered.connect(self.on_export)
 
-        menu_file.addSeparator()
-        act_quit = menu_file.addAction("Quit")
-        act_quit.setShortcut("Ctrl+Q")
-        act_quit.triggered.connect(self.close)
+        self._menu_file.addSeparator()
+        self._act_quit = self._menu_file.addAction(tr("menu_quit"))
+        self._act_quit.setShortcut("Ctrl+Q")
+        self._act_quit.triggered.connect(self.close)
 
         # Edit Menu (Undo / Redo)
-        menu_edit = menubar.addMenu("Edit")
+        self._menu_edit = menubar.addMenu(tr("menu_edit"))
         
-        self.act_undo = menu_edit.addAction("Undo")
+        self.act_undo = self._menu_edit.addAction(tr("menu_undo"))
         self.act_undo.setShortcut("Ctrl+Z")
         self.act_undo.triggered.connect(self.on_undo)
 
-        self.act_redo = menu_edit.addAction("Redo")
+        self.act_redo = self._menu_edit.addAction(tr("menu_redo"))
         self.act_redo.setShortcut("Ctrl+Shift+Z")
         self.act_redo.triggered.connect(self.on_redo)
 
-        menu_edit.addSeparator()
-        act_kb_shortcuts = menu_edit.addAction("Keyboard Shortcuts...")
-        act_kb_shortcuts.triggered.connect(self._show_shortcuts_dialog)
+        self._menu_edit.addSeparator()
+        self._act_kb_shortcuts = self._menu_edit.addAction(tr("menu_shortcuts"))
+        self._act_kb_shortcuts.triggered.connect(self._show_shortcuts_dialog)
 
-        act_settings = menu_edit.addAction("Settings...")
-        act_settings.triggered.connect(self.on_settings)
+        self._act_settings = self._menu_edit.addAction(tr("menu_settings"))
+        self._act_settings.triggered.connect(self.on_settings)
 
         # View Menu (Toggle visibility of panels & Full Screen)
-        menu_view = menubar.addMenu("View")
+        self._menu_view = menubar.addMenu(tr("menu_view"))
 
-        self.act_fullscreen = menu_view.addAction("Full Screen")
+        self.act_fullscreen = self._menu_view.addAction(tr("menu_fullscreen"))
         self.act_fullscreen.setShortcut("F11")
         self.act_fullscreen.setCheckable(True)
         self.act_fullscreen.setChecked(False)
         self.act_fullscreen.triggered.connect(self._toggle_fullscreen)
 
-        menu_view.addSeparator()
+        self._menu_view.addSeparator()
 
-        self.act_v_video = menu_view.addAction("Video Preview Player")
+        self.act_v_video = self._menu_view.addAction(tr("menu_video_player"))
         self.act_v_video.setCheckable(True)
         self.act_v_video.setChecked(True)
         self.act_v_video.triggered.connect(lambda c: self._video_panel.setVisible(c))
 
-        self.act_v_sidebar = menu_view.addAction("Sidebar Tabs (Dialogues / Speakers / Pack Info)")
+        self.act_v_sidebar = self._menu_view.addAction(tr("menu_sidebar_tabs"))
         self.act_v_sidebar.setCheckable(True)
         self.act_v_sidebar.setChecked(True)
         self.act_v_sidebar.triggered.connect(lambda c: self._sidebar_tabs.setVisible(c))
 
-        self.act_v_timeline = menu_view.addAction("Multi-Track Timeline")
+        self.act_v_timeline = self._menu_view.addAction(tr("menu_timeline"))
         self.act_v_timeline.setCheckable(True)
         self.act_v_timeline.setChecked(True)
         self.act_v_timeline.triggered.connect(lambda c: self._timeline_container.setVisible(c))
 
-        self.act_v_clip_editor = menu_view.addAction("Clip Editor")
+        self.act_v_clip_editor = self._menu_view.addAction(tr("menu_clip_editor"))
         self.act_v_clip_editor.setCheckable(True)
         self.act_v_clip_editor.setChecked(True)
         self.act_v_clip_editor.triggered.connect(lambda c: self._clip_editor.setVisible(c))
 
-        self.act_v_progress = menu_view.addAction("Processing Logs")
+        self.act_v_progress = self._menu_view.addAction(tr("menu_processing_logs"))
         self.act_v_progress.setCheckable(True)
         self.act_v_progress.setChecked(False)
         self.act_v_progress.triggered.connect(lambda c: self._progress_panel.setVisible(c))
 
         # Help Menu
-        menu_help = menubar.addMenu("Help")
-        act_shortcuts_help = menu_help.addAction("Keyboard Shortcuts...")
-        act_shortcuts_help.setShortcut("F1")
-        act_shortcuts_help.triggered.connect(self._show_shortcuts_dialog)
+        self._menu_help = menubar.addMenu(tr("menu_help"))
+        self._act_shortcuts_help = self._menu_help.addAction(tr("menu_shortcuts"))
+        self._act_shortcuts_help.setShortcut("F1")
+        self._act_shortcuts_help.triggered.connect(self._show_shortcuts_dialog)
 
-        menu_help.addSeparator()
-        act_about = menu_help.addAction("About")
-        act_about.triggered.connect(self._show_about_dialog)
+        self._menu_help.addSeparator()
+        self._act_about = self._menu_help.addAction(tr("menu_about"))
+        self._act_about.triggered.connect(self._show_about_dialog)
 
     def _show_shortcuts_dialog(self):
         """Open the modern Keyboard Shortcuts reference sheet dialog."""
@@ -398,11 +402,11 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             return a
 
-        self._act_import      = act("Import Video",          self.on_import_video,       "Ctrl+I", "Import a video file", "import.svg")
-        self._act_analyze     = act("Analyze",               self.on_analyze,            "Ctrl+R", "One-Click: Run audio separation, speech extraction, and auto-export ZIP pack", "analyze.svg")
-        self._act_export      = act("Export Pack ZIP",       self.on_export,             "Ctrl+E", "Export The Choice Voicer pack", "package.svg")
-        self._act_open_folder = act("Open Output Folder",    self.on_open_export_folder, "",       "Open output folder in Explorer", "folder.svg")
-        self._act_settings    = act("Settings",              self.on_settings,           "",       "Application settings", "settings.svg")
+        self._act_import      = act(tr("tb_import"),          self.on_import_video,       "Ctrl+I", tr("tb_import_tip"), "import.svg")
+        self._act_analyze     = act(tr("tb_analyze"),         self.on_analyze,            "Ctrl+R", tr("tb_analyze_tip"), "analyze.svg")
+        self._act_export      = act(tr("tb_export"),          self.on_export,             "Ctrl+E", tr("tb_export_tip"), "package.svg")
+        self._act_open_folder = act(tr("tb_open_folder"),     self.on_open_export_folder, "",       tr("tb_open_folder_tip"), "folder.svg")
+        self._act_settings    = act(tr("tb_settings"),        self.on_settings,           "",       tr("tb_settings_tip"), "settings.svg")
 
         tb.addAction(self._act_import)
         tb.addSeparator()
@@ -468,13 +472,13 @@ class MainWindow(QMainWindow):
         self._sidebar_tabs = QTabWidget()
         
         self._dialogue_table = DialogueTable()
-        self._sidebar_tabs.addTab(self._dialogue_table, "Dialogues")
+        self._sidebar_tabs.addTab(self._dialogue_table, tr("tab_dialogues"))
         
         self._speaker_panel = SpeakerPanel()
-        self._sidebar_tabs.addTab(self._speaker_panel, "Speakers")
+        self._sidebar_tabs.addTab(self._speaker_panel, tr("tab_speakers"))
         
         self._pack_info_panel = PackInfoPanel()
-        self._sidebar_tabs.addTab(self._pack_info_panel, "Pack Info")
+        self._sidebar_tabs.addTab(self._pack_info_panel, tr("tab_pack_info"))
         
         top_h_splitter.addWidget(self._sidebar_tabs)
         top_h_splitter.setSizes([450, 850])
@@ -553,9 +557,9 @@ class MainWindow(QMainWindow):
 
         # Timeline Header Controls Bar
         tl_header = QHBoxLayout()
-        tl_title = QLabel("MULTI-TRACK TIMELINE", objectName="section_title")
-        tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px; margin-right: 4px;")
-        tl_header.addWidget(tl_title)
+        self._lbl_tl_title = QLabel(tr("tl_title"), objectName="section_title")
+        self._lbl_tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px; margin-right: 4px;")
+        tl_header.addWidget(self._lbl_tl_title)
 
         # Minimal info/keyboard shortcut button (hover shows clean cheat-sheet, click opens full shortcuts dialog)
         btn_tl_shortcuts = capcut_btn("", "keyboard.svg", "", compact=True)
@@ -582,42 +586,42 @@ class MainWindow(QMainWindow):
         tl_header.addStretch()
 
         # CapCut Style Quick Edit Tools:
-        btn_tl_undo       = capcut_btn("", "undo.svg", "Undo (Ctrl+Z)", compact=True)
-        btn_tl_redo       = capcut_btn("", "redo.svg", "Redo (Ctrl+Y)", compact=True)
+        self._btn_tl_undo       = capcut_btn("", "undo.svg", tr("tl_btn_undo_tip"), compact=True)
+        self._btn_tl_redo       = capcut_btn("", "redo.svg", tr("tl_btn_redo_tip"), compact=True)
 
-        btn_tl_split      = capcut_btn("", "split.svg", "Split at Playhead (S / Ctrl+B)", compact=True)
-        btn_tl_trim_left  = capcut_btn("", "trim-left.svg", "Delete Left to Playhead (Q)", compact=True)
-        btn_tl_trim_right = capcut_btn("", "trim-right.svg", "Delete Right from Playhead (W)", compact=True)
-        btn_tl_del_clip   = capcut_btn("", "trash.svg", "Delete Selected Clip (Del)", compact=True)
+        self._btn_tl_split      = capcut_btn("", "split.svg", tr("tl_btn_split_tip"), compact=True)
+        self._btn_tl_trim_left  = capcut_btn("", "trim-left.svg", tr("tl_btn_trim_left_tip"), compact=True)
+        self._btn_tl_trim_right = capcut_btn("", "trim-right.svg", tr("tl_btn_trim_right_tip"), compact=True)
+        self._btn_tl_del_clip   = capcut_btn("", "trash.svg", tr("tl_btn_delete_tip"), compact=True)
 
-        btn_tl_add_track  = capcut_btn("Add Track", "plus.svg", "Add Character Track (+)")
-        btn_tl_add_clip   = capcut_btn("Add Clip", "clip.svg", "Add Dialogue Clip at Playhead")
+        self._btn_tl_add_track  = capcut_btn(tr("tl_btn_add_track"), "plus.svg", tr("tl_btn_add_track_tip"))
+        self._btn_tl_add_clip   = capcut_btn(tr("tl_btn_add_clip"), "clip.svg", tr("tl_btn_add_clip_tip"))
 
-        btn_tl_play    = capcut_btn("Play", "play.svg", "Play / Pause Timeline (Space)")
-        btn_tl_stop    = capcut_btn("Stop", "stop.svg", "Stop Playback")
-        btn_tl_zoomin  = capcut_btn("Zoom In", "zoom-in.svg", "Zoom In Timeline (+ / =)")
-        btn_tl_zoomout = capcut_btn("Zoom Out", "zoom-out.svg", "Zoom Out Timeline (-)")
+        self._btn_tl_play    = capcut_btn(tr("tl_btn_play"), "play.svg", tr("tl_btn_play_tip"))
+        self._btn_tl_stop    = capcut_btn(tr("tl_btn_stop"), "stop.svg", tr("tl_btn_stop_tip"))
+        self._btn_tl_zoomin  = capcut_btn(tr("tl_btn_zoomin"), "zoom-in.svg", tr("tl_btn_zoom_in_tip"))
+        self._btn_tl_zoomout = capcut_btn(tr("tl_btn_zoomout"), "zoom-out.svg", tr("tl_btn_zoom_out_tip"))
 
-        tl_header.addWidget(btn_tl_undo)
-        tl_header.addWidget(btn_tl_redo)
+        tl_header.addWidget(self._btn_tl_undo)
+        tl_header.addWidget(self._btn_tl_redo)
         tl_header.addWidget(v_sep())
 
-        tl_header.addWidget(btn_tl_split)
-        tl_header.addWidget(btn_tl_trim_left)
-        tl_header.addWidget(btn_tl_trim_right)
-        tl_header.addWidget(btn_tl_del_clip)
+        tl_header.addWidget(self._btn_tl_split)
+        tl_header.addWidget(self._btn_tl_trim_left)
+        tl_header.addWidget(self._btn_tl_trim_right)
+        tl_header.addWidget(self._btn_tl_del_clip)
         tl_header.addWidget(v_sep())
 
-        tl_header.addWidget(btn_tl_add_track)
-        tl_header.addWidget(btn_tl_add_clip)
+        tl_header.addWidget(self._btn_tl_add_track)
+        tl_header.addWidget(self._btn_tl_add_clip)
         tl_header.addWidget(v_sep())
 
-        tl_header.addWidget(btn_tl_play)
-        tl_header.addWidget(btn_tl_stop)
+        tl_header.addWidget(self._btn_tl_play)
+        tl_header.addWidget(self._btn_tl_stop)
         tl_header.addWidget(v_sep())
 
-        tl_header.addWidget(btn_tl_zoomin)
-        tl_header.addWidget(btn_tl_zoomout)
+        tl_header.addWidget(self._btn_tl_zoomin)
+        tl_header.addWidget(self._btn_tl_zoomout)
 
         tl_layout.addLayout(tl_header)
 
@@ -637,20 +641,20 @@ class MainWindow(QMainWindow):
         self._main_v_splitter.addWidget(self._timeline_container)
 
         # Connect Timeline Header buttons
-        btn_tl_undo.clicked.connect(self.on_undo)
-        btn_tl_redo.clicked.connect(self.on_redo)
-        btn_tl_split.clicked.connect(self._on_split_at_playhead)
-        btn_tl_trim_left.clicked.connect(self._on_trim_left)
-        btn_tl_trim_right.clicked.connect(self._on_trim_right)
-        btn_tl_del_clip.clicked.connect(self._on_delete_selected_clip)
+        self._btn_tl_undo.clicked.connect(self.on_undo)
+        self._btn_tl_redo.clicked.connect(self.on_redo)
+        self._btn_tl_split.clicked.connect(self._on_split_at_playhead)
+        self._btn_tl_trim_left.clicked.connect(self._on_trim_left)
+        self._btn_tl_trim_right.clicked.connect(self._on_trim_right)
+        self._btn_tl_del_clip.clicked.connect(self._on_delete_selected_clip)
 
-        btn_tl_add_track.clicked.connect(self._on_add_track)
-        btn_tl_add_clip.clicked.connect(self._on_add_clip)
+        self._btn_tl_add_track.clicked.connect(self._on_add_track)
+        self._btn_tl_add_clip.clicked.connect(self._on_add_clip)
 
-        btn_tl_play.clicked.connect(self._toggle_global_playback)
-        btn_tl_stop.clicked.connect(self._stop_global_playback)
-        btn_tl_zoomin.clicked.connect(self._timeline.zoom_in)
-        btn_tl_zoomout.clicked.connect(self._timeline.zoom_out)
+        self._btn_tl_play.clicked.connect(self._toggle_global_playback)
+        self._btn_tl_stop.clicked.connect(self._stop_global_playback)
+        self._btn_tl_zoomin.clicked.connect(self._timeline.zoom_in)
+        self._btn_tl_zoomout.clicked.connect(self._timeline.zoom_out)
 
         # Section 3: Clip Editor
         self._clip_editor = ClipEditor()
@@ -1257,10 +1261,10 @@ class MainWindow(QMainWindow):
     def _build_statusbar(self):
         sb = QStatusBar()
         self.setStatusBar(sb)
-        self._status_video = QLabel("No video loaded")
-        self._status_save = QLabel("[Ready]")
+        self._status_video = QLabel(tr("status_no_video"))
+        self._status_save = QLabel(tr("status_ready"))
         self._status_save.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8.5pt; padding-right: 12px;")
-        self._status_version = QLabel(f"v{APP_VERSION}  |  The Choice Voicer Dialogue Extractor")
+        self._status_version = QLabel(tr("status_version", version=APP_VERSION))
         sb.addWidget(self._status_video)
         sb.addPermanentWidget(self._status_save)
         sb.addPermanentWidget(self._status_version)
@@ -1285,11 +1289,11 @@ class MainWindow(QMainWindow):
         if not hasattr(self, '_status_save'):
             return
         if self._is_dirty:
-            self._status_save.setText("[Unsaved Changes*]")
+            self._status_save.setText(tr("status_unsaved"))
             self._status_save.setStyleSheet("color: #f59e0b; font-size: 8.5pt; font-weight: bold; padding-right: 12px;")
         else:
             t = f" {self._last_saved_time}" if self._last_saved_time else ""
-            self._status_save.setText(f"[Saved{t}]")
+            self._status_save.setText(tr("status_saved", time=t).replace("  ", " "))
             self._status_save.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8.5pt; padding-right: 12px;")
 
     def _on_autosave_timer_tick(self):
@@ -1306,7 +1310,7 @@ class MainWindow(QMainWindow):
         )
         if as_path:
             t = datetime.now().strftime("%H:%M:%S")
-            self._status_save.setText(f"[Auto-saved {t}*]")
+            self._status_save.setText(tr("status_autosaved", time=t))
             self._status_save.setStyleSheet("color: #38bdf8; font-size: 8.5pt; padding-right: 12px;")
 
     # ── State helpers ─────────────────────────────────────────────────────────
@@ -1359,7 +1363,7 @@ class MainWindow(QMainWindow):
         self._video_panel.reset()
         self._clip_editor.clear()
         self._refresh_all_views()
-        self._status_video.setText("No video loaded")
+        self._status_video.setText(tr("status_no_video"))
         self._update_window_title()
         self._update_save_status()
         self._log_message("New project initialized", "info")
@@ -1413,7 +1417,7 @@ class MainWindow(QMainWindow):
             if state.video_path and state.video_path.exists():
                 self._video_panel.load_video(state.video_path)
                 self._video_panel.show_video_info(state)
-                self._status_video.setText(f"File: {state.video_path.name}")
+                self._status_video.setText(tr("status_file", name=state.video_path.name))
                 self._timeline.set_duration(state.video_duration)
                 if state.preview_proxy_path and state.preview_proxy_path.exists():
                     proxy_h = self._settings.get("preview_proxy_height", 540)
@@ -1421,7 +1425,7 @@ class MainWindow(QMainWindow):
                 else:
                     self._start_preview_proxy_generation(state.video_path)
             else:
-                self._status_video.setText(f"Project: {path.name} (No video file)")
+                self._status_video.setText(tr("status_project_no_video", name=path.name))
 
             self._refresh_all_views()
             self._update_window_title()
@@ -1447,7 +1451,7 @@ class MainWindow(QMainWindow):
             if state.video_path and state.video_path.exists():
                 self._video_panel.load_video(state.video_path)
                 self._video_panel.show_video_info(state)
-                self._status_video.setText(f"File: {state.video_path.name}")
+                self._status_video.setText(tr("status_file", name=state.video_path.name))
                 self._timeline.set_duration(state.video_duration)
                 self._start_preview_proxy_generation(state.video_path)
             else:
@@ -1523,7 +1527,7 @@ class MainWindow(QMainWindow):
         self._menu_recent_projects.clear()
         recents = self._settings.get("recent_projects", [])
         if not recents:
-            act = self._menu_recent_projects.addAction("No Recent Projects")
+            act = self._menu_recent_projects.addAction(tr("menu_no_recent_projects"))
             act.setEnabled(False)
             return
 
@@ -1534,7 +1538,7 @@ class MainWindow(QMainWindow):
                 act.triggered.connect(lambda _, path=p: self.load_project_file(path))
 
         self._menu_recent_projects.addSeparator()
-        act_clear = self._menu_recent_projects.addAction("Clear Recent Projects")
+        act_clear = self._menu_recent_projects.addAction(tr("menu_clear_recent_projects"))
         act_clear.triggered.connect(self._clear_recent_projects)
 
     def _add_recent_project(self, path_str: str):
@@ -1557,7 +1561,7 @@ class MainWindow(QMainWindow):
         self._menu_recent_videos.clear()
         recents = self._settings.get("recent_videos", [])
         if not recents:
-            act = self._menu_recent_videos.addAction("No Recent Videos")
+            act = self._menu_recent_videos.addAction(tr("menu_no_recent_videos"))
             act.setEnabled(False)
             return
 
@@ -1568,7 +1572,7 @@ class MainWindow(QMainWindow):
                 act.triggered.connect(lambda _, path=p: self.load_video(path))
 
         self._menu_recent_videos.addSeparator()
-        act_clear = self._menu_recent_videos.addAction("Clear Recent Videos")
+        act_clear = self._menu_recent_videos.addAction(tr("menu_clear_recent_videos"))
         act_clear.triggered.connect(self._clear_recent_videos)
 
     def _add_recent_video(self, path_str: str):
@@ -1935,12 +1939,18 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self)
         dlg.load_settings(self._settings)
         if dlg.exec_():
+            old_lang = i18n.current_language
             old_proxy_enabled = self._settings.get("preview_proxy_enabled", True)
             old_proxy_h = self._settings.get("preview_proxy_height", 540)
 
             self._settings = dlg.get_settings()
             self._save_settings(self._settings)
             self._timeline.set_sticky_headers(self._settings.get("timeline_sticky_headers", True))
+
+            new_lang = self._settings.get("app_language", "en")
+            if new_lang != old_lang:
+                i18n.set_language(new_lang)
+                self.retranslate_ui()
 
             new_proxy_enabled = self._settings.get("preview_proxy_enabled", True)
             new_proxy_h = self._settings.get("preview_proxy_height", 540)
@@ -1950,6 +1960,99 @@ class MainWindow(QMainWindow):
                     self._state.preview_proxy_path = None
                 else:
                     self._start_preview_proxy_generation(self._state.video_path)
+
+    def retranslate_ui(self):
+        """Retranslate all dynamic UI elements when the language setting changes."""
+        # Menus
+        if hasattr(self, '_menu_file'):
+            self._menu_file.setTitle(tr("menu_file"))
+            self._act_new_proj.setText(tr("menu_new_proj"))
+            self._act_open_proj.setText(tr("menu_open_proj"))
+            self._act_open_pack.setText(tr("menu_open_pack"))
+            self._menu_recent_projects.setTitle(tr("menu_recent_proj"))
+            self._act_save_proj.setText(tr("menu_save_proj"))
+            self._act_save_proj_as.setText(tr("menu_save_proj_as"))
+            self._act_import_menu.setText(tr("menu_import_video"))
+            self._menu_recent_videos.setTitle(tr("menu_recent_videos"))
+            self._act_export_menu.setText(tr("menu_export_pack"))
+            self._act_quit.setText(tr("menu_quit"))
+
+        if hasattr(self, '_menu_edit'):
+            self._menu_edit.setTitle(tr("menu_edit"))
+            self.act_undo.setText(tr("menu_undo"))
+            self.act_redo.setText(tr("menu_redo"))
+            self._act_kb_shortcuts.setText(tr("menu_shortcuts"))
+            self._act_settings.setText(tr("menu_settings"))
+
+        if hasattr(self, '_menu_view'):
+            self._menu_view.setTitle(tr("menu_view"))
+            self.act_fullscreen.setText(tr("menu_fullscreen"))
+            self.act_v_video.setText(tr("menu_video_player"))
+            self.act_v_sidebar.setText(tr("menu_sidebar_tabs"))
+            self.act_v_timeline.setText(tr("menu_timeline"))
+            self.act_v_clip_editor.setText(tr("menu_clip_editor"))
+            self.act_v_progress.setText(tr("menu_processing_logs"))
+
+        if hasattr(self, '_menu_help'):
+            self._menu_help.setTitle(tr("menu_help"))
+            self._act_shortcuts_help.setText(tr("menu_shortcuts"))
+            self._act_about.setText(tr("menu_about"))
+
+        self._rebuild_recent_projects_menu()
+        self._rebuild_recent_videos_menu()
+
+        # Toolbar
+        if hasattr(self, '_act_import'):
+            self._act_import.setText(tr("tb_import"))
+            self._act_import.setToolTip(tr("tb_import_tip"))
+            self._act_analyze.setText(tr("tb_analyze"))
+            self._act_analyze.setToolTip(tr("tb_analyze_tip"))
+            self._act_export.setText(tr("tb_export"))
+            self._act_export.setToolTip(tr("tb_export_tip"))
+            self._act_open_folder.setText(tr("tb_open_folder"))
+            self._act_open_folder.setToolTip(tr("tb_open_folder_tip"))
+            self._act_settings.setText(tr("tb_settings"))
+            self._act_settings.setToolTip(tr("tb_settings_tip"))
+
+        # Sidebar Tabs
+        if hasattr(self, '_sidebar_tabs'):
+            self._sidebar_tabs.setTabText(0, tr("tab_dialogues"))
+            self._sidebar_tabs.setTabText(1, tr("tab_speakers"))
+            self._sidebar_tabs.setTabText(2, tr("tab_pack_info"))
+
+        # Timeline Header
+        if hasattr(self, '_lbl_tl_title'):
+            self._lbl_tl_title.setText(tr("tl_title"))
+        if hasattr(self, '_btn_tl_undo'):
+            self._btn_tl_undo.setToolTip(tr("tl_btn_undo_tip"))
+            self._btn_tl_redo.setToolTip(tr("tl_btn_redo_tip"))
+            self._btn_tl_split.setToolTip(tr("tl_btn_split_tip"))
+            self._btn_tl_trim_left.setToolTip(tr("tl_btn_trim_left_tip"))
+            self._btn_tl_trim_right.setToolTip(tr("tl_btn_trim_right_tip"))
+            self._btn_tl_del_clip.setToolTip(tr("tl_btn_delete_tip"))
+            self._btn_tl_add_track.setText(tr("tl_btn_add_track"))
+            self._btn_tl_add_track.setToolTip(tr("tl_btn_add_track_tip"))
+            self._btn_tl_add_clip.setText(tr("tl_btn_add_clip"))
+            self._btn_tl_add_clip.setToolTip(tr("tl_btn_add_clip_tip"))
+            self._btn_tl_play.setText(tr("tl_btn_play"))
+            self._btn_tl_play.setToolTip(tr("tl_btn_play_tip"))
+            self._btn_tl_stop.setText(tr("tl_btn_stop"))
+            self._btn_tl_stop.setToolTip(tr("tl_btn_stop_tip"))
+            self._btn_tl_zoomin.setText(tr("tl_btn_zoomin"))
+            self._btn_tl_zoomin.setToolTip(tr("tl_btn_zoom_in_tip"))
+            self._btn_tl_zoomout.setText(tr("tl_btn_zoomout"))
+            self._btn_tl_zoomout.setToolTip(tr("tl_btn_zoom_out_tip"))
+
+        # Clip Editor
+        if hasattr(self, '_clip_editor'):
+            self._clip_editor.retranslate_ui()
+
+        # Status Bar
+        if hasattr(self, '_status_version'):
+            self._status_version.setText(tr("status_version", version=APP_VERSION))
+        if hasattr(self, '_status_video') and not self._state.video_path:
+            self._status_video.setText(tr("status_no_video"))
+        self._update_save_status()
 
     def _on_timeline_sticky_toggled(self, is_sticky: bool):
         self._settings["timeline_sticky_headers"] = is_sticky

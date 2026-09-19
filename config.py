@@ -18,6 +18,8 @@ SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 APP_NAME = "The Choice Voicer Dialogue Extractor"
 APP_VERSION = "1.1.0"
 APP_AUTHOR = "The Choice Voicer"
+APP_LANGUAGE_DEFAULT = "en"
+SUPPORTED_LANGUAGES = {"en": "English", "th": "ไทย (Thai)"}
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 APP_DIR = Path(__file__).parent

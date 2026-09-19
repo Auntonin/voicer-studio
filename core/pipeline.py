@@ -37,6 +37,7 @@ from core.models import (
     PipelineState, PipelineStep, PIPELINE_STEP_LABELS,
     PIPELINE_STEP_PROGRESS, DialogueItem, PackInfo,
 )
+from core.i18n import tr
 
 log = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ class PipelineWorker(QThread):
                 language=self.options.get("whisper_language", WHISPER_LANGUAGE_DEFAULT),
                 initial_prompt=self.options.get("whisper_initial_prompt"),
             )
-            self.signals.sub_progress.emit(0, 1, "กำลังโหลดโมเดล Whisper...")
+            self.signals.sub_progress.emit(0, 1, tr("pipe_loading_whisper"))
             transcriber.load_model()
 
             use_whisper_seg = self.options.get("use_whisper_segmentation", True)
@@ -222,9 +223,8 @@ class PipelineWorker(QThread):
                 # ── Whisper-based segmentation (recommended for music-heavy audio) ──
                 # Whisper transcribes the FULL audio and splits by natural sentence
                 # boundaries — ignores background music, much better than VAD alone.
-                self.signals.sub_progress.emit(0, 1,
-                    "Whisper กำลังวิเคราะห์และแยกประโยค (อาจใช้เวลา 1-3 นาที)...")
-                self._log("ใช้ Whisper segmentation เพื่อแยกประโยค (ดีกว่า VAD เมื่อมีเสียงดนตรี)", "info")
+                self.signals.sub_progress.emit(0, 1, tr("pipe_whisper_segmenting"))
+                self._log(tr("pipe_whisper_segmenting"), "info")
 
                 def on_seg_progress(current, total_seg, detail):
                     self.signals.sub_progress.emit(current, max(current, 1), detail)
@@ -239,18 +239,18 @@ class PipelineWorker(QThread):
 
                 if ok:
                     n = len(self.state.active_dialogues())
-                    self.signals.sub_progress.emit(n, n, f"แยกประโยคครบ {n} คลิป")
-                    self._log(f"Whisper แยกได้ {n} ประโยค — พร้อมแยก Speaker", "ok")
+                    self.signals.sub_progress.emit(n, n, tr("pipe_whisper_seg_done", count=n))
+                    self._log(tr("pipe_whisper_seg_done", count=n), "ok")
                     self.signals.dialogues_ready.emit()
                     self._complete_step(step)
                     return
                 else:
-                    self._log("Whisper segmentation ล้มเหลว — ใช้ VAD segments แทน", "warn")
+                    self._log(tr("pipe_whisper_seg_fallback"), "warn")
 
             # ── Fallback: transcribe existing VAD segments ──
             dialogues = self.state.active_dialogues()
             total = len(dialogues)
-            self.signals.sub_progress.emit(0, total, "เตรียมโหลดเสียงเข้า RAM...")
+            self.signals.sub_progress.emit(0, total, tr("pipe_extracting_audio"))
 
             import numpy as np, subprocess as _sp, io
             from config import SUBPROCESS_FLAGS
@@ -274,7 +274,7 @@ class PipelineWorker(QThread):
                     return
                 self.signals.sub_progress.emit(
                     idx + 1, total,
-                    f"ถอดคำ [{idx+1}/{total}] ช่วง {item.format_start()}–{item.format_end()}"
+                    f"Transcribing [{idx+1}/{total}] {item.format_start()}–{item.format_end()}"
                 )
                 text = transcriber.transcribe_segment(
                     self.state.work_audio_path, item.start, item.end,
@@ -283,7 +283,7 @@ class PipelineWorker(QThread):
                 item.caption = text
                 log.debug(f"Transcribed item {item.index}: {text[:40]}")
 
-            self.signals.sub_progress.emit(total, total, f"ถอดคำครบ {total} คลิป")
+            self.signals.sub_progress.emit(total, total, f"Transcribed {total} clips")
             self._log(f"Transcribed {total} dialogue(s)", "ok")
             self._complete_step(step)
         except Exception as e:
@@ -310,11 +310,11 @@ class PipelineWorker(QThread):
             sep = VoiceSeparator(mode=mode)
             sep_dir = TEMP_DIR / "separated"
             sep_dir.mkdir(exist_ok=True)
-            self.signals.sub_progress.emit(0, 1, "กำลังรัน Demucs แยกเสียงพูดออกจากเพลง (อาจใช้เวลาหลายนาที)...")
+            self.signals.sub_progress.emit(0, 1, tr("pipe_separating_voices"))
             vocals, bg = sep.separate(self.state.work_audio_path, sep_dir)
             self.state.separated_vocals_path = vocals
             self.state.separated_bg_path = bg
-            self.signals.sub_progress.emit(1, 1, "แยกเสียงเสร็จแล้ว")
+            self.signals.sub_progress.emit(1, 1, tr("pipe_separation_done"))
             self._complete_step(step)
         except Exception as e:
             self._fail_step(step, str(e))
@@ -344,7 +344,7 @@ class PipelineWorker(QThread):
                 speaker_name = self.state.get_speaker_safe_name(itm.speaker_id)
                 self.signals.sub_progress.emit(
                     completed, total_items,
-                    f"ตัดคลิป [{completed}/{total_items}] {itm.id_str}_{speaker_name} ({itm.format_start()}–{itm.format_end()})"
+                    tr("pipe_slicing_clips", current=completed, total=total_items, id=f"{itm.id_str}_{speaker_name} ({itm.format_start()}–{itm.format_end()})")
                 )
 
             gen.generate_all_clips(
@@ -357,7 +357,7 @@ class PipelineWorker(QThread):
             if self._check_cancel():
                 return
 
-            self.signals.sub_progress.emit(total, total, f"ตัดคลิปครบ {total} คลิป")
+            self.signals.sub_progress.emit(total, total, tr("pipe_slicing_done", count=total))
             self._complete_step(step)
         except Exception as e:
             self._fail_step(step, str(e))
@@ -382,7 +382,7 @@ class PipelineWorker(QThread):
                 speaker_name = self.state.get_speaker_safe_name(item.speaker_id)
                 self.signals.sub_progress.emit(
                     idx + 1, total,
-                    f"แคปภาพ [{idx+1}/{total}] {item.id_str} ช่วง {item.format_start()}"
+                    tr("pipe_capturing_frames", current=idx+1, total=total, id=f"{item.id_str} {item.format_start()}")
                 )
                 fname = f"{item.id_str}_{speaker_name}.png"
                 out_path = self._output_dir / fname
@@ -391,7 +391,7 @@ class PipelineWorker(QThread):
                 item.image_path = out_path
 
             extractor.release()
-            self.signals.sub_progress.emit(total, total, f"แคปภาพครบ {total} เฟรม")
+            self.signals.sub_progress.emit(total, total, tr("pipe_frames_done", count=total))
             self._complete_step(step)
         except Exception as e:
             log.error(f"Frame extraction failed ({e}) — generating placeholder images for all items")
@@ -423,10 +423,10 @@ class PipelineWorker(QThread):
             bitrate = self.options.get("audio_bitrate", "320k")
             if not bitrate or bitrate in ("192k", "256k"):
                 bitrate = "320k"
-            self.signals.sub_progress.emit(0, 1, f"กำลังเข้ารหัส backing track ({bitrate} MP3)...")
+            self.signals.sub_progress.emit(0, 1, tr("pipe_encoding_backing", bitrate=bitrate))
             sep.generate_backing_track(self.state, backing_path, bitrate=bitrate)
             self.state.pack_backing_track_path = backing_path
-            self.signals.sub_progress.emit(1, 1, f"Backing track พร้อมแล้ว")
+            self.signals.sub_progress.emit(1, 1, tr("pipe_backing_done"))
             self._log(f"Backing track saved: {backing_path.name} ({bitrate})", "ok")
             self._complete_step(step)
         except Exception as e:
@@ -465,7 +465,7 @@ class PipelineWorker(QThread):
                 item.txt_path = txt_path
                 self.signals.sub_progress.emit(
                     idx + 1, total,
-                    f"สร้างไฟล์ [{idx+1}/{total}] {txt_name}"
+                    tr("pipe_building_pack", current=idx+1, total=total)
                 )
 
             # Write _pack_info.ini
@@ -485,7 +485,7 @@ class PipelineWorker(QThread):
 
                 dub_video_path = self._output_dir / "dub_video.ogv"
                 if not dub_video_path.exists():
-                    self.signals.sub_progress.emit(total, total, "กำลังสร้าง dub_video.ogv (คุณภาพสูงสุด)...")
+                    self.signals.sub_progress.emit(total, total, tr("pipe_encoding_ogv"))
                     if self.state.video_path.suffix.lower() == ".ogv":
                         shutil.copy2(self.state.video_path, dub_video_path)
                     else:
@@ -500,7 +500,7 @@ class PipelineWorker(QThread):
                         from config import SUBPROCESS_FLAGS
                         subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
 
-            self.signals.sub_progress.emit(total, total, f"สร้างแพ็กครบ {total} ไฟล์")
+            self.signals.sub_progress.emit(total, total, tr("pipe_pack_done", count=total))
             self._complete_step(step)
         except Exception as e:
             self._fail_step(step, str(e))
