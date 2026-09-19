@@ -1,4 +1,9 @@
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from core.models import PipelineState, DialogueItem, SpeakerInfo
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker

@@ -30,8 +30,8 @@
   Adobe-inspired dark theme timeline with draggable clips, interactive waveforms, keyboard shortcuts (`Space`, `Ctrl+Z`, `S` Split, `M` Merge, `Del`), and multi-speaker layering.
 * **🚀 One-Click All-in-One "Analyze"**:
   Import a video and click **Analyze** once. The pipeline extracts audio, separates stems, slices dialogue clips (`.mp3`), captures lossless video frames (`.png`), generates `dub_video.ogv` + `dub_video.mp4`, and automatically builds the final `[PackTitle].zip` archive!
-* **🖥️ Native Windows Integration & One-Click Launch (`start.bat`)**:
-  Automated virtual environment management, automatic configuration initialization, native Windows 10/11 taskbar branding, and zero setup hassle.
+* **🖥️ Native Windows Integration & Standalone Launcher (`VoicerStudio.exe`)**:
+  Zero-console native GUI launcher (`VoicerStudio.exe`), automated virtual environment management, automatic configuration initialization, native Windows 10/11 taskbar branding, and zero setup hassle.
 
 ---
 
@@ -95,13 +95,14 @@ authors=["Voicer Studio"]
    ```
 
 2. **Run the application:**
-   Double-click **`start.bat`** (or run `.\start.bat` in terminal).
+   Double-click **`VoicerStudio.exe`** (or run `.\VoicerStudio.exe`).
 
    > [!TIP]
-   > `start.bat` is fully automated:
-   > - It automatically creates your local `settings.json` from `settings.example.json`.
-   > - If running for the first time, it automatically sets up your Python virtual environment (`.venv`) and installs required dependencies.
-   > - Then it starts Voicer Studio with full Windows taskbar icon integration.
+   > **Zero-Console Native Launcher**:
+   > - Runs directly with **NO black CMD terminal window**.
+   > - Automatically creates your local `settings.json` from template.
+   > - If running for the first time, it prompts to automatically set up your environment and dependencies, then starts the studio immediately.
+   > - Command-line and terminal scripts are also available in `scripts/` (`scripts\start.bat`, `scripts\setup.bat`).
 
 ---
 
@@ -109,17 +110,27 @@ authors=["Voicer Studio"]
 
 ```text
 voicer-studio/
-├── start.bat / run.bat    ← One-click automated launcher & runner
-├── setup.bat / setup.ps1  ← Standalone environment installer script
+├── VoicerStudio.exe       ← Native Windows GUI Launcher (Zero-console, branded icon)
 ├── main.py                ← Application entry point & Adobe-style Splash Screen
 ├── config.py              ← Studio settings, color palette & constants
 ├── requirements.txt       ← Python dependencies
 ├── settings.example.json  ← Template user settings (auto-copied on first run)
-├── test_core.py           ← Core validation and unit test suite
 │
-├── assets/                ← Official application brand assets
+├── assets/                ← Studio icons, vector SVGs, and brand assets
 │   ├── app_icon.ico       ← Multi-resolution Windows application icon
-│   └── app_icon.png       ← High-resolution studio logo
+│   ├── app_icon.png       ← High-resolution studio logo
+│   └── icons/             ← High-precision vector SVG UI icons (split, trim, etc.)
+│
+├── scripts/               ← Build and utility scripts
+│   ├── build_exe.py       ← Compiler script for VoicerStudio.exe
+│   ├── launcher.c         ← Win32 C source code for native GUI launcher
+│   ├── launcher.rc        ← Windows resource metadata file
+│   ├── setup.bat          ← Environment and dependency setup script
+│   └── start.bat          ← Command-line launcher batch script
+│
+├── tests/                 ← Test suite
+│   ├── test_core.py       ← Core pipeline validation tests
+│   └── test_project_manager.py ← Project manager & serialization tests
 │
 ├── core/                  ← Processing Engine & AI Pipelines
 │   ├── separator.py       ← BS-RoFormer stem separation (vocal & BGM isolation)

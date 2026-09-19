@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0"
+cd /d "%~dp0.."
 title Voicer Studio Launcher
 
 echo ============================================================
@@ -23,7 +23,7 @@ if not exist ".venv\Scripts\python.exe" (
     echo [INFO] Python virtual environment (.venv) not found.
     echo [INFO] Starting automatic setup... (this only runs once)
     echo.
-    call setup.bat
+    call "%~dp0setup.bat"
     if errorlevel 1 (
         echo.
         echo [ERROR] Setup encountered an issue. Please review the output above.
