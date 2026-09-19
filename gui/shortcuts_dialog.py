@@ -30,7 +30,7 @@ SHORTCUT_DATA = [
             ("Zoom In", ["+ / ="], "Zoom in timeline view increments"),
             ("Zoom Out", ["-"], "Zoom out timeline view increments"),
             ("Scrub Playhead", ["Click Ruler / Track"], "Jump playhead directly to clicked time position"),
-            ("Center Clip & Track", ["Double-click Table / Clip"], "Smooth-pan camera to center dialogue clip and character track"),
+            ("Pan to Clip Start & Track", ["Double-click Table / Clip"], "Smooth-pan camera to dialogue start point and character track"),
             ("Seek to Dialogue", ["Click Table Row"], "Move playhead and video player to dialogue start time"),
         ]
     },

@@ -155,17 +155,17 @@ class TimelineWidget(QWidget):
                 self._camera_anim_group.stop()
 
     def center_on_dialogue(self, item: DialogueItem, animated: bool = True):
-        """Center the timeline viewport horizontally on the dialogue clip and vertically on its track."""
+        """Smoothly pan timeline camera to dialogue clip's start point (item.start) and vertically on its track."""
         if not item:
             return
-        t_mid = (item.start + item.end) / 2.0
+        t_start = item.start
         speakers_list = self._get_speaker_list()
         try:
             spk_idx = speakers_list.index(item.speaker_id)
         except ValueError:
             spk_idx = 0
         track_y = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
-        self.center_on_coords(time_sec=t_mid, track_y=track_y, animated=animated)
+        self.center_on_coords(time_sec=t_start, track_y=track_y, animated=animated)
 
     def center_on_time(self, time_sec: float, animated: bool = True):
         """Center the timeline viewport horizontally on the given timestamp without changing vertical scroll."""
