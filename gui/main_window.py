@@ -128,10 +128,10 @@ class MainWindow(QMainWindow):
         text_container.setContentsMargins(0, 0, 0, 0)
         text_container.setSpacing(2)
 
-        self._toast_title = QLabel("Dialogue Extraction Completed")
+        self._toast_title = QLabel(tr("msg_extraction_finished_title"))
         self._toast_title.setStyleSheet("font-weight: bold; font-size: 10.5pt; color: #ffffff; background: transparent;")
 
-        self._toast_msg = QLabel("All dialogue clips and character packs generated successfully.")
+        self._toast_msg = QLabel(tr("msg_extraction_finished_desc"))
         self._toast_msg.setStyleSheet(f"font-size: 8.5pt; color: {COLORS['text_secondary']}; background: transparent;")
 
         text_container.addWidget(self._toast_title)
@@ -363,6 +363,28 @@ class MainWindow(QMainWindow):
         dlg = ShortcutsDialog(self)
         dlg.exec()
 
+    def _update_shortcuts_tooltip(self):
+        if not hasattr(self, '_btn_tl_shortcuts'):
+            return
+        tip_html = (
+            '<div style="background-color: #18181b; color: #e4e4e7; font-family: \'Segoe UI\', \'Leelawadee UI\', \'Tahoma\', system-ui, sans-serif; padding: 6px 10px; border-radius: 6px;">'
+            f'<div style="font-size: 8.5pt; font-weight: bold; color: #ffffff; margin-bottom: 6px; letter-spacing: 0.3px;">{tr("tip_sc_title")}</div>'
+            '<table cellpadding="2" cellspacing="0" style="font-size: 8pt; color: #e4e4e7;">'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Space</span></td><td style="color:#a1a1aa;">{tr("tip_sc_space")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">S</span> / <span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+B</span></td><td style="color:#a1a1aa;">{tr("tip_sc_split")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Q</span></td><td style="color:#a1a1aa;">{tr("tip_sc_trim_left")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">W</span></td><td style="color:#a1a1aa;">{tr("tip_sc_trim_right")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Del</span></td><td style="color:#a1a1aa;">{tr("tip_sc_del")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+Z</span> / <span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+Y</span></td><td style="color:#a1a1aa;">{tr("tip_sc_undo_redo")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl + Wheel</span></td><td style="color:#a1a1aa;">{tr("tip_sc_zoom")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Shift + Wheel</span></td><td style="color:#a1a1aa;">{tr("tip_sc_scroll_h")}</td></tr>'
+            f'<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Middle Drag</span></td><td style="color:#a1a1aa;">{tr("tip_sc_pan")}</td></tr>'
+            '</table>'
+            f'<div style="margin-top: 8px; border-top: 1px solid #27272a; padding-top: 6px; font-size: 7.5pt; color: #71717a;">{tr("tip_sc_footer")}</div>'
+            '</div>'
+        )
+        self._btn_tl_shortcuts.setToolTip(tip_html)
+
     def _toggle_fullscreen(self):
         """Toggle borderless fullscreen mode via F11."""
         if self.isFullScreen():
@@ -559,26 +581,10 @@ class MainWindow(QMainWindow):
         tl_header.addWidget(self._lbl_tl_title)
 
         # Minimal info/keyboard shortcut button (hover shows clean cheat-sheet, click opens full shortcuts dialog)
-        btn_tl_shortcuts = capcut_btn("", "keyboard.svg", "", compact=True)
-        btn_tl_shortcuts.setToolTip(
-            '<div style="background-color: #18181b; color: #e4e4e7; font-family: Segoe UI, system-ui, sans-serif; padding: 6px 10px; border-radius: 6px;">'
-            '<div style="font-size: 8.5pt; font-weight: bold; color: #ffffff; margin-bottom: 6px; letter-spacing: 0.3px;">TIMELINE SHORTCUTS &amp; GESTURES</div>'
-            '<table cellpadding="2" cellspacing="0" style="font-size: 8pt; color: #e4e4e7;">'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Space</span></td><td style="color:#a1a1aa;">Play / Pause Timeline</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">S</span> / <span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+B</span></td><td style="color:#a1a1aa;">Split Clip at Playhead</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Q</span></td><td style="color:#a1a1aa;">Delete Left to Playhead</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">W</span></td><td style="color:#a1a1aa;">Delete Right from Playhead</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Del</span></td><td style="color:#a1a1aa;">Delete Selected Clip</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+Z</span> / <span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl+Y</span></td><td style="color:#a1a1aa;">Undo / Redo</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Ctrl + Wheel</span></td><td style="color:#a1a1aa;">Zoom at Cursor</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Shift + Wheel</span></td><td style="color:#a1a1aa;">Scroll Horizontally</td></tr>'
-            '<tr><td style="padding-right: 12px;"><span style="background-color: #2c2c2e; border: 1px solid #3f3f46; border-radius: 3px; padding: 1px 5px; color: #ffffff; font-weight: 600;">Middle Drag</span></td><td style="color:#a1a1aa;">Pan Canvas 2D</td></tr>'
-            '</table>'
-            '<div style="margin-top: 8px; border-top: 1px solid #27272a; padding-top: 6px; font-size: 7.5pt; color: #71717a;">Click to open full shortcuts reference (F1)</div>'
-            '</div>'
-        )
-        btn_tl_shortcuts.clicked.connect(self._show_shortcuts_dialog)
-        tl_header.addWidget(btn_tl_shortcuts)
+        self._btn_tl_shortcuts = capcut_btn("", "keyboard.svg", "", compact=True)
+        self._update_shortcuts_tooltip()
+        self._btn_tl_shortcuts.clicked.connect(self._show_shortcuts_dialog)
+        tl_header.addWidget(self._btn_tl_shortcuts)
 
         tl_header.addStretch()
 
@@ -882,8 +888,8 @@ class MainWindow(QMainWindow):
 
         name, ok = QInputDialog.getText(
             self,
-            "Add Character Track",
-            "Enter character name for new track:",
+            tr("tl_dialog_add_track_title"),
+            tr("tl_dialog_add_track_msg"),
             text=default_name
         )
         if not ok:
@@ -1417,9 +1423,9 @@ class MainWindow(QMainWindow):
 
         path_str, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Voicer Project",
+            tr("dlg_open_project"),
             "",
-            "Voicer Studio Project (*.voicer *.json);;All Files (*)",
+            tr("dlg_filter_project"),
         )
         if path_str:
             self.load_project_file(Path(path_str))
@@ -1431,7 +1437,7 @@ class MainWindow(QMainWindow):
 
         dir_str = QFileDialog.getExistingDirectory(
             self,
-            "Open Exported Pack Folder",
+            tr("dlg_open_pack_folder"),
             ""
         )
         if dir_str:
@@ -1540,9 +1546,9 @@ class MainWindow(QMainWindow):
 
         path_str, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Project As",
+            tr("dlg_save_project_as"),
             str(suggested_path),
-            "Voicer Studio Project (*.voicer);;JSON Files (*.json)",
+            tr("dlg_filter_project_save"),
         )
         if not path_str:
             return False
@@ -1636,9 +1642,9 @@ class MainWindow(QMainWindow):
     def on_import_video(self):
         path_str, _ = QFileDialog.getOpenFileName(
             self,
-            "Import Video",
+            tr("dlg_import_video"),
             "",
-            "Video Files (*.mp4 *.mkv *.mov *.webm *.avi);;All Files (*)",
+            tr("dlg_filter_video"),
         )
         if path_str:
             self.load_video(Path(path_str))
@@ -2089,6 +2095,10 @@ class MainWindow(QMainWindow):
             self._btn_tl_zoomout.setText(tr("tl_btn_zoomout"))
             self._btn_tl_zoomout.setToolTip(tr("tl_btn_zoom_out_tip"))
 
+        self._update_shortcuts_tooltip()
+        if hasattr(self, '_timeline'):
+            self._timeline.update()
+
         # Clip Editor & Child Panels
         if hasattr(self, '_clip_editor'):
             self._clip_editor.retranslate_ui()
@@ -2106,8 +2116,15 @@ class MainWindow(QMainWindow):
         # Status Bar
         if hasattr(self, '_status_version'):
             self._status_version.setText(tr("status_version", version=APP_VERSION))
-        if hasattr(self, '_status_video') and not self._state.video_path:
-            self._status_video.setText(tr("status_no_video"))
+        if hasattr(self, '_status_video'):
+            if self._state.video_path:
+                self._status_video.setText(tr("status_file", name=self._state.video_path.name))
+            else:
+                self._status_video.setText(tr("status_no_video"))
+        if hasattr(self, '_toast_title'):
+            self._toast_title.setText(tr("msg_extraction_finished_title"))
+        if hasattr(self, '_toast_msg'):
+            self._toast_msg.setText(tr("msg_extraction_finished_desc"))
         self._update_save_status()
 
     def _on_timeline_sticky_toggled(self, is_sticky: bool):
@@ -2185,7 +2202,7 @@ class MainWindow(QMainWindow):
         QMainWindow, QWidget {{
             background-color: {COLORS['bg_primary']};
             color: {COLORS['text_primary']};
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
             font-size: 9.5pt;
         }}
         QMenuBar {{
@@ -2328,7 +2345,7 @@ class MainWindow(QMainWindow):
             border: 1px solid #3f3f46;
             border-radius: 6px;
             padding: 6px 10px;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
             font-size: 8.5pt;
         }}
         """

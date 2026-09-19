@@ -273,7 +273,7 @@ class ExportDialog(QDialog):
         if pix:
             lbl_thumb.setPixmap(pix)
         else:
-            lbl_thumb.setText("Video")
+            lbl_thumb.setText(tr("exp_thumb_video"))
             lbl_thumb.setStyleSheet("background-color: #141414; border: 1px solid #282828; border-radius: 6px; color: #777777; font-weight: bold;")
         preview_row.addWidget(lbl_thumb)
 
@@ -549,7 +549,7 @@ class ExportDialog(QDialog):
         if pix:
             self.lbl_prog_thumb.setPixmap(pix)
         else:
-            self.lbl_prog_thumb.setText("Video")
+            self.lbl_prog_thumb.setText(tr("exp_thumb_video"))
             self.lbl_prog_thumb.setStyleSheet("background-color: #141414; border: 1px solid #282828; border-radius: 4px; color: #777777;")
         pack_title = self.state.pack_info.title or (self.state.video_path.stem if self.state.video_path else "Dialogue_Pack")
         self.lbl_prog_title.setText(pack_title)

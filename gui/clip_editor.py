@@ -84,7 +84,7 @@ class ClipEditor(QWidget):
             QWidget {{
                 background-color: {COLORS['bg_secondary']};
                 color: {COLORS['text_primary']};
-                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
                 font-size: 9pt;
             }}
             QFrame#editor_card {{
@@ -222,7 +222,7 @@ class ClipEditor(QWidget):
         self.spin_end.valueChanged.connect(self._on_time_changed)
         grid.addWidget(self.spin_end, 2, 1)
 
-        self.lbl_duration = QLabel("Duration: 0.000s")
+        self.lbl_duration = QLabel(tr("ed_duration_val", dur=0.0))
         self.lbl_duration.setStyleSheet(f"color: {COLORS['accent_green']}; font-weight: bold;")
         grid.addWidget(self.lbl_duration, 3, 0, 1, 2)
 
@@ -255,7 +255,7 @@ class ClipEditor(QWidget):
 
         cap_header.addStretch()
 
-        self.lbl_caption_stats = QLabel("0 chars")
+        self.lbl_caption_stats = QLabel(f"0 {tr('ed_chars_unit')}")
         self.lbl_caption_stats.setStyleSheet(
             "font-size: 8pt; color: #888888; margin-right: 4px;"
         )
@@ -354,7 +354,7 @@ class ClipEditor(QWidget):
 
     def _on_time_changed(self):
         dur = max(0.0, self.spin_end.value() - self.spin_start.value())
-        self.lbl_duration.setText(f"Duration: {dur:.3f}s")
+        self.lbl_duration.setText(tr("ed_duration_val", dur=dur))
         if not self._is_loading and self.item:
             self._set_save_status("Saving...")
             self._timing_timer.start()
@@ -373,16 +373,16 @@ class ClipEditor(QWidget):
         chars = len(text)
         words = len(text.split()) if text else 0
         if chars > 0:
-            self.lbl_caption_stats.setText(f"{chars} chars • {words} words")
+            self.lbl_caption_stats.setText(f"{chars} {tr('ed_chars_unit')} • {words} {tr('ed_words_unit')}")
         else:
-            self.lbl_caption_stats.setText("0 chars")
+            self.lbl_caption_stats.setText(f"0 {tr('ed_chars_unit')}")
 
     def _on_copy_caption(self):
         text = self.txt_caption.toPlainText().strip()
         if text:
             QApplication.clipboard().setText(text)
-            self.btn_copy.setText("Copied!")
-            QTimer.singleShot(1200, lambda: self.btn_copy.setText("Copy"))
+            self.btn_copy.setText(tr("ed_copied"))
+            QTimer.singleShot(1200, lambda: self.btn_copy.setText(tr("ed_copy")))
 
     def _on_clear_caption(self):
         text = self.txt_caption.toPlainText()
@@ -498,15 +498,15 @@ class ClipEditor(QWidget):
 
         self.spin_start.setValue(item.start)
         self.spin_end.setValue(item.end)
-        self.lbl_duration.setText(f"Duration: {item.duration:.3f}s")
+        self.lbl_duration.setText(tr("ed_duration_val", dur=item.duration))
         
         # User requested: show placeholder text when caption is empty, don't fill dummy text
         self.txt_caption.blockSignals(True)
         self.txt_caption.setPlainText(item.caption if item.caption else "")
-        self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
+        self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
         self.txt_caption.blockSignals(False)
 
-        self.lbl_clip_badge.setText(f"Clip #{item.index}")
+        self.lbl_clip_badge.setText(tr("ed_clip_badge", index=item.index))
         self._update_caption_stats()
 
         self.spin_start.blockSignals(False)
@@ -569,12 +569,12 @@ class ClipEditor(QWidget):
         self.spin_end.blockSignals(False)
         self.txt_caption.blockSignals(True)
         self.txt_caption.clear()
-        self.txt_caption.setPlaceholderText("Enter dialogue caption text...")
+        self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
         self.txt_caption.blockSignals(False)
-        self.lbl_clip_badge.setText("No Selection")
-        self.lbl_caption_stats.setText("0 chars")
-        self.image_preview.setText("No Video Frame")
-        self.lbl_duration.setText("Duration: 0.000s")
+        self.lbl_clip_badge.setText(tr("ed_no_selection"))
+        self.lbl_caption_stats.setText(f"0 {tr('ed_chars_unit')}")
+        self.image_preview.setText(tr("ed_no_frame"))
+        self.lbl_duration.setText(tr("ed_duration_val", dur=0.0))
         self.player.stop()
         self._is_loading = False
 
@@ -627,8 +627,11 @@ class ClipEditor(QWidget):
         if not self.item:
             self.lbl_clip_badge.setText(tr("ed_no_selection"))
             self.image_preview.setText(tr("ed_no_frame"))
+            self.lbl_duration.setText(tr("ed_duration_val", dur=0.0))
         else:
             self.lbl_clip_badge.setText(tr("ed_clip_badge", index=self.item.index))
+            self.lbl_duration.setText(tr("ed_duration_val", dur=self.item.duration))
+        self._update_caption_stats()
 
         self.btn_regen_caption.setText(tr("ed_retranscribe"))
         self.btn_regen_caption.setToolTip(tr("ed_retranscribe_tip"))

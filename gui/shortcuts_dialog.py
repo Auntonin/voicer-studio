@@ -26,12 +26,12 @@ SHORTCUT_DATA = [
             ("sc_item_zoom_anchored", ["Ctrl + Wheel", "Alt + Wheel"], "sc_item_zoom_anchored_desc"),
             ("sc_item_scroll_h", ["Shift + Wheel"], "sc_item_scroll_h_desc"),
             ("sc_item_scroll_v", ["Wheel"], "sc_item_scroll_v_desc"),
-            ("sc_item_canvas_pan", ["Middle Mouse Drag"], "sc_item_canvas_pan_desc"),
+            ("sc_item_canvas_pan", ["sc_key_mmb_drag"], "sc_item_canvas_pan_desc"),
             ("sc_item_zoom_in", ["+ / ="], "sc_item_zoom_in_desc"),
             ("sc_item_zoom_out", ["-"], "sc_item_zoom_out_desc"),
-            ("sc_item_scrub_playhead", ["Click Ruler / Track"], "sc_item_scrub_playhead_desc"),
-            ("sc_item_pan_clip_start", ["Double-click Table / Clip"], "sc_item_pan_clip_start_desc"),
-            ("sc_item_seek_dialogue", ["Click Table Row"], "sc_item_seek_dialogue_desc"),
+            ("sc_item_scrub_playhead", ["sc_key_click_ruler"], "sc_item_scrub_playhead_desc"),
+            ("sc_item_pan_clip_start", ["sc_key_dblclick_item"], "sc_item_pan_clip_start_desc"),
+            ("sc_item_seek_dialogue", ["sc_key_click_table"], "sc_item_seek_dialogue_desc"),
         ]
     },
     {
@@ -41,19 +41,19 @@ SHORTCUT_DATA = [
             ("sc_item_trim_left", ["Q"], "sc_item_trim_left_desc"),
             ("sc_item_trim_right", ["W"], "sc_item_trim_right_desc"),
             ("sc_item_del_clip", ["Del", "Backspace"], "sc_item_del_clip_desc"),
-            ("sc_item_slip_clip", ["Drag Clip Body"], "sc_item_slip_clip_desc"),
-            ("sc_item_trim_boundary", ["Drag Clip Edge"], "sc_item_trim_boundary_desc"),
-            ("sc_item_move_track", ["Drag Vertically"], "sc_item_move_track_desc"),
+            ("sc_item_slip_clip", ["sc_key_drag_clip"], "sc_item_slip_clip_desc"),
+            ("sc_item_trim_boundary", ["sc_key_drag_edge"], "sc_item_trim_boundary_desc"),
+            ("sc_item_move_track", ["sc_key_drag_vertical"], "sc_item_move_track_desc"),
         ]
     },
     {
         "category_key": "sc_cat_tracks",
         "items": [
-            ("sc_item_add_track", ["+ Add Track"], "sc_item_add_track_desc"),
-            ("sc_item_rename_char", ["Double-click Track"], "sc_item_rename_char_desc"),
-            ("sc_item_track_menu", ["Right-click Track"], "sc_item_track_menu_desc"),
-            ("sc_item_pin_tracks", ["Pin Icon"], "sc_item_pin_tracks_desc"),
-            ("sc_item_reorder_tracks", ["Drag Track Grip"], "sc_item_reorder_tracks_desc"),
+            ("sc_item_add_track", ["sc_key_add_track_btn"], "sc_item_add_track_desc"),
+            ("sc_item_rename_char", ["sc_key_dblclick_track"], "sc_item_rename_char_desc"),
+            ("sc_item_track_menu", ["sc_key_rclick_track"], "sc_item_track_menu_desc"),
+            ("sc_item_pin_tracks", ["sc_key_pin_icon"], "sc_item_pin_tracks_desc"),
+            ("sc_item_reorder_tracks", ["sc_key_drag_track"], "sc_item_reorder_tracks_desc"),
         ]
     },
     {
@@ -93,7 +93,7 @@ class ShortcutsDialog(QDialog):
             QDialog {
                 background-color: #181818;
                 color: #e4e4e7;
-                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
             }
             QLineEdit {
                 background-color: #121212;
@@ -151,13 +151,13 @@ class ShortcutsDialog(QDialog):
         header_text = QVBoxLayout()
         header_text.setSpacing(2)
 
-        title_lbl = QLabel(tr("sc_dialog_title"))
-        title_lbl.setStyleSheet("font-size: 13pt; font-weight: bold; color: #ffffff; letter-spacing: -0.2px;")
-        sub_lbl = QLabel(tr("sc_dialog_subtitle"))
-        sub_lbl.setStyleSheet("font-size: 8.5pt; color: #888888;")
+        self.title_lbl = QLabel(tr("sc_dialog_title"))
+        self.title_lbl.setStyleSheet("font-size: 13pt; font-weight: bold; color: #ffffff; letter-spacing: -0.2px;")
+        self.sub_lbl = QLabel(tr("sc_dialog_subtitle"))
+        self.sub_lbl.setStyleSheet("font-size: 8.5pt; color: #888888;")
 
-        header_text.addWidget(title_lbl)
-        header_text.addWidget(sub_lbl)
+        header_text.addWidget(self.title_lbl)
+        header_text.addWidget(self.sub_lbl)
         top_bar.addLayout(header_text)
         top_bar.addStretch()
 
@@ -195,14 +195,14 @@ class ShortcutsDialog(QDialog):
 
         # ── Footer ──
         footer = QHBoxLayout()
-        tip_lbl = QLabel(tr("sc_tip_hover"))
-        tip_lbl.setStyleSheet("font-size: 8pt; color: #777777;")
-        footer.addWidget(tip_lbl)
+        self.tip_lbl = QLabel(tr("sc_tip_hover"))
+        self.tip_lbl.setStyleSheet("font-size: 8pt; color: #777777;")
+        footer.addWidget(self.tip_lbl)
         footer.addStretch()
 
-        btn_close = QPushButton(tr("sc_btn_close"), objectName="close_btn")
-        btn_close.clicked.connect(self.accept)
-        footer.addWidget(btn_close)
+        self.btn_close = QPushButton(tr("sc_btn_close"), objectName="close_btn")
+        self.btn_close.clicked.connect(self.accept)
+        footer.addWidget(self.btn_close)
 
         layout.addLayout(footer)
 
@@ -286,7 +286,7 @@ class ShortcutsDialog(QDialog):
                 border-radius: 4px;
                 padding: 2px 7px;
                 color: #f4f4f5;
-                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
                 font-weight: 600;
                 font-size: 8pt;
             }
@@ -300,23 +300,43 @@ class ShortcutsDialog(QDialog):
                 or_lbl.setStyleSheet(or_style)
                 layout.addWidget(or_lbl)
 
-            if "+" in combo_str and combo_str.strip() not in ("+", "+ / ="):
+            if "+" in combo_str and combo_str.strip() not in ("+", "+ / =") and not combo_str.startswith("sc_key_"):
                 tokens = [t.strip() for t in combo_str.split("+") if t.strip()]
                 for t_idx, token in enumerate(tokens):
                     if t_idx > 0:
                         plus_lbl = QLabel("+")
                         plus_lbl.setStyleSheet(sep_style)
                         layout.addWidget(plus_lbl)
-                    k_lbl = QLabel(token)
+                    txt = tr(token) if token.startswith("sc_key_") else token
+                    k_lbl = QLabel(txt)
                     k_lbl.setStyleSheet(badge_style)
                     layout.addWidget(k_lbl)
             else:
-                k_lbl = QLabel(combo_str)
+                txt = tr(combo_str) if combo_str.startswith("sc_key_") else combo_str
+                k_lbl = QLabel(txt)
                 k_lbl.setStyleSheet(badge_style)
                 layout.addWidget(k_lbl)
 
         layout.addStretch()
         return container
+
+    def retranslate_ui(self):
+        """Dynamically retranslates all category titles, items, and search box."""
+        self.setWindowTitle(tr("sc_dialog_title"))
+        self.title_lbl.setText(tr("sc_dialog_title"))
+        self.sub_lbl.setText(tr("sc_dialog_subtitle"))
+        self.search_box.setPlaceholderText(tr("sc_search_placeholder"))
+        self.tip_lbl.setText(tr("sc_tip_hover"))
+        self.btn_close.setText(tr("sc_btn_close"))
+
+        # Clear existing category cards and rebuild
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._category_widgets = []
+        self._build_shortcut_list()
+        self._filter_shortcuts(self.search_box.text())
 
     def _filter_shortcuts(self, query: str):
         query = query.strip().lower()

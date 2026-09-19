@@ -473,7 +473,7 @@ class TimelineWidget(QWidget):
             font_empty = QFont("Segoe UI", 9)
             painter.setFont(font_empty)
             empty_rect = QRectF(self.HEADER_WIDTH, self.RULER_HEIGHT, self.width() - self.HEADER_WIDTH, self.height() - self.RULER_HEIGHT)
-            painter.drawText(empty_rect, Qt.AlignmentFlag.AlignCenter, "Import a video file or audio to display dialogue clips on the timeline")
+            painter.drawText(empty_rect, Qt.AlignmentFlag.AlignCenter, tr("tl_empty_prompt"))
 
         # Check if dragging a clip to highlight target track lane
         active_drag_spk_idx = -1
@@ -773,7 +773,7 @@ class TimelineWidget(QWidget):
         font_corner = QFont("Segoe UI", 8, QFont.Weight.Bold)
         painter.setFont(font_corner)
         title_rect = QRectF(header_x + 8, 0, self.HEADER_WIDTH - 36, self.RULER_HEIGHT)
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "AUDIO TRACKS")
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, tr("tl_audio_tracks"))
 
         # Discreet Pin Button in Corner Cell
         pin_btn_rect = QRectF(header_x + self.HEADER_WIDTH - 24, 4, 18, 20)
@@ -853,7 +853,7 @@ class TimelineWidget(QWidget):
             painter.setPen(QColor("#888888" if not is_lifted else "#444444"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
-            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{count} clips")
+            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, tr("tl_clips_count", count=count))
 
         # 8. Track Reordering Visual Feedback (Drag Ghost + Drop Target Insertion Line)
         if self._dragging and self._dragging[0] == "track_header" and len(self._dragging) > 4:
@@ -944,7 +944,7 @@ class TimelineWidget(QWidget):
             painter.setPen(QColor("#9E9E9E"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
-            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Reordering...")
+            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, tr("tl_reordering"))
 
     # ── Mouse Interaction & Cursors ─────────────────────────────────────────────
 

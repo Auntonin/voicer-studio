@@ -180,8 +180,8 @@ class DialogueTable(QWidget):
             self.table.setUpdatesEnabled(True)
 
     def _fill_row(self, row: int, item: DialogueItem, color_hex: str):
-        has_img = "Yes" if item.image_path and item.image_path.exists() else "—"
-        has_aud = "Yes" if item.audio_path and item.audio_path.exists() else "—"
+        has_img = "✓" if item.image_path and item.image_path.exists() else "—"
+        has_aud = "✓" if item.audio_path and item.audio_path.exists() else "—"
         col_data = [
             str(item.index),
             self.state.get_speaker(item.speaker_id).display_name if self.state and item.speaker_id in self.state.speakers else item.speaker_id,
@@ -203,7 +203,7 @@ class DialogueTable(QWidget):
 
             if col == 1:
                 t_item.setForeground(QColor(color_hex))
-            elif col in (6, 7) and text == "Yes":
+            elif col in (6, 7) and text == "✓":
                 t_item.setForeground(QColor("#3fb950"))
             elif col in (6, 7):
                 t_item.setForeground(QColor("#484f58"))

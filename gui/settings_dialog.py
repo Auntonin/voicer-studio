@@ -57,12 +57,14 @@ class SettingsDialog(QDialog):
         lang_box.setSpacing(2)
         lang_box.addWidget(self.combo_app_lang)
         lang_box.addWidget(self.lbl_lang_hint)
-        form_gen.addRow(tr("cfg_lang_title"), lang_box)
+        self.lbl_row_lang = QLabel(tr("cfg_lang_title"))
+        form_gen.addRow(self.lbl_row_lang, lang_box)
 
         # Timeline Display options
         self.chk_sticky_headers = QCheckBox(tr("cfg_pin_headers"))
         self.chk_sticky_headers.setChecked(True)
-        form_gen.addRow(tr("cfg_timeline_section"), self.chk_sticky_headers)
+        self.lbl_row_timeline = QLabel(tr("cfg_timeline_section"))
+        form_gen.addRow(self.lbl_row_timeline, self.chk_sticky_headers)
 
         self.chk_auto_save = QCheckBox(tr("cfg_auto_save"))
         self.chk_auto_save.setChecked(True)
@@ -83,21 +85,25 @@ class SettingsDialog(QDialog):
         self.btn_test_hf.clicked.connect(self._test_hf_token)
         hf_layout.addWidget(self.edit_hf)
         hf_layout.addWidget(self.btn_test_hf)
-        form_ai.addRow(tr("cfg_hf_token"), hf_layout)
+        self.lbl_row_hf = QLabel(tr("cfg_hf_token"))
+        form_ai.addRow(self.lbl_row_hf, hf_layout)
 
         self.spin_max_speakers = QSpinBox()
         self.spin_max_speakers.setRange(2, 16)
         self.spin_max_speakers.setValue(DIARIZATION_MAX_SPEAKERS)
-        self.spin_max_speakers.setSuffix(" speakers")
-        form_ai.addRow(tr("cfg_max_speakers"), self.spin_max_speakers)
+        self.spin_max_speakers.setSuffix(tr("cfg_max_speakers_suffix"))
+        self.lbl_row_speakers = QLabel(tr("cfg_max_speakers"))
+        form_ai.addRow(self.lbl_row_speakers, self.spin_max_speakers)
         
         self.combo_whisper = QComboBox()
         self.combo_whisper.addItems(["tiny", "base", "small", "medium", "large-v3"])
-        form_ai.addRow(tr("cfg_whisper_model"), self.combo_whisper)
+        self.lbl_row_whisper_model = QLabel(tr("cfg_whisper_model"))
+        form_ai.addRow(self.lbl_row_whisper_model, self.combo_whisper)
         
         self.combo_lang = QComboBox()
         self.combo_lang.addItems(["Auto", "Thai", "Japanese", "English", "Chinese"])
-        form_ai.addRow(tr("cfg_whisper_lang"), self.combo_lang)
+        self.lbl_row_whisper_lang = QLabel(tr("cfg_whisper_lang"))
+        form_ai.addRow(self.lbl_row_whisper_lang, self.combo_lang)
         
         self.rb_sep_orig = QRadioButton(tr("cfg_sep_orig"))
         self.rb_sep_iso = QRadioButton(tr("cfg_sep_iso"))
@@ -106,7 +112,8 @@ class SettingsDialog(QDialog):
         sep_layout.addWidget(self.rb_sep_orig)
         sep_layout.addWidget(self.rb_sep_iso)
         sep_layout.addWidget(self.rb_sep_hq)
-        form_ai.addRow(tr("cfg_voice_sep"), sep_layout)
+        self.lbl_row_voice_sep = QLabel(tr("cfg_voice_sep"))
+        form_ai.addRow(self.lbl_row_voice_sep, sep_layout)
         
         self.tabs.addTab(tab_ai, tr("tab_ai_models"))
         
@@ -123,7 +130,8 @@ class SettingsDialog(QDialog):
         ts_layout.addWidget(self.rb_ts_start)
         ts_layout.addWidget(self.rb_ts_start_end)
         ts_layout.addWidget(self.rb_ts_rel)
-        form_proc.addRow(tr("cfg_ts_mode"), ts_layout)
+        self.lbl_row_ts_mode = QLabel(tr("cfg_ts_mode"))
+        form_proc.addRow(self.lbl_row_ts_mode, ts_layout)
         
         vad_layout = QHBoxLayout()
         self.slider_vad = QSlider(Qt.Orientation.Horizontal)
@@ -132,12 +140,14 @@ class SettingsDialog(QDialog):
         self.slider_vad.valueChanged.connect(lambda v: self.lbl_vad.setText(f"{v/100:.2f}"))
         vad_layout.addWidget(self.slider_vad)
         vad_layout.addWidget(self.lbl_vad)
-        form_proc.addRow(tr("cfg_vad_thresh"), vad_layout)
+        self.lbl_row_vad_thresh = QLabel(tr("cfg_vad_thresh"))
+        form_proc.addRow(self.lbl_row_vad_thresh, vad_layout)
         
         self.spin_pad = QSpinBox()
         self.spin_pad.setRange(0, 1000)
         self.spin_pad.setSuffix(" ms")
-        form_proc.addRow(tr("cfg_vad_pad"), self.spin_pad)
+        self.lbl_row_vad_pad = QLabel(tr("cfg_vad_pad"))
+        form_proc.addRow(self.lbl_row_vad_pad, self.spin_pad)
         
         self.spin_gap = QSpinBox()
         self.spin_gap.setRange(0, 2000)
@@ -149,23 +159,27 @@ class SettingsDialog(QDialog):
         gap_layout.setSpacing(2)
         gap_layout.addWidget(self.spin_gap)
         gap_layout.addWidget(self.gap_hint)
-        form_proc.addRow(tr("cfg_vad_gap"), gap_layout)
+        self.lbl_row_vad_gap = QLabel(tr("cfg_vad_gap"))
+        form_proc.addRow(self.lbl_row_vad_gap, gap_layout)
         
         self.spin_img = QSpinBox()
         self.spin_img.setRange(50, 100)
-        form_proc.addRow(tr("cfg_img_quality"), self.spin_img)
+        self.lbl_row_img = QLabel(tr("cfg_img_quality"))
+        form_proc.addRow(self.lbl_row_img, self.spin_img)
         
         self.combo_bitrate = QComboBox()
         self.combo_bitrate.addItems(["128k", "192k", "256k", "320k"])
-        form_proc.addRow(tr("cfg_bitrate"), self.combo_bitrate)
+        self.lbl_row_bitrate = QLabel(tr("cfg_bitrate"))
+        form_proc.addRow(self.lbl_row_bitrate, self.combo_bitrate)
 
         self.chk_preview_proxy = QCheckBox(tr("cfg_preview_proxy"))
         self.chk_preview_proxy.setChecked(True)
         form_proc.addRow("", self.chk_preview_proxy)
 
         self.combo_proxy_res = QComboBox()
-        self.combo_proxy_res.addItems(["540p (Fastest, Highly Recommended)", "720p (HD Proxy)", "Original (No Proxy)"])
-        form_proc.addRow(tr("cfg_proxy_res"), self.combo_proxy_res)
+        self._populate_proxy_combo()
+        self.lbl_row_proxy_res = QLabel(tr("cfg_proxy_res"))
+        form_proc.addRow(self.lbl_row_proxy_res, self.combo_proxy_res)
         
         self.tabs.addTab(tab_proc, tr("tab_processing"))
 
@@ -188,8 +202,9 @@ class SettingsDialog(QDialog):
         form_dub.addRow("", self.chk_format_keywords)
         
         self.edit_initial_prompt = QLineEdit()
-        self.edit_initial_prompt.setPlaceholderText("Initial prompt for Whisper...")
-        form_dub.addRow(tr("cfg_whisper_prompt"), self.edit_initial_prompt)
+        self.edit_initial_prompt.setPlaceholderText(tr("cfg_whisper_prompt_placeholder"))
+        self.lbl_row_whisper_prompt = QLabel(tr("cfg_whisper_prompt"))
+        form_dub.addRow(self.lbl_row_whisper_prompt, self.edit_initial_prompt)
         
         self.tabs.addTab(tab_dub, tr("tab_dubbing"))
         
@@ -205,13 +220,15 @@ class SettingsDialog(QDialog):
         self.btn_browse.clicked.connect(self._browse_output_dir)
         out_layout.addWidget(self.edit_out_dir)
         out_layout.addWidget(self.btn_browse)
-        form_out.addRow(tr("cfg_out_dir"), out_layout)
+        self.lbl_row_out_dir = QLabel(tr("cfg_out_dir"))
+        form_out.addRow(self.lbl_row_out_dir, out_layout)
         
         self.chk_dub = QCheckBox(tr("cfg_inc_dub_video"))
         form_out.addRow("", self.chk_dub)
         
         self.edit_authors = QLineEdit()
-        form_out.addRow(tr("cfg_pack_authors"), self.edit_authors)
+        self.lbl_row_authors = QLabel(tr("cfg_pack_authors"))
+        form_out.addRow(self.lbl_row_authors, self.edit_authors)
         
         self.tabs.addTab(tab_out, tr("tab_output"))
 
@@ -239,6 +256,18 @@ class SettingsDialog(QDialog):
         self.combo_app_lang.clear()
         for code, name in i18n.get_available_languages().items():
             self.combo_app_lang.addItem(name, userData=code)
+
+    def _populate_proxy_combo(self):
+        """Populate proxy resolution options with localized labels while maintaining index parity."""
+        curr_idx = self.combo_proxy_res.currentIndex() if hasattr(self, 'combo_proxy_res') and self.combo_proxy_res.count() > 0 else 0
+        self.combo_proxy_res.blockSignals(True)
+        self.combo_proxy_res.clear()
+        self.combo_proxy_res.addItem(tr("cfg_proxy_res_540p"))
+        self.combo_proxy_res.addItem(tr("cfg_proxy_res_720p"))
+        self.combo_proxy_res.addItem(tr("cfg_proxy_res_orig"))
+        if 0 <= curr_idx < self.combo_proxy_res.count():
+            self.combo_proxy_res.setCurrentIndex(curr_idx)
+        self.combo_proxy_res.blockSignals(False)
 
     def _on_apply(self):
         """Save settings without closing the dialog."""
@@ -270,10 +299,47 @@ class SettingsDialog(QDialog):
         self.tabs.setTabText(3, tr("tab_dubbing"))
         self.tabs.setTabText(4, tr("tab_output"))
 
+        # Form Row Labels
+        if hasattr(self, 'lbl_row_lang'):
+            self.lbl_row_lang.setText(tr("cfg_lang_title"))
+        if hasattr(self, 'lbl_row_timeline'):
+            self.lbl_row_timeline.setText(tr("cfg_timeline_section"))
+        if hasattr(self, 'lbl_row_hf'):
+            self.lbl_row_hf.setText(tr("cfg_hf_token"))
+        if hasattr(self, 'lbl_row_speakers'):
+            self.lbl_row_speakers.setText(tr("cfg_max_speakers"))
+        if hasattr(self, 'lbl_row_whisper_model'):
+            self.lbl_row_whisper_model.setText(tr("cfg_whisper_model"))
+        if hasattr(self, 'lbl_row_whisper_lang'):
+            self.lbl_row_whisper_lang.setText(tr("cfg_whisper_lang"))
+        if hasattr(self, 'lbl_row_voice_sep'):
+            self.lbl_row_voice_sep.setText(tr("cfg_voice_sep"))
+        if hasattr(self, 'lbl_row_ts_mode'):
+            self.lbl_row_ts_mode.setText(tr("cfg_ts_mode"))
+        if hasattr(self, 'lbl_row_vad_thresh'):
+            self.lbl_row_vad_thresh.setText(tr("cfg_vad_thresh"))
+        if hasattr(self, 'lbl_row_vad_pad'):
+            self.lbl_row_vad_pad.setText(tr("cfg_vad_pad"))
+        if hasattr(self, 'lbl_row_vad_gap'):
+            self.lbl_row_vad_gap.setText(tr("cfg_vad_gap"))
+        if hasattr(self, 'lbl_row_img'):
+            self.lbl_row_img.setText(tr("cfg_img_quality"))
+        if hasattr(self, 'lbl_row_bitrate'):
+            self.lbl_row_bitrate.setText(tr("cfg_bitrate"))
+        if hasattr(self, 'lbl_row_proxy_res'):
+            self.lbl_row_proxy_res.setText(tr("cfg_proxy_res"))
+        if hasattr(self, 'lbl_row_whisper_prompt'):
+            self.lbl_row_whisper_prompt.setText(tr("cfg_whisper_prompt"))
+        if hasattr(self, 'lbl_row_out_dir'):
+            self.lbl_row_out_dir.setText(tr("cfg_out_dir"))
+        if hasattr(self, 'lbl_row_authors'):
+            self.lbl_row_authors.setText(tr("cfg_pack_authors"))
+
         self.lbl_lang_hint.setText(tr("cfg_lang_hint"))
         self.chk_sticky_headers.setText(tr("cfg_pin_headers"))
         self.chk_auto_save.setText(tr("cfg_auto_save"))
         self.btn_test_hf.setText(tr("cfg_hf_test"))
+        self.spin_max_speakers.setSuffix(tr("cfg_max_speakers_suffix"))
         self.rb_sep_orig.setText(tr("cfg_sep_orig"))
         self.rb_sep_iso.setText(tr("cfg_sep_iso"))
         self.rb_sep_hq.setText(tr("cfg_sep_hq"))
@@ -282,9 +348,11 @@ class SettingsDialog(QDialog):
         self.rb_ts_rel.setText(tr("cfg_ts_rel"))
         self.gap_hint.setText(f"<small style='color:#888'>{tr('cfg_vad_gap_hint')}</small>")
         self.chk_preview_proxy.setText(tr("cfg_preview_proxy"))
+        self._populate_proxy_combo()
         self.chk_thai_opt.setText(tr("cfg_thai_opt"))
         self.chk_clean_hallucinations.setText(tr("cfg_clean_hallucinations"))
         self.chk_format_keywords.setText(tr("cfg_format_keywords"))
+        self.edit_initial_prompt.setPlaceholderText(tr("cfg_whisper_prompt_placeholder"))
         self.btn_browse.setText(tr("cfg_browse"))
         self.chk_dub.setText(tr("cfg_inc_dub_video"))
         self.btn_ok.setText(tr("btn_ok"))
@@ -294,7 +362,7 @@ class SettingsDialog(QDialog):
     def _test_hf_token(self):
         token = self.edit_hf.text().strip()
         if not token:
-            QMessageBox.warning(self, "Token Required", "Please enter a Hugging Face token.")
+            QMessageBox.warning(self, tr("cfg_token_required_title"), tr("cfg_token_required_msg"))
             return
             
         try:
@@ -308,15 +376,15 @@ class SettingsDialog(QDialog):
                 if resp.status == 200:
                     data = json.loads(resp.read().decode('utf-8'))
                     name = data.get("name", "User")
-                    QMessageBox.information(self, "Success", f"Token valid! Logged in as: {name}")
+                    QMessageBox.information(self, tr("cfg_token_success_title"), tr("cfg_token_success_msg", name=name))
                 else:
-                    QMessageBox.warning(self, "Failed", f"Token check returned HTTP {resp.status}")
+                    QMessageBox.warning(self, tr("cfg_token_failed_title"), tr("cfg_token_failed_msg", status=resp.status))
         except Exception as e:
-            QMessageBox.critical(self, "Invalid Token", f"Token test failed: {e}")
+            QMessageBox.critical(self, tr("cfg_token_invalid_title"), tr("cfg_token_invalid_msg", error=str(e)))
 
     def _browse_output_dir(self):
         from PySide6.QtWidgets import QFileDialog
-        dir_str = QFileDialog.getExistingDirectory(self, "Select Output Directory", self.edit_out_dir.text())
+        dir_str = QFileDialog.getExistingDirectory(self, tr("cfg_select_out_dir"), self.edit_out_dir.text())
         if dir_str:
             self.edit_out_dir.setText(dir_str)
 

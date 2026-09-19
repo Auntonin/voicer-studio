@@ -71,7 +71,7 @@ class VideoPanel(QFrame):
         self.lbl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
         header.addWidget(self.lbl_title)
 
-        self.lbl_proxy_badge = QPushButton("[ORIGINAL]")
+        self.lbl_proxy_badge = QPushButton(f"[{tr('vp_badge_original')}]")
         self.lbl_proxy_badge.setObjectName("proxy_badge")
         self.lbl_proxy_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_proxy_badge.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -241,7 +241,7 @@ class VideoPanel(QFrame):
         self._update_badge("ORIGINAL")
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self._stack_layout.setCurrentIndex(1)
-        self.btn_play.setText("Play")
+        self.btn_play.setText(tr("vp_btn_play"))
 
     def set_status_generating(self):
         """Show that the proxy is being actively created in background."""
@@ -298,9 +298,14 @@ class VideoPanel(QFrame):
         self.lbl_drag.setText(tr("vp_drop_title"))
         self.lbl_sub.setText(tr("vp_drop_sub"))
         self.btn_browse.setText(tr("vp_browse_btn"))
-        self.btn_play.setText(tr("vp_btn_play"))
+        if self.is_playing():
+            self.btn_play.setText(tr("vp_btn_pause"))
+        else:
+            self.btn_play.setText(tr("vp_btn_play"))
         self.btn_stop.setText(tr("vp_btn_stop"))
         self._update_badge(self._current_badge_status, self._proxy_height)
+        if hasattr(self, '_last_state') and self._last_state:
+            self.show_video_info(self._last_state)
 
     def _update_badge(self, status: str, height: int = 540):
         self._current_badge_status = status
@@ -317,9 +322,10 @@ class VideoPanel(QFrame):
                     background: #1c3d27; border-color: #4ade80;
                 }
             """)
-            self.lbl_proxy_badge.setToolTip(f"Active: Fast-Seek {height}p Proxy for smooth scrubbing. Click to switch to Original video.")
+            self.lbl_proxy_badge.setToolTip(tr("vp_tip_proxy_active", height=height))
         elif status == "GENERATING":
-            self.lbl_proxy_badge.setText("[CREATING PROXY...]")
+            gen_txt = tr("vp_badge_creating_proxy")
+            self.lbl_proxy_badge.setText(f"[{gen_txt}]")
             self.lbl_proxy_badge.setStyleSheet("""
                 QPushButton#proxy_badge {
                     font-size: 7.5pt; font-weight: bold; color: #f59e0b; background: #261a06;
@@ -329,7 +335,7 @@ class VideoPanel(QFrame):
                     background: #382408;
                 }
             """)
-            self.lbl_proxy_badge.setToolTip("Creating lightweight fast-seek proxy video in background with NVENC/CPU...")
+            self.lbl_proxy_badge.setToolTip(tr("vp_tip_proxy_generating"))
         else:
             orig_txt = tr("vp_badge_original")
             self.lbl_proxy_badge.setText(f"[{orig_txt}]")
@@ -343,17 +349,18 @@ class VideoPanel(QFrame):
                 }
             """)
             if self._proxy_path and self._proxy_path.exists():
-                self.lbl_proxy_badge.setToolTip("Active: Full-resolution Original video. Click to switch to Fast-Seek Proxy.")
+                self.lbl_proxy_badge.setToolTip(tr("vp_tip_orig_active_can_switch"))
             else:
-                self.lbl_proxy_badge.setToolTip("Active: Full-resolution Original video. Click to generate Fast-Seek Proxy.")
+                self.lbl_proxy_badge.setToolTip(tr("vp_tip_orig_active_can_gen"))
 
     def show_video_info(self, state: PipelineState):
+        self._last_state = state
         name = state.video_path.name if state.video_path else "—"
         dur_m = int(state.video_duration // 60)
         dur_s = state.video_duration % 60
         self._info_label.setText(
-            f"File: {name}  |  Duration: {dur_m:02d}:{dur_s:05.2f}  |  "
-            f"Resolution: {state.video_width}x{state.video_height} @ {state.video_fps:.2f} fps"
+            f"{tr('vp_info_file')}: {name}  |  {tr('vp_info_duration')}: {dur_m:02d}:{dur_s:05.2f}  |  "
+            f"{tr('vp_info_resolution')}: {state.video_width}x{state.video_height} @ {state.video_fps:.2f} fps"
         )
 
     def sync_master_time(self, audio_sec: float):
@@ -400,17 +407,17 @@ class VideoPanel(QFrame):
             # Mute video player audio stream so master timeline audio is the single source
             self.audio_output.setMuted(True)
             self.player.play()
-            self.btn_play.setText("Pause")
+            self.btn_play.setText(tr("vp_btn_pause"))
             self.playback_toggled.emit(True)
 
     def pause_playback(self):
         self.player.pause()
-        self.btn_play.setText("Play")
+        self.btn_play.setText(tr("vp_btn_play"))
         self.playback_toggled.emit(False)
 
     def stop_playback(self):
         self.player.stop()
-        self.btn_play.setText("Play")
+        self.btn_play.setText(tr("vp_btn_play"))
         self.playback_toggled.emit(False)
 
     def is_playing(self) -> bool:
@@ -473,5 +480,5 @@ class VideoPanel(QFrame):
         self._stack_layout.setCurrentIndex(0)
         self._info_label.setText("")
         self._update_badge("ORIGINAL")
-        self.btn_play.setText("Play")
+        self.btn_play.setText(tr("vp_btn_play"))
 
