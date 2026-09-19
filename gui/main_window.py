@@ -674,6 +674,9 @@ class MainWindow(QMainWindow):
         self._dialogue_table.dialogue_selected.connect(
             lambda item: self._on_select_dialogue(item)
         )
+        self._dialogue_table.dialogue_double_clicked.connect(
+            self._on_dialogue_double_clicked
+        )
         self._dialogue_table.dialogue_deleted.connect(self._on_dialogue_deleted)
         self._dialogue_table.merge_next_requested.connect(self._on_merge_next)
         self._dialogue_table.split_requested.connect(self._on_split)
@@ -772,6 +775,17 @@ class MainWindow(QMainWindow):
         self._timeline.set_current_time(item.start)
         self._video_panel.set_position(item.start)
         self._set_active_speaker(item.speaker_id)
+        self._timeline.selected_index = item.index
+        self._timeline.ensure_playhead_visible(margin=80)
+        self._timeline.update()
+
+    def _on_dialogue_double_clicked(self, item: DialogueItem):
+        self._timeline.set_current_time(item.start)
+        self._video_panel.set_position(item.start)
+        self._set_active_speaker(item.speaker_id)
+        self._timeline.selected_index = item.index
+        self._timeline.center_on_dialogue(item, animated=True)
+        self._timeline.update()
 
     def _select_dialogue_by_idx(self, idx: int):
         for item in self._state.active_dialogues():
@@ -779,6 +793,7 @@ class MainWindow(QMainWindow):
                 self._clip_editor.load_item(item, self._state)
                 self._video_panel.set_position(item.start)
                 self._set_active_speaker(item.speaker_id)
+                self._dialogue_table.select_dialogue_by_index(idx)
                 break
 
     # ── Undo / Redo Actions ──────────────────────────────────────────────────

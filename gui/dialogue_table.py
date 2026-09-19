@@ -9,6 +9,7 @@ from core.models import DialogueItem, PipelineState
 
 class DialogueTable(QWidget):
     dialogue_selected = Signal(DialogueItem)
+    dialogue_double_clicked = Signal(DialogueItem)
     dialogue_deleted = Signal(int)
     dialogue_changed = Signal(DialogueItem)
     play_audio_requested = Signal(DialogueItem)
@@ -72,7 +73,7 @@ class DialogueTable(QWidget):
         self.table.setHorizontalHeaderLabels(headers)
         
         tooltips = [
-            "Dialogue line sequence index",
+            "Dialogue line sequence index (Double-click row to center on timeline)",
             "Assigned character / speaker layer",
             "Start timestamp (HH:MM:SS.mmm)",
             "End timestamp (HH:MM:SS.mmm)",
@@ -186,20 +187,39 @@ class DialogueTable(QWidget):
         if row < 0: return
         idx_item = self.table.item(row, 0)
         if not idx_item: return
-        idx = int(idx_item.text())
+        try:
+            idx = int(idx_item.text())
+        except ValueError:
+            return
         for item in self._items:
             if item.index == idx:
                 self.dialogue_selected.emit(item)
                 break
 
     def on_double_click(self, row, col):
+        """Select item and request smooth camera center on double click."""
         if row < 0: return
         idx_item = self.table.item(row, 0)
         if not idx_item: return
-        idx = int(idx_item.text())
+        try:
+            idx = int(idx_item.text())
+        except ValueError:
+            return
         for item in self._items:
             if item.index == idx:
                 self.dialogue_selected.emit(item)
+                self.dialogue_double_clicked.emit(item)
+                break
+
+    def select_dialogue_by_index(self, idx: int):
+        """Select and scroll to row with dialogue index idx without re-triggering recursive events."""
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.text() == str(idx):
+                self.table.blockSignals(True)
+                self.table.selectRow(row)
+                self.table.scrollToItem(item, QTableWidget.ScrollHint.EnsureVisible)
+                self.table.blockSignals(False)
                 break
 
     def show_context_menu(self, pos):

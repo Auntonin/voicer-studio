@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 from PySide6.QtWidgets import (
     QWidget, QToolTip, QApplication, QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QTimer, QUrl
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QCursor, QFontMetrics, QLinearGradient
 
@@ -58,6 +58,9 @@ class TimelineWidget(QWidget):
         self._pan_start_pos = QPoint()
         self._pan_start_h = 0
         self._pan_start_v = 0
+
+        # Smooth Camera / Viewport Animation Group
+        self._camera_anim_group: Optional[QParallelAnimationGroup] = None
 
         # Distinct colors for each speaker track (unified with speaker panel)
         self.colors = list(SPEAKER_PALETTE)
@@ -144,6 +147,94 @@ class TimelineWidget(QWidget):
             elif px > cur_scroll_x + vp_w - margin:
                 h_bar.setValue(min(h_bar.maximum(), px - vp_w + margin))
 
+    def stop_camera_animation(self):
+        """Immediately stop any active camera panning animation."""
+        if hasattr(self, '_camera_anim_group') and self._camera_anim_group:
+            if self._camera_anim_group.state() == QParallelAnimationGroup.State.Running:
+                self._camera_anim_group.stop()
+
+    def center_on_dialogue(self, item: DialogueItem, animated: bool = True):
+        """Center the timeline viewport horizontally on the dialogue clip and vertically on its track."""
+        if not item:
+            return
+        t_mid = (item.start + item.end) / 2.0
+        speakers_list = self._get_speaker_list()
+        try:
+            spk_idx = speakers_list.index(item.speaker_id)
+        except ValueError:
+            spk_idx = 0
+        track_y = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
+        self.center_on_coords(time_sec=t_mid, track_y=track_y, animated=animated)
+
+    def center_on_time(self, time_sec: float, animated: bool = True):
+        """Center the timeline viewport horizontally on the given timestamp without changing vertical scroll."""
+        self.center_on_coords(time_sec=time_sec, track_y=None, animated=animated)
+
+    def center_on_coords(self, time_sec: float, track_y: Optional[int] = None, animated: bool = True):
+        """
+        Smoothly pan timeline camera to target time and optional track Y position.
+        Uses QEasingCurve.Type.OutCubic for a fast, organic, buttery-smooth cinematic pan (~280ms).
+        """
+        scroll_area = self._get_scroll_area()
+        if not scroll_area:
+            return
+
+        h_bar = scroll_area.horizontalScrollBar()
+        v_bar = scroll_area.verticalScrollBar()
+        vp = scroll_area.viewport()
+        vp_w = vp.width()
+        vp_h = vp.height()
+
+        # Stop any existing camera animation to prevent conflict
+        self.stop_camera_animation()
+
+        # Horizontal target calculation
+        if self.sticky_headers:
+            visible_content_w = max(100, vp_w - self.HEADER_WIDTH)
+            target_h = int((time_sec * self.pixels_per_second) - (visible_content_w / 2.0))
+        else:
+            target_h = int((self.HEADER_WIDTH + time_sec * self.pixels_per_second) - (vp_w / 2.0))
+        target_h = max(0, min(h_bar.maximum(), target_h))
+
+        # Vertical target calculation
+        target_v = None
+        if track_y is not None and v_bar and v_bar.maximum() > 0:
+            track_center_y = track_y + (self.TRACK_HEIGHT / 2.0)
+            calc_v = int(track_center_y - (vp_h / 2.0))
+            target_v = max(0, min(v_bar.maximum(), calc_v))
+
+        if not animated:
+            h_bar.setValue(target_h)
+            if target_v is not None:
+                v_bar.setValue(target_v)
+            self.update()
+            return
+
+        h_diff = abs(h_bar.value() - target_h)
+        v_diff = abs(v_bar.value() - target_v) if target_v is not None else 0
+        if h_diff < 3 and v_diff < 3:
+            return
+
+        self._camera_anim_group = QParallelAnimationGroup(self)
+
+        if h_diff > 0:
+            anim_h = QPropertyAnimation(h_bar, b"value", self._camera_anim_group)
+            anim_h.setDuration(280)
+            anim_h.setStartValue(h_bar.value())
+            anim_h.setEndValue(target_h)
+            anim_h.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._camera_anim_group.addAnimation(anim_h)
+
+        if target_v is not None and v_diff > 0:
+            anim_v = QPropertyAnimation(v_bar, b"value", self._camera_anim_group)
+            anim_v.setDuration(280)
+            anim_v.setStartValue(v_bar.value())
+            anim_v.setEndValue(target_v)
+            anim_v.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._camera_anim_group.addAnimation(anim_v)
+
+        self._camera_anim_group.start()
+
     def set_duration(self, d: float):
         self.duration = max(1.0, d)
         self._recalculate_size()
@@ -191,6 +282,7 @@ class TimelineWidget(QWidget):
         self.update()
 
     def wheelEvent(self, event):
+        self.stop_camera_animation()
         """
         NLE Standard Wheel Controls:
         - Ctrl + Wheel / Alt + Wheel : Zoom Timeline horizontally (anchored at cursor)
@@ -835,7 +927,11 @@ class TimelineWidget(QWidget):
         return "track", None
 
     def mouseDoubleClickEvent(self, event):
-        """Double-click on a character track header to rename it immediately."""
+        """
+        Double-click actions:
+        - On Track Header: Rename character immediately.
+        - On Dialogue Clip: Smoothly pan timeline camera to center clip horizontally and track vertically.
+        """
         if event.button() == Qt.MouseButton.LeftButton and self.state:
             x = event.pos().x()
             y = event.pos().y()
@@ -848,6 +944,19 @@ class TimelineWidget(QWidget):
                     self._prompt_rename_track(spk_id)
                     event.accept()
                     return
+
+            # Double-click on dialogue clip: center camera, seek playhead, select
+            zone, item = self._hit_test(x, y)
+            if zone in ("body", "start", "end") and item:
+                self.selected_index = item.index
+                self.set_current_time(item.start)
+                self.seek_requested.emit(item.start)
+                self.segment_selected.emit(item.index)
+                self.center_on_dialogue(item, animated=True)
+                self.update()
+                event.accept()
+                return
+
         super().mouseDoubleClickEvent(event)
 
     def _prompt_rename_track(self, spk_id: str):
@@ -865,6 +974,7 @@ class TimelineWidget(QWidget):
             self.track_renamed.emit(spk_id, new_name.strip())
 
     def mousePressEvent(self, event):
+        self.stop_camera_animation()
         self.setFocus()
         if not self.state:
             return
