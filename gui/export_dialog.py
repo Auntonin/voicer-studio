@@ -31,6 +31,7 @@ from config import COLORS, ASSETS_DIR, SUBPROCESS_FLAGS
 from core.models import PipelineState
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker
+from core.i18n import tr
 from gui.ui_utils import apply_dark_title_bar
 
 
@@ -64,7 +65,7 @@ class FullExportWorker(QThread):
                     raise RuntimeError("Export cancelled by user")
                 self.progress.emit(max(1, min(99, pct)), msg)
 
-            self.progress.emit(2, "Assembling dialogue cards and audio clips...")
+            self.progress.emit(2, tr("exp_step_assembling"))
             pack_dir = builder.build_pack(
                 self.state, self.output_base, self.options,
                 progress_cb=on_progress
@@ -73,11 +74,11 @@ class FullExportWorker(QThread):
             if self._is_cancelled:
                 raise RuntimeError("Export cancelled by user")
 
-            self.progress.emit(74, "Validating dialogue pack structure...")
+            self.progress.emit(74, tr("exp_step_validating"))
             checker = QualityChecker()
             checker.check_all(self.state, pack_dir)
 
-            self.progress.emit(78, "Creating compressed ZIP archive...")
+            self.progress.emit(78, tr("exp_step_zipping"))
             PackBuilder.export_zip(pack_dir, self.zip_path, progress_cb=on_progress)
 
             if self._is_cancelled:
@@ -85,7 +86,7 @@ class FullExportWorker(QThread):
 
             elapsed = time.time() - t0
             zip_size = self.zip_path.stat().st_size if self.zip_path.exists() else 0
-            self.progress.emit(100, "Pack exported successfully!")
+            self.progress.emit(100, tr("exp_step_success"))
             self.finished.emit(str(self.zip_path), str(pack_dir), elapsed, zip_size)
 
         except Exception as e:
@@ -113,7 +114,7 @@ class ExportDialog(QDialog):
         self.current_percent: int = 0
         self._spinner_idx: int = 0
 
-        self.setWindowTitle("Export Dialogue Pack — Voicer Studio")
+        self.setWindowTitle(tr("exp_win_title"))
         self.setFixedSize(620, 440)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
@@ -247,9 +248,9 @@ class ExportDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
-        lbl_header = QLabel("Export Dialogue Pack")
+        lbl_header = QLabel(tr("exp_header"))
         lbl_header.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-        lbl_sub = QLabel("Compile isolated dialogue audio, video cue cards, and game assets into a ZIP archive.")
+        lbl_sub = QLabel(tr("exp_sub"))
         lbl_sub.setStyleSheet("color: #9E9E9E; font-size: 9pt;")
         layout.addWidget(lbl_header)
         layout.addWidget(lbl_sub)
@@ -279,7 +280,7 @@ class ExportDialog(QDialog):
         vbox_meta = QVBoxLayout()
         vbox_meta.setSpacing(4)
         pack_title = self.state.pack_info.title or (self.state.video_path.stem if self.state.video_path else "Dialogue_Pack")
-        self.lbl_pack_title = QLabel(f"<b>Pack Title:</b> {pack_title}")
+        self.lbl_pack_title = QLabel(f"<b>{tr('exp_pack_title')}</b> {pack_title}")
         self.lbl_pack_title.setStyleSheet("font-size: 10pt; color: #FFFFFF;")
         vbox_meta.addWidget(self.lbl_pack_title)
 
@@ -288,7 +289,8 @@ class ExportDialog(QDialog):
         dur_m = int(total_dur // 60)
         dur_s = int(total_dur % 60)
         spk_count = len(self.state.speakers)
-        lbl_stats = QLabel(f"<b>Contents:</b> {len(active_items)} dialogue clips • {spk_count} characters<br/><b>Total Duration:</b> {dur_m:02d}:{dur_s:02d}")
+        contents_str = tr("exp_clips_characters", clips=len(active_items), speakers=spk_count)
+        lbl_stats = QLabel(f"<b>{tr('exp_contents')}</b> {contents_str}<br/><b>{tr('exp_total_duration')}</b> {dur_m:02d}:{dur_s:02d}")
         lbl_stats.setStyleSheet("color: #CCCCCC; font-size: 9pt;")
         vbox_meta.addWidget(lbl_stats)
         vbox_meta.addStretch()
@@ -301,7 +303,7 @@ class ExportDialog(QDialog):
         sep.setStyleSheet("background-color: #282828; max-height: 1px;")
         card_layout.addWidget(sep)
 
-        lbl_dest_hdr = QLabel("<b>Destination ZIP File:</b>")
+        lbl_dest_hdr = QLabel(f"<b>{tr('exp_dest_zip')}</b>")
         card_layout.addWidget(lbl_dest_hdr)
 
         dest_row = QHBoxLayout()
@@ -314,14 +316,14 @@ class ExportDialog(QDialog):
         self.lbl_dest_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.target_zip_path = suggested_zip
 
-        btn_browse = QPushButton("Browse...")
+        btn_browse = QPushButton(tr("exp_browse"))
         btn_browse.clicked.connect(self._on_browse_destination)
 
         dest_row.addWidget(self.lbl_dest_path, 1)
         dest_row.addWidget(btn_browse)
         card_layout.addLayout(dest_row)
 
-        self.chk_dub_video = QCheckBox("Encode && include game video (dub_video.ogv && dub_video.mp4)")
+        self.chk_dub_video = QCheckBox(tr("exp_include_game_video"))
         self.chk_dub_video.setChecked(self.state.pack_info.include_dub_video)
         self.chk_dub_video.setStyleSheet("margin-top: 4px; color: #CCCCCC;")
         card_layout.addWidget(self.chk_dub_video)
@@ -333,10 +335,10 @@ class ExportDialog(QDialog):
         btn_box.setSpacing(10)
         btn_box.addStretch()
 
-        btn_cancel = QPushButton("Cancel")
+        btn_cancel = QPushButton(tr("exp_btn_cancel"))
         btn_cancel.clicked.connect(self.reject)
 
-        btn_export = QPushButton("Start Export")
+        btn_export = QPushButton(tr("exp_btn_start"))
         btn_export.setObjectName("PrimaryBtn")
         btn_export.setMinimumWidth(120)
         btn_export.clicked.connect(self._start_export)
@@ -350,8 +352,8 @@ class ExportDialog(QDialog):
     def _on_browse_destination(self):
         suggested = str(self.target_zip_path)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Choose Destination ZIP",
-            suggested, "ZIP Archives (*.zip)"
+            self, tr("exp_choose_dest"),
+            suggested, tr("exp_filter_zip")
         )
         if path:
             self.target_zip_path = Path(path)
@@ -366,7 +368,7 @@ class ExportDialog(QDialog):
         layout.setSpacing(14)
 
         hdr_row = QHBoxLayout()
-        lbl_header = QLabel("Exporting Dialogue Pack...")
+        lbl_header = QLabel(tr("exp_prog_header"))
         lbl_header.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
         hdr_row.addWidget(lbl_header)
         hdr_row.addStretch()
@@ -377,7 +379,7 @@ class ExportDialog(QDialog):
         hdr_row.addWidget(self.lbl_spinner)
         layout.addLayout(hdr_row)
 
-        self.lbl_progress_sub = QLabel("Rendering audio slices, cue cards, and game assets...")
+        self.lbl_progress_sub = QLabel(tr("exp_prog_sub"))
         self.lbl_progress_sub.setStyleSheet("color: #9E9E9E; font-size: 9pt;")
         layout.addWidget(self.lbl_progress_sub)
 
@@ -401,7 +403,7 @@ class ExportDialog(QDialog):
         vbox_task.setSpacing(3)
         self.lbl_prog_title = QLabel()
         self.lbl_prog_title.setStyleSheet("font-weight: bold; color: #FFFFFF; font-size: 9.5pt;")
-        self.lbl_step_detail = QLabel("Initializing export engine...")
+        self.lbl_step_detail = QLabel(tr("exp_init_engine"))
         self.lbl_step_detail.setStyleSheet("color: #38BDF8; font-weight: 500; font-size: 9pt;")
         vbox_task.addWidget(self.lbl_prog_title)
         vbox_task.addWidget(self.lbl_step_detail)
@@ -422,7 +424,7 @@ class ExportDialog(QDialog):
 
         vbox_elapsed = QVBoxLayout()
         vbox_elapsed.setSpacing(2)
-        lbl_el_title = QLabel("ELAPSED TIME")
+        lbl_el_title = QLabel(tr("exp_elapsed_time"))
         lbl_el_title.setStyleSheet("color: #888888; font-size: 7.5pt; font-weight: bold;")
         self.lbl_elapsed = QLabel("00:00")
         self.lbl_elapsed.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
@@ -433,9 +435,9 @@ class ExportDialog(QDialog):
 
         vbox_eta = QVBoxLayout()
         vbox_eta.setSpacing(2)
-        lbl_eta_title = QLabel("ESTIMATED REMAINING")
+        lbl_eta_title = QLabel(tr("exp_est_remaining"))
         lbl_eta_title.setStyleSheet("color: #888888; font-size: 7.5pt; font-weight: bold;")
-        self.lbl_eta = QLabel("Estimating...")
+        self.lbl_eta = QLabel(tr("exp_estimating"))
         self.lbl_eta.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self.lbl_eta.setStyleSheet("color: #38BDF8;")
         vbox_eta.addWidget(lbl_eta_title)
@@ -444,7 +446,7 @@ class ExportDialog(QDialog):
 
         vbox_pct = QVBoxLayout()
         vbox_pct.setSpacing(2)
-        lbl_pct_title = QLabel("PROGRESS")
+        lbl_pct_title = QLabel(tr("exp_progress"))
         lbl_pct_title.setStyleSheet("color: #888888; font-size: 7.5pt; font-weight: bold;")
         self.lbl_pct = QLabel("0%")
         self.lbl_pct.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
@@ -459,7 +461,7 @@ class ExportDialog(QDialog):
 
         btn_box = QHBoxLayout()
         btn_box.addStretch()
-        self.btn_abort = QPushButton("Cancel Export")
+        self.btn_abort = QPushButton(tr("exp_btn_cancel_export"))
         self.btn_abort.setObjectName("DangerBtn")
         self.btn_abort.clicked.connect(self._on_cancel_export)
         btn_box.addWidget(self.btn_abort)
@@ -475,10 +477,10 @@ class ExportDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
 
-        lbl_header = QLabel("Export Completed Successfully!")
+        lbl_header = QLabel(tr("exp_done_header"))
         lbl_header.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
         lbl_header.setStyleSheet("color: #10B981;")
-        lbl_sub = QLabel("Your dialogue pack is ready for game engine import or distribution.")
+        lbl_sub = QLabel(tr("exp_done_sub"))
         lbl_sub.setStyleSheet("color: #9E9E9E; font-size: 9pt;")
         layout.addWidget(lbl_header)
         layout.addWidget(lbl_sub)
@@ -524,11 +526,11 @@ class ExportDialog(QDialog):
         btn_box.setSpacing(10)
         btn_box.addStretch()
 
-        btn_open = QPushButton("Open Output Folder")
+        btn_open = QPushButton(tr("exp_btn_open_folder"))
         btn_open.setObjectName("PrimaryBtn")
         btn_open.clicked.connect(self._open_output_folder)
 
-        btn_close = QPushButton("Done")
+        btn_close = QPushButton(tr("exp_btn_done"))
         btn_close.clicked.connect(self.accept)
 
         btn_box.addWidget(btn_open)
@@ -596,30 +598,32 @@ class ExportDialog(QDialog):
             else:
                 self.lbl_eta.setText(f"~{rs}s")
         else:
-            self.lbl_eta.setText("Estimating...")
+            self.lbl_eta.setText(tr("exp_estimating"))
 
     def _on_worker_finished(self, zip_path: str, pack_dir: str, elapsed: float, size_bytes: int):
         self.timer.stop()
         size_mb = size_bytes / (1024.0 * 1024.0)
 
-        self.lbl_done_path.setText(f"<b>ZIP Archive:</b> {zip_path}")
+        self.lbl_done_path.setText(f"<b>{tr('exp_zip_archive')}</b> {zip_path}")
         active_count = len(self.state.active_dialogues())
-        self.lbl_done_size.setText(f"• <b>Archive Size:</b> {size_mb:.2f} MB")
-        self.lbl_done_cues.setText(f"• <b>Total Dialogues:</b> {active_count} cue cards generated")
-        self.lbl_done_time.setText(f"• <b>Processing Time:</b> {elapsed:.1f} seconds")
-        self.lbl_done_folder.setText(f"• <b>Pack Directory:</b> {pack_dir}")
+        self.lbl_done_size.setText(f"• <b>{tr('exp_archive_size')}</b> {size_mb:.2f} MB")
+        cues_str = tr("exp_cues_generated", count=active_count)
+        self.lbl_done_cues.setText(f"• <b>{tr('exp_total_dialogues')}</b> {cues_str}")
+        sec_str = tr("exp_seconds", sec=elapsed)
+        self.lbl_done_time.setText(f"• <b>{tr('exp_processing_time')}</b> {sec_str}")
+        self.lbl_done_folder.setText(f"• <b>{tr('exp_pack_dir')}</b> {pack_dir}")
 
         self.stack.setCurrentIndex(2)
 
     def _on_worker_error(self, err_msg: str):
         self.timer.stop()
-        QMessageBox.critical(self, "Export Failed", f"An error occurred during export:\n\n{err_msg}")
+        QMessageBox.critical(self, tr("exp_msg_failed_title"), tr("exp_msg_failed", error=err_msg))
         self.reject()
 
     def _on_cancel_export(self):
         reply = QMessageBox.question(
-            self, "Cancel Export",
-            "Are you sure you want to cancel the export?",
+            self, tr("exp_msg_cancel_title"),
+            tr("exp_msg_cancel_prompt"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -627,7 +631,7 @@ class ExportDialog(QDialog):
             if self.worker:
                 self.worker.cancel()
                 self.btn_abort.setEnabled(False)
-                self.lbl_step_detail.setText("Cancelling export...")
+                self.lbl_step_detail.setText(tr("exp_cancelling"))
                 self.worker.wait(2000)
             self.reject()
 

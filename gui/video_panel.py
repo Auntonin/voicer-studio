@@ -16,6 +16,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from core.models import PipelineState
 from config import COLORS
+from core.i18n import tr
 
 
 class VideoPanel(QFrame):
@@ -43,6 +44,7 @@ class VideoPanel(QFrame):
         self._proxy_height: int = 540
         self._is_user_seeking = False
         self._last_slider_seek_time = 0.0
+        self._current_badge_status = "ORIGINAL"
 
         # ── QMediaPlayer Setup ─────────────────────────────────────────
         self.player = QMediaPlayer()
@@ -63,10 +65,10 @@ class VideoPanel(QFrame):
 
         # Header Title Bar
         header = QHBoxLayout()
-        lbl_title = QLabel("VIDEO PREVIEW PLAYER")
-        lbl_title.setObjectName("section_title")
-        lbl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
-        header.addWidget(lbl_title)
+        self.lbl_title = QLabel(tr("vp_title"))
+        self.lbl_title.setObjectName("section_title")
+        self.lbl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px;")
+        header.addWidget(self.lbl_title)
 
         self.lbl_proxy_badge = QPushButton("[ORIGINAL]")
         self.lbl_proxy_badge.setObjectName("proxy_badge")
@@ -105,9 +107,9 @@ class VideoPanel(QFrame):
         drop_layout.setContentsMargins(32, 32, 32, 32)
         drop_layout.setSpacing(12)
 
-        lbl_badge = QLabel("MEDIA IMPORT")
-        lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_badge.setStyleSheet("""
+        self.lbl_badge = QLabel(tr("vp_badge_media_import"))
+        self.lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_badge.setStyleSheet("""
             font-size: 8pt;
             font-weight: bold;
             color: #888888;
@@ -120,18 +122,18 @@ class VideoPanel(QFrame):
 
         badge_container = QHBoxLayout()
         badge_container.addStretch()
-        badge_container.addWidget(lbl_badge)
+        badge_container.addWidget(self.lbl_badge)
         badge_container.addStretch()
 
-        lbl_drag = QLabel("Drop Video File to Begin")
-        lbl_drag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_drag.setStyleSheet("font-size: 14pt; font-weight: bold; color: #ffffff; background: transparent; border: none;")
+        self.lbl_drag = QLabel(tr("vp_drop_title"))
+        self.lbl_drag.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_drag.setStyleSheet("font-size: 14pt; font-weight: bold; color: #ffffff; background: transparent; border: none;")
 
-        lbl_sub = QLabel("Supports: MP4, MKV, MOV, WEBM, AVI\nAudio separation & dialogue extraction pipeline")
-        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_sub.setStyleSheet("font-size: 9pt; color: #888888; line-height: 1.4; background: transparent; border: none;")
+        self.lbl_sub = QLabel(tr("vp_drop_sub"))
+        self.lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_sub.setStyleSheet("font-size: 9pt; color: #888888; line-height: 1.4; background: transparent; border: none;")
 
-        self.btn_browse = QPushButton("  Browse Video File...  ")
+        self.btn_browse = QPushButton(tr("vp_browse_btn"))
         self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_browse.setStyleSheet(f"""
             QPushButton {{
@@ -156,8 +158,8 @@ class VideoPanel(QFrame):
 
         drop_layout.addStretch()
         drop_layout.addLayout(badge_container)
-        drop_layout.addWidget(lbl_drag)
-        drop_layout.addWidget(lbl_sub)
+        drop_layout.addWidget(self.lbl_drag)
+        drop_layout.addWidget(self.lbl_sub)
         drop_layout.addSpacing(6)
         drop_layout.addLayout(btn_container)
         drop_layout.addStretch()
@@ -180,8 +182,8 @@ class VideoPanel(QFrame):
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(6)
 
-        self.btn_play = QPushButton("Play")
-        self.btn_stop = QPushButton("Stop")
+        self.btn_play = QPushButton(tr("vp_btn_play"))
+        self.btn_stop = QPushButton(tr("vp_btn_stop"))
         self.btn_play.setFixedWidth(68)
         self.btn_stop.setFixedWidth(68)
 
@@ -288,9 +290,23 @@ class VideoPanel(QFrame):
             else:
                 self.toggle_proxy_requested.emit()
 
+    def retranslate_ui(self):
+        """Retranslates all static labels, buttons, and proxy status in VideoPanel."""
+        self.lbl_title.setText(tr("vp_title"))
+        self.lbl_badge.setText(tr("vp_badge_media_import"))
+        self.lbl_drag.setText(tr("vp_drop_title"))
+        self.lbl_sub.setText(tr("vp_drop_sub"))
+        self.btn_browse.setText(tr("vp_browse_btn"))
+        self.btn_play.setText(tr("vp_btn_play"))
+        self.btn_stop.setText(tr("vp_btn_stop"))
+        self._update_badge(self._current_badge_status, self._proxy_height)
+
     def _update_badge(self, status: str, height: int = 540):
+        self._current_badge_status = status
+        self._proxy_height = height
         if status == "PROXY":
-            self.lbl_proxy_badge.setText(f"[PROXY {height}p]")
+            proxy_txt = tr("vp_badge_proxy")
+            self.lbl_proxy_badge.setText(f"[{proxy_txt}]")
             self.lbl_proxy_badge.setStyleSheet("""
                 QPushButton#proxy_badge {
                     font-size: 7.5pt; font-weight: bold; color: #4ade80; background: #142a1b;
@@ -314,7 +330,8 @@ class VideoPanel(QFrame):
             """)
             self.lbl_proxy_badge.setToolTip("Creating lightweight fast-seek proxy video in background with NVENC/CPU...")
         else:
-            self.lbl_proxy_badge.setText("[ORIGINAL]")
+            orig_txt = tr("vp_badge_original")
+            self.lbl_proxy_badge.setText(f"[{orig_txt}]")
             self.lbl_proxy_badge.setStyleSheet("""
                 QPushButton#proxy_badge {
                     font-size: 7.5pt; font-weight: bold; color: #a1a1aa; background: #222222;

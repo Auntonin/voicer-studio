@@ -6,6 +6,7 @@ from PySide6.QtGui import QIcon
 
 from core.models import PipelineState, SpeakerInfo
 from config import COLORS, ASSETS_DIR, SPEAKER_PALETTE
+from core.i18n import tr
 
 
 
@@ -62,12 +63,12 @@ class SpeakerPanel(QWidget):
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
         
-        lbl_title = QLabel("CHARACTER SPEAKERS & LAYERS")
-        lbl_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: bold; font-size: 9.5pt;")
-        top_bar.addWidget(lbl_title)
+        self.lbl_title = QLabel(tr("spk_panel_title"))
+        self.lbl_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-weight: bold; font-size: 9.5pt;")
+        top_bar.addWidget(self.lbl_title)
         top_bar.addStretch()
 
-        self.btn_add_speaker = QPushButton("Add Speaker")
+        self.btn_add_speaker = QPushButton(tr("spk_btn_add"))
         add_icon_path = ASSETS_DIR / "icons" / "user-plus.svg"
         if add_icon_path.exists():
             self.btn_add_speaker.setIcon(QIcon(str(add_icon_path)))
@@ -130,7 +131,7 @@ class SpeakerPanel(QWidget):
 
             # Drag handle grip icon [≡]
             lbl_drag = QLabel("≡")
-            lbl_drag.setToolTip("Drag & drop to reorder layer position")
+            lbl_drag.setToolTip(tr("spk_drag_tip"))
             lbl_drag.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 13pt; font-weight: bold; cursor: grab; padding: 0 4px;")
             row_layout.addWidget(lbl_drag)
             
@@ -148,7 +149,7 @@ class SpeakerPanel(QWidget):
             row_layout.addWidget(lbl_id)
             
             edit = QLineEdit(spk.display_name)
-            edit.setPlaceholderText("Display Name")
+            edit.setPlaceholderText(tr("spk_placeholder_name"))
             edit.setStyleSheet(f"""
                 QLineEdit {{
                     background-color: {COLORS['bg_input']};
@@ -163,12 +164,12 @@ class SpeakerPanel(QWidget):
             edit.focusInEvent = lambda event, sid=spk_id, e=edit: (self.speaker_selected.emit(sid), QLineEdit.focusInEvent(e, event))
             row_layout.addWidget(edit, stretch=1)
             
-            cnt_lbl = QLabel(f"{count} dialogues")
+            cnt_lbl = QLabel(tr("spk_dialogues_count", count=count))
             cnt_lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 8.5pt; border: none;")
             row_layout.addWidget(cnt_lbl)
             
             # Delete speaker button
-            btn_del = QPushButton("Delete")
+            btn_del = QPushButton(tr("spk_btn_delete"))
             del_icon_path = ASSETS_DIR / "icons" / "user-minus.svg"
             if del_icon_path.exists():
                 btn_del.setIcon(QIcon(str(del_icon_path)))
@@ -195,6 +196,13 @@ class SpeakerPanel(QWidget):
             item.setSizeHint(QSize(0, 48))
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, row)
+
+    def retranslate_ui(self):
+        """Retranslates header and items in SpeakerPanel."""
+        self.lbl_title.setText(tr("spk_panel_title"))
+        self.btn_add_speaker.setText(tr("spk_btn_add"))
+        if self.state:
+            self.populate(self.state)
 
     def _on_items_reordered(self, new_order: list):
         if self.state and new_order:
@@ -230,7 +238,7 @@ class SpeakerPanel(QWidget):
         if not self.state or spk_id not in self.state.speakers:
             return
         if len(self.state.speakers) <= 1:
-            QMessageBox.warning(self, "Delete Speaker", "Cannot delete the last remaining speaker track.")
+            QMessageBox.warning(self, tr("spk_msg_delete_title"), tr("spk_msg_cannot_delete_last"))
             return
         self.speaker_deleted.emit(spk_id)
 
@@ -239,3 +247,10 @@ class SpeakerPanel(QWidget):
             self.state.speakers[spk_id].display_name = new_name
             self.speaker_selected.emit(spk_id)
             self.speaker_renamed.emit(spk_id, new_name)
+
+    def retranslate_ui(self):
+        """Update strings when language changes."""
+        self.lbl_title.setText(tr("spk_panel_title"))
+        self.btn_add_speaker.setText(tr("spk_btn_add"))
+        if self.state:
+            self.populate(self.state)

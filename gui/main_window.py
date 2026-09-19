@@ -371,15 +371,8 @@ class MainWindow(QMainWindow):
     def _show_about_dialog(self):
         QMessageBox.about(
             self,
-            f"About {APP_NAME}",
-            f"<b>{APP_NAME}</b><br/>"
-            f"Version {APP_VERSION}<br/><br/>"
-            "An offline dialogue extraction suite tailored for <b>The Choice Voicer</b> game dialogue pack format.<br/><br/>"
-            "• Faster-Whisper Speech Recognition<br/>"
-            "• Silero VAD & Pyannote Diarization<br/>"
-            "• RoFormer & Demucs Audio Stem Separation<br/>"
-            "• Lossless Frame Extraction<br/><br/>"
-            "Developed with Python & PySide6."
+            tr("about_title", app_name=APP_NAME),
+            tr("about_body", app_name=APP_NAME, version=APP_VERSION),
         )
 
     def _build_toolbar(self):
@@ -885,7 +878,7 @@ class MainWindow(QMainWindow):
 
     def _on_delete_last_track(self):
         if len(self._state.speakers) <= 1:
-            QMessageBox.warning(self, "Delete Track", "Cannot delete the last remaining track.")
+            QMessageBox.warning(self, tr("msg_delete_track_title"), tr("msg_delete_track_cannot_last"))
             return
         last_spk = self._state.get_speaker_order()[-1]
         self._on_delete_track(last_spk)
@@ -893,16 +886,14 @@ class MainWindow(QMainWindow):
     def _on_delete_track(self, spk_id: str):
         if spk_id in self._state.speakers:
             if len(self._state.speakers) <= 1:
-                QMessageBox.warning(self, "Delete Speaker", "Cannot delete the last remaining speaker track.")
+                QMessageBox.warning(self, tr("msg_delete_speaker_title"), tr("msg_delete_speaker_cannot_last"))
                 return
             spk_info = self._state.speakers[spk_id]
             clip_count = sum(1 for d in self._state.active_dialogues() if d.speaker_id == spk_id)
             reply = QMessageBox.question(
                 self,
-                "Confirm Delete Track",
-                f"Are you sure you want to delete character track '{spk_info.display_name}' ({spk_id})?\n"
-                f"This track currently contains {clip_count} dialogue clip(s).\n\n"
-                "All dialogue clips on this track will be reassigned to the default track.",
+                tr("msg_confirm_delete_speaker_title"),
+                tr("msg_confirm_delete_speaker_prompt", name=spk_info.display_name, id=spk_id, count=clip_count),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
@@ -1160,7 +1151,7 @@ class MainWindow(QMainWindow):
         self._mark_dirty(True)
         self._speaker_panel.populate(self._state)
         self._timeline.populate(self._state)
-        self._show_toast("Tracks Reordered", "Speaker track ordering updated", "info")
+        self._show_toast(tr("msg_tracks_reordered_title"), tr("msg_tracks_reordered_desc"), "info")
 
     def _on_speaker_renamed(self, spk_id: str, new_name: str):
         self._push_undo()
@@ -1337,8 +1328,8 @@ class MainWindow(QMainWindow):
         proj_name = self._current_project_path.name if self._current_project_path else (self._state.pack_info.title or "Untitled Project")
         reply = QMessageBox.question(
             self,
-            "Save Changes?",
-            f"Save changes to '{proj_name}' before continuing?",
+            tr("msg_save_changes_title"),
+            tr("msg_save_changes_named", name=proj_name),
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save
         )
@@ -1432,10 +1423,10 @@ class MainWindow(QMainWindow):
             self._update_save_status()
             self._add_recent_project(str(path.resolve()))
             self._log_message(f"Opened project: {path.name} ({len(state.dialogues)} dialogues)", "ok")
-            self._show_toast("Project Loaded", f"Loaded {len(state.dialogues)} dialogues from {path.name}", "ok")
+            self._show_toast(tr("msg_project_loaded_title"), tr("msg_project_loaded_desc", count=len(state.dialogues), name=path.name), "ok")
         except Exception as e:
             self._log_message(f"Failed to open project: {e}", "error")
-            QMessageBox.critical(self, "Open Project Error", f"Could not load project file:\n{e}")
+            QMessageBox.critical(self, tr("msg_open_error_title"), tr("msg_open_error", error=str(e)))
 
     def load_pack_folder(self, pack_dir: Path):
         """Reconstruct project from an exported pack directory."""
@@ -1462,10 +1453,10 @@ class MainWindow(QMainWindow):
             self._update_save_status()
             self._add_recent_project(str(self._current_project_path.resolve()))
             self._log_message(f"Imported pack folder: {pack_dir.name} ({len(state.dialogues)} dialogues)", "ok")
-            self._show_toast("Pack Folder Imported", f"Imported {len(state.dialogues)} dialogues.", "ok")
+            self._show_toast(tr("msg_pack_imported_title"), tr("msg_pack_imported_desc", count=len(state.dialogues)), "ok")
         except Exception as e:
             self._log_message(f"Failed to import pack folder: {e}", "error")
-            QMessageBox.critical(self, "Import Pack Error", f"Could not import pack folder:\n{e}")
+            QMessageBox.critical(self, tr("msg_import_pack_error_title"), tr("msg_import_pack_error", error=str(e)))
 
     def on_save_project(self) -> bool:
         """Save to current project path, or prompt for path if untitled."""
@@ -1477,11 +1468,11 @@ class MainWindow(QMainWindow):
                 self._mark_dirty(False)
                 self._add_recent_project(str(self._current_project_path.resolve()))
                 self._log_message(f"Project saved: {self._current_project_path.name}", "ok")
-                self._show_toast("Project Saved", self._current_project_path.name, "ok")
+                self._show_toast(tr("msg_project_saved_title"), self._current_project_path.name, "ok")
                 return True
             else:
                 self._log_message("Failed to save project file", "error")
-                QMessageBox.critical(self, "Save Error", "Could not save project file.")
+                QMessageBox.critical(self, tr("msg_save_error_title"), tr("msg_save_error"))
                 return False
         return self.on_save_project_as()
 
@@ -1514,11 +1505,11 @@ class MainWindow(QMainWindow):
             self._mark_dirty(False)
             self._add_recent_project(str(path.resolve()))
             self._log_message(f"Project saved as: {path.name}", "ok")
-            self._show_toast("Project Saved", path.name, "ok")
+            self._show_toast(tr("msg_project_saved_title"), path.name, "ok")
             return True
         else:
             self._log_message("Failed to save project file", "error")
-            QMessageBox.critical(self, "Save Error", "Could not save project file.")
+            QMessageBox.critical(self, tr("msg_save_error_title"), tr("msg_save_error"))
             return False
 
     def _rebuild_recent_projects_menu(self):
@@ -1700,8 +1691,8 @@ class MainWindow(QMainWindow):
             self._log_message(f"Opened folder: {out_dir}", "info")
         else:
             QMessageBox.information(
-                self, "Export Folder",
-                f"Output directory does not exist yet:\n{out_dir or 'Not specified'}"
+                self, tr("msg_export_folder_title"),
+                tr("msg_export_folder_not_exist", path=str(out_dir or 'Not specified'))
             )
 
     def load_dialogues(self, state: PipelineState):
@@ -1749,8 +1740,8 @@ class MainWindow(QMainWindow):
             return
 
         if self._worker and self._worker.isRunning():
-            QMessageBox.warning(self, "Pipeline Running",
-                                "Analysis is already in progress.")
+            QMessageBox.warning(self, tr("msg_pipeline_running_title"),
+                                tr("msg_pipeline_already_running"))
             return
 
         # Update pack info from panel
@@ -1846,19 +1837,23 @@ class MainWindow(QMainWindow):
                 PackBuilder.export_zip(self._output_dir, zip_path)
                 self._log_message(f"All-in-One Process Complete: {zip_path.name}", "ok")
                 self._show_toast(
-                    title="All-in-One Process Complete",
-                    msg=f"Pack exported: {zip_path.name}",
+                    title=tr("msg_all_in_one_complete_title"),
+                    msg=tr("msg_all_in_one_complete_desc", name=zip_path.name),
                     level="ok"
                 )
             except Exception as e:
                 self._log_message(f"Auto-export ZIP error: {e}", "warn")
                 self._show_toast(
-                    title="Dialogue Extraction Finished",
-                    msg="Pack folder created successfully.",
+                    title=tr("msg_extraction_finished_title"),
+                    msg=tr("msg_extraction_finished_desc"),
                     level="ok"
                 )
         else:
-            self._show_toast()
+            self._show_toast(
+                title=tr("msg_extraction_finished_title"),
+                msg=tr("msg_extraction_finished_desc"),
+                level="ok"
+            )
 
         self._mark_dirty(True)
         # Immediately auto-save project so newly extracted dialogues and pack data are persisted
@@ -2043,9 +2038,19 @@ class MainWindow(QMainWindow):
             self._btn_tl_zoomout.setText(tr("tl_btn_zoomout"))
             self._btn_tl_zoomout.setToolTip(tr("tl_btn_zoom_out_tip"))
 
-        # Clip Editor
+        # Clip Editor & Child Panels
         if hasattr(self, '_clip_editor'):
             self._clip_editor.retranslate_ui()
+        if hasattr(self, '_dialogue_table'):
+            self._dialogue_table.retranslate_ui()
+        if hasattr(self, '_video_panel'):
+            self._video_panel.retranslate_ui()
+        if hasattr(self, '_speaker_panel'):
+            self._speaker_panel.retranslate_ui()
+        if hasattr(self, '_pack_info_panel'):
+            self._pack_info_panel.retranslate_ui()
+        if hasattr(self, '_progress_panel'):
+            self._progress_panel.retranslate_ui()
 
         # Status Bar
         if hasattr(self, '_status_version'):
@@ -2079,8 +2084,8 @@ class MainWindow(QMainWindow):
         if self._worker and self._worker.isRunning():
             reply = QMessageBox.question(
                 self,
-                "Pipeline In Progress",
-                "A dialogue processing pipeline is currently running.\nDo you really want to cancel it and quit?",
+                tr("msg_pipeline_running_title"),
+                tr("msg_pipeline_running_cancel_prompt"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
@@ -2095,8 +2100,8 @@ class MainWindow(QMainWindow):
             name = self._current_project_path.name if self._current_project_path else (self._state.pack_info.title or "Untitled Project")
             reply = QMessageBox.question(
                 self,
-                "Unsaved Changes",
-                f"Do you want to save changes to '{name}' before closing?",
+                tr("msg_save_changes_title"),
+                tr("msg_save_before_exit_named", name=name),
                 QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Save
             )

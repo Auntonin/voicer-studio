@@ -20,55 +20,55 @@ from gui.ui_utils import apply_dark_title_bar
 
 SHORTCUT_DATA = [
     {
-        "category": "TIMELINE NAVIGATION & PLAYBACK",
+        "category_key": "sc_cat_timeline",
         "items": [
-            ("Play / Pause Timeline", ["Space"], "Toggle master timeline audio playback"),
-            ("Zoom Timeline (Anchored)", ["Ctrl + Wheel", "Alt + Wheel"], "Zoom timeline centered directly under mouse cursor"),
-            ("Scroll Timeline (H)", ["Shift + Wheel"], "Pan timeline canvas horizontally left or right"),
-            ("Scroll Tracks (V / H)", ["Wheel"], "Scroll track lanes vertically or horizontally"),
-            ("2D Canvas Pan", ["Middle Mouse Drag"], "Pan freely across timeline canvas with hand tool"),
-            ("Zoom In", ["+ / ="], "Zoom in timeline view increments"),
-            ("Zoom Out", ["-"], "Zoom out timeline view increments"),
-            ("Scrub Playhead", ["Click Ruler / Track"], "Jump playhead directly to clicked time position"),
-            ("Pan to Clip Start & Track", ["Double-click Table / Clip"], "Smooth-pan camera to dialogue start point and character track"),
-            ("Seek to Dialogue", ["Click Table Row"], "Move playhead and video player to dialogue start time"),
+            ("sc_item_play_pause", ["Space"], "sc_item_play_pause_desc"),
+            ("sc_item_zoom_anchored", ["Ctrl + Wheel", "Alt + Wheel"], "sc_item_zoom_anchored_desc"),
+            ("sc_item_scroll_h", ["Shift + Wheel"], "sc_item_scroll_h_desc"),
+            ("sc_item_scroll_v", ["Wheel"], "sc_item_scroll_v_desc"),
+            ("sc_item_canvas_pan", ["Middle Mouse Drag"], "sc_item_canvas_pan_desc"),
+            ("sc_item_zoom_in", ["+ / ="], "sc_item_zoom_in_desc"),
+            ("sc_item_zoom_out", ["-"], "sc_item_zoom_out_desc"),
+            ("sc_item_scrub_playhead", ["Click Ruler / Track"], "sc_item_scrub_playhead_desc"),
+            ("sc_item_pan_clip_start", ["Double-click Table / Clip"], "sc_item_pan_clip_start_desc"),
+            ("sc_item_seek_dialogue", ["Click Table Row"], "sc_item_seek_dialogue_desc"),
         ]
     },
     {
-        "category": "CLIP EDITING & TRIMMING",
+        "category_key": "sc_cat_editing",
         "items": [
-            ("Split at Playhead", ["S", "Ctrl+B"], "Slice active clip at current playhead position"),
-            ("Delete Left to Playhead", ["Q"], "Trim and delete clip segment from start to playhead"),
-            ("Delete Right from Playhead", ["W"], "Trim and delete clip segment from playhead to end"),
-            ("Delete Selected Clip", ["Del", "Backspace"], "Remove selected dialogue clip from timeline"),
-            ("Slip / Move Clip", ["Drag Clip Body"], "Reposition dialogue start and end timings together"),
-            ("Trim Clip Boundary", ["Drag Clip Edge"], "Adjust start or end boundary with 10px snapping"),
-            ("Move Between Tracks", ["Drag Vertically"], "Reassign dialogue clip to a different character track"),
+            ("sc_item_split", ["S", "Ctrl+B"], "sc_item_split_desc"),
+            ("sc_item_trim_left", ["Q"], "sc_item_trim_left_desc"),
+            ("sc_item_trim_right", ["W"], "sc_item_trim_right_desc"),
+            ("sc_item_del_clip", ["Del", "Backspace"], "sc_item_del_clip_desc"),
+            ("sc_item_slip_clip", ["Drag Clip Body"], "sc_item_slip_clip_desc"),
+            ("sc_item_trim_boundary", ["Drag Clip Edge"], "sc_item_trim_boundary_desc"),
+            ("sc_item_move_track", ["Drag Vertically"], "sc_item_move_track_desc"),
         ]
     },
     {
-        "category": "TRACKS & CHARACTERS",
+        "category_key": "sc_cat_tracks",
         "items": [
-            ("Add Character Track", ["+ Add Track"], "Create new track and prompt character name immediately"),
-            ("Rename Character", ["Double-click Track"], "Directly edit character display name"),
-            ("Track Context Menu", ["Right-click Track"], "Rename, delete track, or toggle sticky pinning"),
-            ("Pin Tracks to Edge", ["Pin Icon"], "Keep character headers visible while scrolling right"),
-            ("Reorder Tracks", ["Drag Track Grip"], "Grab left grip handle to reorder track rows"),
+            ("sc_item_add_track", ["+ Add Track"], "sc_item_add_track_desc"),
+            ("sc_item_rename_char", ["Double-click Track"], "sc_item_rename_char_desc"),
+            ("sc_item_track_menu", ["Right-click Track"], "sc_item_track_menu_desc"),
+            ("sc_item_pin_tracks", ["Pin Icon"], "sc_item_pin_tracks_desc"),
+            ("sc_item_reorder_tracks", ["Drag Track Grip"], "sc_item_reorder_tracks_desc"),
         ]
     },
     {
-        "category": "PROJECT & APPLICATION",
+        "category_key": "sc_cat_project",
         "items": [
-            ("Undo Action", ["Ctrl+Z"], "Revert last timeline, text, or dialogue edit"),
-            ("Redo Action", ["Ctrl+Y", "Ctrl+Shift+Z"], "Restore undone edit"),
-            ("Save Project", ["Ctrl+S"], "Save current project to .voicer file"),
-            ("Save Project As...", ["Ctrl+Shift+S"], "Save project to a new file location"),
-            ("New Project", ["Ctrl+N"], "Start a new project"),
-            ("Open Project...", ["Ctrl+O"], "Open an existing .voicer project"),
-            ("Import Video...", ["Ctrl+I"], "Import video for dialogue extraction"),
-            ("Export Pack ZIP...", ["Ctrl+E"], "Export final game dialogue pack archive"),
-            ("Toggle Full Screen", ["F11"], "Enter or exit borderless full screen mode"),
-            ("Keyboard Shortcuts", ["F1", "?"], "Open this keyboard shortcuts reference sheet"),
+            ("sc_item_undo", ["Ctrl+Z"], "sc_item_undo_desc"),
+            ("sc_item_redo", ["Ctrl+Y", "Ctrl+Shift+Z"], "sc_item_redo_desc"),
+            ("sc_item_save_proj", ["Ctrl+S"], "sc_item_save_proj_desc"),
+            ("sc_item_save_as", ["Ctrl+Shift+S"], "sc_item_save_as_desc"),
+            ("sc_item_new_proj", ["Ctrl+N"], "sc_item_new_proj_desc"),
+            ("sc_item_open_proj", ["Ctrl+O"], "sc_item_open_proj_desc"),
+            ("sc_item_import_vid", ["Ctrl+I"], "sc_item_import_vid_desc"),
+            ("sc_item_export_zip", ["Ctrl+E"], "sc_item_export_zip_desc"),
+            ("sc_item_fullscreen", ["F11"], "sc_item_fullscreen_desc"),
+            ("sc_item_shortcuts", ["F1", "?"], "sc_item_shortcuts_desc"),
         ]
     }
 ]
@@ -82,8 +82,8 @@ class ShortcutsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("sc_dialog_title"))
-        self.resize(880, 600)
-        self.setMinimumSize(720, 480)
+        self.resize(920, 620)
+        self.setMinimumSize(780, 500)
 
         icon_path = ASSETS_DIR / "icons" / "keyboard.svg"
         if icon_path.exists():
@@ -153,7 +153,7 @@ class ShortcutsDialog(QDialog):
 
         title_lbl = QLabel(tr("sc_dialog_title"))
         title_lbl.setStyleSheet("font-size: 13pt; font-weight: bold; color: #ffffff; letter-spacing: -0.2px;")
-        sub_lbl = QLabel("Quick reference guide for Voicer Studio editing controls and keybindings")
+        sub_lbl = QLabel(tr("sc_dialog_subtitle"))
         sub_lbl.setStyleSheet("font-size: 8.5pt; color: #888888;")
 
         header_text.addWidget(title_lbl)
@@ -195,12 +195,12 @@ class ShortcutsDialog(QDialog):
 
         # ── Footer ──
         footer = QHBoxLayout()
-        tip_lbl = QLabel("Tip: You can also hover your cursor over toolbar buttons to see their shortcuts.")
+        tip_lbl = QLabel(tr("sc_tip_hover"))
         tip_lbl.setStyleSheet("font-size: 8pt; color: #777777;")
         footer.addWidget(tip_lbl)
         footer.addStretch()
 
-        btn_close = QPushButton("Close (Esc)", objectName="close_btn")
+        btn_close = QPushButton(tr("sc_btn_close"), objectName="close_btn")
         btn_close.clicked.connect(self.accept)
         footer.addWidget(btn_close)
 
@@ -221,13 +221,7 @@ class ShortcutsDialog(QDialog):
             card_layout.setContentsMargins(14, 12, 14, 14)
             card_layout.setSpacing(8)
 
-            cat_map = {
-                "TIMELINE NAVIGATION & PLAYBACK": "sc_cat_timeline",
-                "CLIP EDITING & TRIMMING": "sc_cat_editing",
-                "TRACKS & CHARACTERS": "sc_cat_tracks",
-                "PROJECT & APPLICATION": "sc_cat_project",
-            }
-            cat_text = tr(cat_map.get(cat_data["category"], cat_data["category"]))
+            cat_text = tr(cat_data["category_key"])
             cat_title = QLabel(cat_text)
             cat_title.setStyleSheet("""
                 font-size: 8pt;
@@ -247,7 +241,10 @@ class ShortcutsDialog(QDialog):
             grid.setVerticalSpacing(8)
 
             item_records = []
-            for row_idx, (name, keys_list, desc) in enumerate(cat_data["items"]):
+            for row_idx, (name_key, keys_list, desc_key) in enumerate(cat_data["items"]):
+                name = tr(name_key)
+                desc = tr(desc_key)
+
                 name_lbl = QLabel(name)
                 name_lbl.setStyleSheet("font-size: 8.5pt; font-weight: 500; color: #e4e4e7; border: none;")
 
@@ -259,7 +256,7 @@ class ShortcutsDialog(QDialog):
 
                 grid.addWidget(name_lbl, row_idx, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 grid.addWidget(keys_widget, row_idx, 1, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                grid.addWidget(desc_lbl, row_idx, 2, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                grid.addWidget(desc_lbl, row_idx, 2, Qt.AlignmentFlag.AlignVCenter)
 
                 search_keys_str = " ".join(keys_list)
                 item_records.append((name, search_keys_str, desc, name_lbl, keys_widget, desc_lbl))
@@ -270,7 +267,7 @@ class ShortcutsDialog(QDialog):
             card_layout.addLayout(grid)
 
             self.content_layout.addWidget(cat_card)
-            self._category_widgets.append((cat_card, cat_data["category"], item_records))
+            self._category_widgets.append((cat_card, cat_text, item_records))
 
         self.content_layout.addStretch()
 

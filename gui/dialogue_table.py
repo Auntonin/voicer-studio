@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QAction
 
 from core.models import DialogueItem, PipelineState
+from core.i18n import tr
 
 class DialogueTable(QWidget):
     dialogue_selected = Signal(DialogueItem)
@@ -28,11 +29,11 @@ class DialogueTable(QWidget):
         # Top bar
         top_bar = QHBoxLayout()
         self.filter_input = QLineEdit()
-        self.filter_input.setPlaceholderText("Filter by character name...")
+        self.filter_input.setPlaceholderText(tr("dt_filter_placeholder"))
         self.filter_input.textChanged.connect(self.on_filter_changed)
         top_bar.addWidget(self.filter_input)
         
-        self.count_label = QLabel("0 dialogues / 0 speakers")
+        self.count_label = QLabel(tr("dt_stats_empty"))
         top_bar.addWidget(self.count_label)
         layout.addLayout(top_bar)
         
@@ -69,24 +70,7 @@ class DialogueTable(QWidget):
                 border: 1px solid #333333;
             }}
         """)
-        headers = ["#", "Character", "Start", "End", "Duration", "Caption", "Img", "Aud", "Confirm"]
-        self.table.setHorizontalHeaderLabels(headers)
-        
-        tooltips = [
-            "Dialogue line sequence index (Double-click row to center on timeline)",
-            "Assigned character / speaker layer",
-            "Start timestamp (HH:MM:SS.mmm)",
-            "End timestamp (HH:MM:SS.mmm)",
-            "Total segment duration in seconds",
-            "Speech transcript caption text",
-            "Companion image frame extracted on disk (Yes / —)",
-            "Companion audio clip extracted on disk (Yes / —)",
-            "Proofreading status checkbox: Check when verified and approved"
-        ]
-        for col, tip in enumerate(tooltips):
-            h_item = self.table.horizontalHeaderItem(col)
-            if h_item:
-                h_item.setToolTip(tip)
+        self._apply_headers_and_tooltips()
 
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -108,6 +92,42 @@ class DialogueTable(QWidget):
         
         self.colors = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7"]
 
+    def _apply_headers_and_tooltips(self):
+        headers = [
+            tr("dt_col_index"),
+            tr("dt_col_character"),
+            tr("dt_col_start"),
+            tr("dt_col_end"),
+            tr("dt_col_duration"),
+            tr("dt_col_caption"),
+            tr("dt_col_img"),
+            tr("dt_col_aud"),
+            tr("dt_col_confirm"),
+        ]
+        self.table.setHorizontalHeaderLabels(headers)
+
+        tooltips = [
+            tr("dt_tip_index"),
+            tr("dt_tip_character"),
+            tr("dt_tip_start"),
+            tr("dt_tip_end"),
+            tr("dt_tip_duration"),
+            tr("dt_tip_caption"),
+            tr("dt_tip_img"),
+            tr("dt_tip_aud"),
+            tr("dt_tip_confirm"),
+        ]
+        for col, tip in enumerate(tooltips):
+            h_item = self.table.horizontalHeaderItem(col)
+            if h_item:
+                h_item.setToolTip(tip)
+
+    def retranslate_ui(self):
+        """Retranslates table headers, tooltips, search placeholder, and labels."""
+        self.filter_input.setPlaceholderText(tr("dt_filter_placeholder"))
+        self._apply_headers_and_tooltips()
+        self.refresh_table()
+
     def populate(self, state: PipelineState):
         self.state = state
         self._items = state.active_dialogues()
@@ -116,7 +136,7 @@ class DialogueTable(QWidget):
     def refresh_table(self):
         if not self.state:
             self.table.setRowCount(0)
-            self.count_label.setText("0 dialogues / 0 speakers")
+            self.count_label.setText(tr("dt_stats_empty"))
             return
 
         filter_text = self.filter_input.text().lower()
@@ -128,7 +148,7 @@ class DialogueTable(QWidget):
             if not filter_text or filter_text in speaker_name.lower() or filter_text in item.caption.lower():
                 display_items.append(item)
 
-        self.count_label.setText(f"{len(display_items)} dialogues / {len(speakers)} speakers")
+        self.count_label.setText(tr("dt_stats_label", count=len(display_items), speakers=len(speakers)))
 
         speaker_colors = {}
         for idx, spk in enumerate(sorted(speakers)):
@@ -184,7 +204,7 @@ class DialogueTable(QWidget):
         else:
             cb = QCheckBox()
             cb.setChecked(getattr(item, 'caption_confirmed', False))
-            cb.setToolTip("Mark as verified and approved (Proofread QA)")
+            cb.setToolTip(tr("dt_proofread_tip"))
             def _on_confirm_toggled(state, itm=item):
                 itm.caption_confirmed = (state == Qt.CheckState.Checked.value)
                 self.dialogue_changed.emit(itm)
@@ -272,13 +292,13 @@ class DialogueTable(QWidget):
         if not target_item: return
 
         menu = QMenu(self)
-        play_action = menu.addAction("Play Audio")
-        view_action = menu.addAction("View Image")
+        play_action = menu.addAction(tr("dt_menu_play_audio"))
+        view_action = menu.addAction(tr("dt_menu_view_image"))
         menu.addSeparator()
-        merge_action = menu.addAction("Merge with Next")
-        split_action = menu.addAction("Split")
+        merge_action = menu.addAction(tr("dt_menu_merge_next"))
+        split_action = menu.addAction(tr("dt_menu_split"))
         menu.addSeparator()
-        delete_action = menu.addAction("Delete")
+        delete_action = menu.addAction(tr("dt_menu_delete"))
         
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
         if action == delete_action:
