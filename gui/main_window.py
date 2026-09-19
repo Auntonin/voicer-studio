@@ -702,6 +702,9 @@ class MainWindow(QMainWindow):
         self._timeline.merge_requested.connect(self._on_merge_next)
         self._timeline.delete_requested.connect(self._on_dialogue_deleted)
         self._timeline.tracks_reordered.connect(self._on_timeline_tracks_reordered)
+        self._timeline.playback_toggle_requested.connect(self._toggle_global_playback)
+        self._timeline.playback_start_requested.connect(self._start_global_playback)
+        self._timeline.playback_stop_requested.connect(self._stop_global_playback)
 
         # ── Connect Speaker Panel Signals ──
         self._speaker_panel.speaker_renamed.connect(self._on_speaker_renamed)
@@ -760,13 +763,34 @@ class MainWindow(QMainWindow):
         elif not is_playing and self._timeline._is_playing:
             self._timeline.stop_playback()
 
+    def seek_to_time(self, t: float, keep_playing: Optional[bool] = None):
+        """
+        Unified time seek across timeline and video panel.
+        If keep_playing is None, preserves current playback state (seamlessly continues playing if playing).
+        """
+        was_playing = self._timeline._is_playing or self._video_panel.is_playing()
+        should_play = was_playing if keep_playing is None else keep_playing
+
+        # Seek timeline (master clock)
+        self._timeline.seek(t)
+        # Seek video panel
+        self._video_panel.set_position(t)
+
+        if should_play:
+            if not self._timeline._is_playing:
+                self._timeline.start_playback()
+            if not self._video_panel.is_playing():
+                self._video_panel.start_playback()
+        else:
+            if self._timeline._is_playing:
+                self._timeline.stop_playback()
+            if self._video_panel.is_playing():
+                self._video_panel.pause_playback()
+
     def _on_video_seek(self, t: float):
         self._timeline.set_current_time(t)
 
     def _on_timeline_seek(self, t: float):
-        if self._video_panel.is_playing():
-            self._video_panel.pause_playback()
-        self._timeline.set_current_time(t)
         self._video_panel.set_position(t)
         for item in self._state.active_dialogues():
             if item.start <= t <= item.end:
@@ -782,16 +806,14 @@ class MainWindow(QMainWindow):
             self._pending_seek_item = None
 
     def _on_select_dialogue(self, item: DialogueItem):
-        self._timeline.set_current_time(item.start)
-        self._video_panel.set_position(item.start)
+        self.seek_to_time(item.start)
         self._set_active_speaker(item.speaker_id)
         self._timeline.selected_index = item.index
         self._timeline.ensure_playhead_visible(margin=80)
         self._timeline.update()
 
     def _on_dialogue_double_clicked(self, item: DialogueItem):
-        self._timeline.set_current_time(item.start)
-        self._video_panel.set_position(item.start)
+        self.seek_to_time(item.start)
         self._set_active_speaker(item.speaker_id)
         self._timeline.selected_index = item.index
         self._timeline.center_on_dialogue(item, animated=True)
@@ -801,7 +823,7 @@ class MainWindow(QMainWindow):
         for item in self._state.active_dialogues():
             if item.index == idx:
                 self._clip_editor.load_item(item, self._state)
-                self._video_panel.set_position(item.start)
+                self.seek_to_time(item.start)
                 self._set_active_speaker(item.speaker_id)
                 self._dialogue_table.select_dialogue_by_index(idx)
                 break

@@ -44,6 +44,7 @@ class VideoPanel(QFrame):
         self._proxy_height: int = 540
         self._is_user_seeking = False
         self._last_slider_seek_time = 0.0
+        self._last_direct_seek_time = 0.0
         self._current_badge_status = "ORIGINAL"
 
         # ── QMediaPlayer Setup ─────────────────────────────────────────
@@ -361,8 +362,15 @@ class VideoPanel(QFrame):
         Checks drift between audio master clock and video player.
         If drift exceeds 80ms (~2.5 frames), re-aligns video immediately.
         """
+        import time
+        now = time.monotonic()
         target_ms = int(audio_sec * 1000)
         if self.is_playing():
+            # If an explicit direct seek occurred within the last 250ms, give video decoder a grace window to settle
+            if now - getattr(self, '_last_direct_seek_time', 0.0) < 0.25:
+                self._update_time_code(target_ms, self.player.duration())
+                return
+
             cur_ms = self.player.position()
             drift_ms = abs(target_ms - cur_ms)
             if drift_ms > 80:
@@ -373,8 +381,12 @@ class VideoPanel(QFrame):
         self._update_time_code(target_ms, self.player.duration())
 
     def set_position(self, sec: float):
-        """Seek player position without triggering recursive signals."""
-        self.sync_master_time(sec)
+        """Seek player position directly without triggering recursive signals."""
+        import time
+        self._last_direct_seek_time = time.monotonic()
+        target_ms = int(sec * 1000)
+        self.player.setPosition(target_ms)
+        self._update_time_code(target_ms, self.player.duration())
 
     def toggle_playback(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:

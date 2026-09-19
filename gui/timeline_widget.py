@@ -34,6 +34,10 @@ class TimelineWidget(QWidget):
     add_clip_requested = Signal(str, float)
     tracks_reordered = Signal()
     sticky_headers_toggled = Signal(bool)
+    playhead_tick = Signal(float)
+    playback_toggle_requested = Signal()
+    playback_start_requested = Signal()
+    playback_stop_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -46,6 +50,11 @@ class TimelineWidget(QWidget):
         self._is_hovering_pin = False
         self._scroll_connected = False
         self._last_scrub_seek_time = 0.0
+
+        # Seek guard & anti-rubberbanding state
+        self._seek_in_progress = False
+        self._pending_seek_target = 0.0
+        self._seek_timestamp = 0.0
 
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -89,10 +98,45 @@ class TimelineWidget(QWidget):
         self.state = state
         self.set_duration(state.video_duration)
         self._recalculate_size()
+        # Pre-set audio source if available so seek positions register immediately
+        audio_src = self.state.separated_vocals_path or self.state.work_audio_path or (self.state.video_path if (self.state.video_path and self.state.video_path.exists()) else None)
+        if audio_src and audio_src.exists():
+            target_url = QUrl.fromLocalFile(str(audio_src))
+            if self.player.source() != target_url:
+                self.player.setSource(target_url)
         self.update()
 
     def set_current_time(self, t: float):
-        self.current_time = max(0.0, min(self.duration if self.duration > 0 else 99999.0, t))
+        self.seek(t)
+
+    def seek(self, t: float):
+        """Authoritative time seek across timeline and audio master clock with anti-rubberbanding guard."""
+        import time
+        max_dur = self.duration if self.duration > 0 else 99999.0
+        t = max(0.0, min(max_dur, t))
+
+        now = time.monotonic()
+        # Deduplicate rapid seek requests to the same millisecond target (e.g. double-click race)
+        if self._seek_in_progress and abs(self._pending_seek_target - t) < 0.005 and (now - self._seek_timestamp) < 0.15:
+            return
+
+        self.current_time = t
+        self._pending_seek_target = t
+        self._seek_in_progress = True
+        self._seek_timestamp = now
+
+        # Ensure player source is set if state has media available
+        if self.state and not self.player.source().isValid():
+            audio_src = self.state.separated_vocals_path or self.state.work_audio_path or (self.state.video_path if (self.state.video_path and self.state.video_path.exists()) else None)
+            if audio_src and audio_src.exists():
+                self.player.setSource(QUrl.fromLocalFile(str(audio_src)))
+
+        if self.player.source().isValid():
+            self.player.setPosition(int(t * 1000))
+            if self._is_playing and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                self.player.play()
+
+        self.playhead_tick.emit(t)
         self.update()
 
     def _get_scroll_area(self) -> Optional[QScrollArea]:
@@ -248,8 +292,6 @@ class TimelineWidget(QWidget):
         total_w = self.HEADER_WIDTH + int(self.duration * self.pixels_per_second) + 350
         self.setMinimumSize(total_w, total_h)
 
-    playhead_tick = Signal(float)
-
     def _get_speaker_list(self) -> List[str]:
         if not self.state or not self.state.speakers:
             return ["SPEAKER_00"]
@@ -361,15 +403,13 @@ class TimelineWidget(QWidget):
     def start_playback(self):
         if not self.state:
             return
-        audio_src = self.state.separated_vocals_path or self.state.work_audio_path
-        if not audio_src or not audio_src.exists():
-            return
-
-        target_url = QUrl.fromLocalFile(str(audio_src))
-        if self.player.source() != target_url:
-            self.player.setSource(target_url)
-        self.player.setPosition(int(self.current_time * 1000))
-        self.player.play()
+        audio_src = self.state.separated_vocals_path or self.state.work_audio_path or (self.state.video_path if (self.state.video_path and self.state.video_path.exists()) else None)
+        if audio_src and audio_src.exists():
+            target_url = QUrl.fromLocalFile(str(audio_src))
+            if self.player.source() != target_url:
+                self.player.setSource(target_url)
+            self.player.setPosition(int(self.current_time * 1000))
+            self.player.play()
         self.play_timer.start()
         self._is_playing = True
 
@@ -377,15 +417,42 @@ class TimelineWidget(QWidget):
         self.player.stop()
         self.play_timer.stop()
         self._is_playing = False
+        self._seek_in_progress = False
 
     def _on_play_timer_tick(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            import time
             pos_sec = self.player.position() / 1000.0
-            self.current_time = pos_sec
-            self.playhead_tick.emit(pos_sec)
+
+            if self._seek_in_progress:
+                elapsed_since_seek = time.monotonic() - self._seek_timestamp
+                # Guard window: wait for player position to arrive near target, or timeout after 350ms
+                if abs(pos_sec - self._pending_seek_target) <= 0.35 or elapsed_since_seek >= 0.35:
+                    self._seek_in_progress = False
+                    self.current_time = pos_sec
+                else:
+                    # In-flight seek: advance smoothly from target based on wall-clock elapsed time
+                    # Prevents rubberbanding back to stale pre-seek time!
+                    self.current_time = self._pending_seek_target + elapsed_since_seek
+                    self.playhead_tick.emit(self.current_time)
+                    self.update()
+                    return
+            else:
+                self.current_time = pos_sec
+
+            self.playhead_tick.emit(self.current_time)
+            self.update()
+        elif not self.player.source().isValid() and self._is_playing:
+            # Synthetic timeline clock fallback if media has no audio track
+            self.current_time += 0.033
+            if self.duration > 0 and self.current_time >= self.duration:
+                self.stop_playback()
+                return
+            self.playhead_tick.emit(self.current_time)
             self.update()
         else:
-            self.stop_playback()
+            if not self._seek_in_progress:
+                self.stop_playback()
 
 
     # ── Painting ───────────────────────────────────────────────────────────────
@@ -1074,10 +1141,10 @@ class TimelineWidget(QWidget):
             # Pause playback while scrubbing so it does not fight mouse dragging
             self._was_playing_before_drag = self._is_playing
             if self._is_playing:
-                self.stop_playback()
+                self.playback_stop_requested.emit()
 
             t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
-            self.set_current_time(t)
+            self.seek(t)
             self.seek_requested.emit(t)
             self.ensure_playhead_visible(margin=60)
             self.selected_index = -1
@@ -1279,11 +1346,11 @@ class TimelineWidget(QWidget):
             elif mode == "playhead":
                 x = event.pos().x()
                 t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
-                self.set_current_time(t)
+                self.seek(t)
                 self.seek_requested.emit(t)
                 QToolTip.hideText()
                 if self._was_playing_before_drag:
-                    self.start_playback()
+                    self.playback_start_requested.emit()
                     self._was_playing_before_drag = False
 
             self._dragging = None
@@ -1318,7 +1385,7 @@ class TimelineWidget(QWidget):
         has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
         if key == Qt.Key.Key_Space:
-            self.toggle_playback()
+            self.playback_toggle_requested.emit()
         elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             if self.selected_index >= 0:
                 self.delete_requested.emit(self.selected_index)

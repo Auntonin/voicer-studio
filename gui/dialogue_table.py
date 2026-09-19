@@ -260,7 +260,6 @@ class DialogueTable(QWidget):
             return
         for item in self._items:
             if item.index == idx:
-                self.dialogue_selected.emit(item)
                 self.dialogue_double_clicked.emit(item)
                 break
 
