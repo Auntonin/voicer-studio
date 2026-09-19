@@ -8,6 +8,17 @@ from PySide6.QtGui import QColor, QAction
 from core.models import DialogueItem, PipelineState
 from core.i18n import tr
 
+class _DialogueTableWidget(QTableWidget):
+    playback_toggle_requested = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self.playback_toggle_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class DialogueTable(QWidget):
     dialogue_selected = Signal(DialogueItem)
     dialogue_double_clicked = Signal(DialogueItem)
@@ -17,6 +28,7 @@ class DialogueTable(QWidget):
     view_image_requested = Signal(DialogueItem)
     merge_next_requested = Signal(int)
     split_requested = Signal(int)
+    playback_toggle_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -38,7 +50,8 @@ class DialogueTable(QWidget):
         layout.addLayout(top_bar)
         
         # Table - 9 columns
-        self.table = QTableWidget(0, 9)
+        self.table = _DialogueTableWidget(0, 9)
+        self.table.playback_toggle_requested.connect(self.playback_toggle_requested)
         self.table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: #181818;
@@ -88,6 +101,7 @@ class DialogueTable(QWidget):
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.table.cellDoubleClicked.connect(self.on_double_click)
         self.table.cellClicked.connect(self._on_single_click)
+        self.table.currentCellChanged.connect(self._on_current_cell_changed)
         layout.addWidget(self.table)
         
         self.colors = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7"]
@@ -234,6 +248,12 @@ class DialogueTable(QWidget):
 
     def on_filter_changed(self):
         self.refresh_table()
+
+    def _on_current_cell_changed(self, currentRow: int, currentColumn: int, previousRow: int, previousColumn: int):
+        """Sync selection and playhead when navigating table with arrow keys."""
+        if currentRow < 0 or currentRow == previousRow:
+            return
+        self._on_single_click(currentRow, currentColumn)
 
     def _on_single_click(self, row, col):
         """Select item on single click."""

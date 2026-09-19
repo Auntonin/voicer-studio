@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog,
     QToolTip
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation
+from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEvent
 from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette, QKeySequence, QShortcut
 
 from config import (
@@ -107,7 +107,11 @@ class MainWindow(QMainWindow):
         self._sc_shortcuts.activated.connect(self._show_shortcuts_dialog)
 
         self._apply_dark_title_bar()
-        
+
+        # Install global studio application event filter for universal Spacebar Play/Pause
+        q_app = QApplication.instance()
+        if q_app:
+            q_app.installEventFilter(self)
         # Professional Bottom-Right Toast Floating Card
         self._toast = QFrame(self)
         self._toast.setObjectName("toast_card")
@@ -685,6 +689,7 @@ class MainWindow(QMainWindow):
         self._dialogue_table.merge_next_requested.connect(self._on_merge_next)
         self._dialogue_table.split_requested.connect(self._on_split)
         self._dialogue_table.dialogue_changed.connect(lambda itm: self._mark_dirty(True))
+        self._dialogue_table.playback_toggle_requested.connect(self._toggle_global_playback)
 
         # ── Connect Timeline Signals ──
         self._timeline.segment_selected.connect(self._select_dialogue_by_idx)
@@ -1037,7 +1042,31 @@ class MainWindow(QMainWindow):
     def _on_speaker_deleted(self, spk_id: str):
         self._on_delete_track(spk_id)
 
-    # ── Keyboard Shortcuts (Spacebar & Undo) ──────────────────────────────────
+    # ── Keyboard Shortcuts (Spacebar & Global Event Filter) ───────────────────
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space:
+            # If target widget receiving the key is a text input field, let it type a space
+            if isinstance(obj, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                return super().eventFilter(obj, event)
+
+            # If a modal dialog is active, let it handle its own keys
+            if QApplication.activeModalWidget() is not None:
+                return super().eventFilter(obj, event)
+
+            focus = QApplication.focusWidget()
+            if focus:
+                # If focus is inside a secondary window or dialog, let it pass
+                if focus.window() != self:
+                    return super().eventFilter(obj, event)
+                # If user is actively typing in a text field, let it type a space
+                if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                    return super().eventFilter(obj, event)
+
+            self._toggle_global_playback()
+            return True
+
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event):
         key = event.key()
