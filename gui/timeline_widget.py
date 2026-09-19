@@ -436,7 +436,7 @@ class TimelineWidget(QWidget):
             painter.setPen(QPen(QColor("#2d2d2d"), 1))
             painter.drawLine(self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT), self.width(), int(y_top + self.TRACK_HEIGHT))
 
-        # 3. Dynamic Ruler Ticks & Track Guidelines
+        # 3. Dynamic Ruler Ticks & Track Guidelines (with Viewport Frustum Culling)
         pps = self.pixels_per_second
         if pps >= 150:
             major_step = 1.0
@@ -457,9 +457,18 @@ class TimelineWidget(QWidget):
         font_ruler = QFont("Segoe UI", 8)
         painter.setFont(font_ruler)
 
-        t = 0.0
+        scroll_area = self._get_scroll_area()
+        scroll_x = scroll_area.horizontalScrollBar().value() if scroll_area else 0
+        vp_w = scroll_area.viewport().width() if scroll_area else self.width()
+        min_vis_x = max(0, scroll_x - 100)
+        max_vis_x = scroll_x + vp_w + 100
+
         max_t = self.duration + 30.0
-        while t <= max_t:
+        t_start = max(0.0, (min_vis_x - self.HEADER_WIDTH) / max(1.0, pps))
+        t_end = min(max_t, (max_vis_x - self.HEADER_WIDTH) / max(1.0, pps) + 1.0)
+        t = max(0.0, math.floor(t_start / minor_step) * minor_step)
+
+        while t <= t_end:
             x = self.HEADER_WIDTH + t * pps
             if x > self.width():
                 break
@@ -490,9 +499,21 @@ class TimelineWidget(QWidget):
 
             t = round(t + minor_step, 4)
 
-        # 4. Dialogue Clips per Track (Waveform + Gradient + Clean Typography)
+        # 4. Dialogue Clips per Track (with Viewport Frustum Culling & Cached Font Metrics)
+        font_bold = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        font_reg = QFont("Segoe UI", 7.5)
+        fm_bold = QFontMetrics(font_bold)
+        fm_reg = QFontMetrics(font_reg)
+
         if self.state:
             for item in self.state.active_dialogues():
+                x1 = self.HEADER_WIDTH + item.start * self.pixels_per_second
+                w = max(4.0, item.duration * self.pixels_per_second)
+
+                # Frustum culling: Instantly skip offscreen clips!
+                if x1 + w < min_vis_x or x1 > max_vis_x:
+                    continue
+
                 try:
                     spk_idx = speakers_list.index(item.speaker_id)
                 except ValueError:
@@ -500,8 +521,6 @@ class TimelineWidget(QWidget):
 
                 y_top = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP) + 3
                 h = self.TRACK_HEIGHT - 6
-                x1 = self.HEADER_WIDTH + item.start * self.pixels_per_second
-                w = max(4.0, item.duration * self.pixels_per_second)
 
                 color_hex = self.colors[spk_idx % len(self.colors)]
                 base_color = QColor(color_hex)
@@ -539,7 +558,7 @@ class TimelineWidget(QWidget):
                     painter.setPen(Qt.PenStyle.NoPen)
                     wave_color = QColor(255, 255, 255, 45 if is_sel else 28)
                     painter.setBrush(QBrush(wave_color))
-                    n_bars = int(wave_w // 3)
+                    n_bars = min(60, int(wave_w // 3))
                     bar_x = x1 + 5
                     for b_idx in range(n_bars):
                         progress = b_idx / max(1, n_bars)
@@ -560,9 +579,6 @@ class TimelineWidget(QWidget):
                 avail_w = w - 12
                 if avail_w > 16:
                     painter.setPen(QColor("#FFFFFF"))
-                    font_bold = QFont("Segoe UI", 8, QFont.Weight.Bold)
-                    font_reg = QFont("Segoe UI", 7.5)
-                    fm_bold = QFontMetrics(font_bold)
                     spk_name = self.state.get_speaker_safe_name(item.speaker_id)
 
                     if avail_w > 110 and h >= 38:
@@ -574,7 +590,6 @@ class TimelineWidget(QWidget):
                         if item.caption:
                             painter.setFont(font_reg)
                             painter.setPen(QColor("#E2E8F0"))
-                            fm_reg = QFontMetrics(font_reg)
                             elided_cap = fm_reg.elidedText(f'"{item.caption}"', Qt.TextElideMode.ElideRight, int(avail_w))
                             painter.drawText(QRectF(x1 + 6, y_top + 19, avail_w, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_cap)
                     else:
@@ -592,9 +607,9 @@ class TimelineWidget(QWidget):
         painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(0, self.RULER_HEIGHT, self.width(), self.RULER_HEIGHT)
 
-        # Re-draw ticks inside ruler area on top
-        t = 0.0
-        while t <= max_t:
+        # Re-draw ticks inside ruler area on top (only visible range)
+        t = max(0.0, math.floor(t_start / minor_step) * minor_step)
+        while t <= t_end:
             x = self.HEADER_WIDTH + t * pps
             if x > self.width():
                 break
@@ -1145,31 +1160,28 @@ class TimelineWidget(QWidget):
                     self._last_scrub_seek_time = now
                 self.ensure_playhead_visible(margin=60)
 
-                # Show dynamic time badge while scrubbing
-                m = int(t // 60)
-                s = int(t % 60)
-                ms = int((t - int(t)) * 1000)
-                QToolTip.showText(
-                    event.globalPos(),
-                    f"⏱ {m:02d}:{s:02d}.{ms:03d}",
-                    self
-                )
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self.update()
                 return
 
+            import time
+            now = time.monotonic()
             _, item, start_x, start_val = self._dragging[:4]
             dx = (x - start_x) / max(1.0, self.pixels_per_second)
             if mode == "start":
                 raw = start_val + dx
                 snapped = self._snap_time(raw, ignore_item=item)
                 item.start = max(0.0, min(snapped, item.end - 0.1))
-                self.seek_requested.emit(item.start)
+                if now - self._last_scrub_seek_time >= 0.030:
+                    self.seek_requested.emit(item.start)
+                    self._last_scrub_seek_time = now
             elif mode == "end":
                 raw = start_val + dx
                 snapped = self._snap_time(raw, ignore_item=item)
                 item.end = max(item.start + 0.1, min(self.duration, snapped))
-                self.seek_requested.emit(item.end)
+                if now - self._last_scrub_seek_time >= 0.030:
+                    self.seek_requested.emit(item.end)
+                    self._last_scrub_seek_time = now
             elif mode == "body":
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 raw_start = start_val + dx
@@ -1180,7 +1192,9 @@ class TimelineWidget(QWidget):
                 if new_end <= self.duration + 5.0:
                     item.start = new_start
                     item.end = new_end
-                    self.seek_requested.emit(item.start)
+                    if now - self._last_scrub_seek_time >= 0.030:
+                        self.seek_requested.emit(item.start)
+                        self._last_scrub_seek_time = now
 
                 # Vertical drag: move clip to different speaker track
                 target_spk_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))

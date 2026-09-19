@@ -173,7 +173,7 @@ class PackBuilder:
                     proc = subprocess.Popen(
                         cmd,
                         stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
                         text=True,
                         bufsize=1,
                         universal_newlines=True,
@@ -217,9 +217,9 @@ class PackBuilder:
                                     pass
                             raise
 
-                    _, stderr_data = proc.communicate()
+                    proc.wait()
                     if proc.returncode != 0 or not dest_vid.exists():
-                        logger.error(f"FFmpeg OGV encoding failed (exit code {proc.returncode}): {stderr_data}")
+                        logger.error(f"FFmpeg OGV encoding failed (exit code {proc.returncode})")
                 except Exception as e:
                     logger.error(f"Failed to encode dub_video.ogv: {e}")
                     raise

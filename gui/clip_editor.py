@@ -49,6 +49,8 @@ class ClipEditor(QWidget):
     split_requested = Signal(int)
     merge_requested = Signal(int)
     play_started = Signal()
+    _frame_qimage_ready = Signal(int, QImage)
+    _preview_audio_ready = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,6 +58,15 @@ class ClipEditor(QWidget):
         self.state = None
         self._temp_audio_file = None
         self._is_loading = False
+
+        # Asynchronous frame preview state (prevents UI freeze during scrubbing/cutting)
+        self._frame_preview_timer = QTimer(self)
+        self._frame_preview_timer.setSingleShot(True)
+        self._frame_preview_timer.setInterval(60)
+        self._frame_preview_timer.timeout.connect(self._do_async_frame_preview)
+        self._frame_preview_req_id = 0
+        self._frame_qimage_ready.connect(self._on_frame_qimage_ready)
+        self._preview_audio_ready.connect(self._on_preview_audio_ready)
 
         # Auto-save debounce timers
         self._caption_timer = QTimer(self)
@@ -409,23 +420,50 @@ class ClipEditor(QWidget):
     def _set_save_status(self, text: str):
         pass
 
+    def _on_frame_qimage_ready(self, req_id: int, qimg: QImage):
+        if req_id == self._frame_preview_req_id and not qimg.isNull():
+            pix = QPixmap.fromImage(qimg).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.image_preview.setPixmap(pix)
+
+    def _on_preview_audio_ready(self, file_path_str: str):
+        if file_path_str and Path(file_path_str).exists():
+            self.player.setSource(QUrl.fromLocalFile(file_path_str))
+            self.player.play()
+
     def _seek_frame_preview(self):
+        """Debounce frame seek request so rapid scrubbing/splitting never freezes the GUI thread."""
+        self._frame_preview_req_id += 1
+        self._frame_preview_timer.start()
+
+    def _do_async_frame_preview(self):
+        """Asynchronously extract video frame in background thread (zero GUI freeze)."""
         if not self.state or not self.state.video_path:
             return
         ts = self.spin_start.value()
-        try:
-            from core.frame_extractor import FrameExtractor
-            extractor = FrameExtractor(self.state.video_path)
-            frame = extractor.extract_frame(ts)
-            extractor.release()
-            if frame is not None:
-                h, w, ch = frame.shape
-                bytes_per_line = ch * w
-                qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
-                pix = QPixmap.fromImage(qimg).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio)
-                self.image_preview.setPixmap(pix)
-        except Exception:
-            pass
+        req_id = self._frame_preview_req_id
+        # Prioritize lightweight proxy video (seeks in < 2ms) if available
+        video_src = self.state.preview_proxy_path if (self.state.preview_proxy_path and self.state.preview_proxy_path.exists()) else self.state.video_path
+
+        def _worker():
+            try:
+                import cv2
+                cap = cv2.VideoCapture(str(video_src))
+                if not cap.isOpened():
+                    return
+                cap.set(cv2.CAP_PROP_POS_MSEC, ts * 1000)
+                ret, frame = cap.read()
+                cap.release()
+                if ret and frame is not None and req_id == self._frame_preview_req_id:
+                    h, w, ch = frame.shape
+                    bytes_per_line = ch * w
+                    # QImage copy is thread-safe across threads
+                    qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_BGR888).copy()
+                    self._frame_qimage_ready.emit(req_id, qimg)
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def load_item(self, item: DialogueItem, state: PipelineState):
         self._is_loading = True
@@ -436,15 +474,21 @@ class ClipEditor(QWidget):
         self.spin_start.blockSignals(True)
         self.spin_end.blockSignals(True)
 
-        self.combo_speaker.blockSignals(True)
-        self.combo_speaker.clear()
-        for spk_id, spk in state.speakers.items():
-            self.combo_speaker.addItem(spk.display_name, spk_id)
+        # Smart combo population: only rebuild if speaker list keys changed
+        current_spk_ids = [self.combo_speaker.itemData(i) for i in range(self.combo_speaker.count())]
+        new_spk_ids = list(state.speakers.keys())
+        if current_spk_ids != new_spk_ids:
+            self.combo_speaker.blockSignals(True)
+            self.combo_speaker.clear()
+            for spk_id, spk in state.speakers.items():
+                self.combo_speaker.addItem(spk.display_name, spk_id)
+            self.combo_speaker.blockSignals(False)
 
         idx = self.combo_speaker.findData(item.speaker_id)
-        if idx >= 0:
+        if idx >= 0 and self.combo_speaker.currentIndex() != idx:
+            self.combo_speaker.blockSignals(True)
             self.combo_speaker.setCurrentIndex(idx)
-        self.combo_speaker.blockSignals(False)
+            self.combo_speaker.blockSignals(False)
 
         self.spin_start.setValue(item.start)
         self.spin_end.setValue(item.end)
@@ -462,9 +506,9 @@ class ClipEditor(QWidget):
         self.spin_start.blockSignals(False)
         self.spin_end.blockSignals(False)
 
-        # Image preview
+        # Image preview (immediate if on disk, non-blocking async seek if not)
         if item.image_path and item.image_path.exists():
-            pix = QPixmap(str(item.image_path)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio)
+            pix = QPixmap(str(item.image_path)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.image_preview.setPixmap(pix)
         else:
             self._seek_frame_preview()
@@ -482,25 +526,30 @@ class ClipEditor(QWidget):
             self.player.play()
             return
             
-        # Fallback: slice audio from work_audio_path on the fly
+        # Fallback: slice audio from work_audio_path asynchronously without freezing GUI
         audio_src = self.state.work_audio_path if self.state else None
         if audio_src and audio_src.exists():
-            try:
-                tmp = Path(tempfile.gettempdir()) / "preview_clip.wav"
-                dur = max(0.1, self.item.end - self.item.start)
-                cmd = [
-                    "ffmpeg", "-y", "-ss", f"{self.item.start:.3f}",
-                    "-i", str(audio_src), "-t", f"{dur:.3f}",
-                    "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                    str(tmp)
-                ]
-                from config import SUBPROCESS_FLAGS
-                res = subprocess.run(cmd, capture_output=True, timeout=10, creationflags=SUBPROCESS_FLAGS)
-                if res.returncode == 0 and tmp.exists():
-                    self.player.setSource(QUrl.fromLocalFile(str(tmp)))
-                    self.player.play()
-            except Exception as e:
-                print(f"Error previewing audio: {e}")
+            item_start = self.item.start
+            item_dur = max(0.1, self.item.end - self.item.start)
+            item_idx = self.item.index
+            def _async_slice():
+                try:
+                    tmp = Path(tempfile.gettempdir()) / f"preview_clip_{item_idx}.wav"
+                    cmd = [
+                        "ffmpeg", "-y", "-ss", f"{item_start:.3f}",
+                        "-i", str(audio_src), "-t", f"{item_dur:.3f}",
+                        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                        str(tmp)
+                    ]
+                    from config import SUBPROCESS_FLAGS
+                    res = subprocess.run(cmd, capture_output=True, timeout=10, creationflags=SUBPROCESS_FLAGS)
+                    if res.returncode == 0 and tmp.exists():
+                        self._preview_audio_ready.emit(str(tmp))
+                except Exception as e:
+                    print(f"Error previewing audio asynchronously: {e}")
+
+            import threading
+            threading.Thread(target=_async_slice, daemon=True).start()
 
     def clear(self):
         self._is_loading = True

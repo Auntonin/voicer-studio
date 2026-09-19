@@ -1,6 +1,9 @@
+import os
 import subprocess
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Optional, Callable
 from core.models import PipelineState, DialogueItem
 from config import AUDIO_EXPORT_BITRATE, AUDIO_SAMPLE_RATE
 
@@ -31,7 +34,12 @@ class ClipGenerator:
             str(output_path)
         ]
         from config import SUBPROCESS_FLAGS
-        res = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=SUBPROCESS_FLAGS)
+        except subprocess.TimeoutExpired:
+            logger.error(f"FFmpeg timed out generating clip {item.index}")
+            raise RuntimeError(f"FFmpeg timed out generating clip {item.index}")
+
         if res.returncode != 0:
             logger.error(f"FFmpeg error generating clip {item.index}: {res.stderr}")
             raise RuntimeError(f"FFmpeg failed to generate clip {item.index}: {res.stderr[:200]}")
@@ -39,19 +47,49 @@ class ClipGenerator:
         item.audio_path = output_path
         return output_path
 
-    def generate_all_clips(self, state: PipelineState, source_audio: Path, output_dir: Path):
-        logger.info(f"Generating clips in {output_dir}")
+    def generate_all_clips(
+        self,
+        state: PipelineState,
+        source_audio: Path,
+        output_dir: Path,
+        progress_cb: Optional[Callable[[int, int, DialogueItem], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        max_workers: Optional[int] = None,
+    ):
+        logger.info(f"Generating clips in parallel in {output_dir}")
         output_dir.mkdir(parents=True, exist_ok=True)
         audio = source_audio or state.work_audio_path
-        for item in state.active_dialogues():
-            try:
-                speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
-                self.generate_clip(item, audio, output_dir, speaker_safe_name)
-            except Exception as e:
-                logger.error(f"Failed to generate clip {item.index}: {e}")
+        dialogues = state.active_dialogues()
+        total = len(dialogues)
+        if total == 0:
+            return
+
+        workers = max_workers or min(8, max(2, os.cpu_count() or 4))
+
+        def _task(item: DialogueItem):
+            if cancel_check and cancel_check():
+                return item, False
+            speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
+            self.generate_clip(item, audio, output_dir, speaker_safe_name)
+            return item, True
+
+        completed_count = 0
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_item = {executor.submit(_task, item): item for item in dialogues}
+            for future in as_completed(future_to_item):
+                if cancel_check and cancel_check():
+                    break
+                try:
+                    item, ok = future.result()
+                    completed_count += 1
+                    if ok and progress_cb:
+                        progress_cb(completed_count, total, item)
+                except Exception as e:
+                    logger.error(f"Failed to generate clip: {e}")
 
     def regenerate_clip(self, item: DialogueItem, state: PipelineState, output_dir: Path):
         logger.info(f"Regenerating clip for item {item.index}")
         speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
         source_audio = state.separated_vocals_path if state.separated_vocals_path else state.work_audio_path
         self.generate_clip(item, source_audio, output_dir, speaker_safe_name)
+

@@ -340,15 +340,22 @@ class PipelineWorker(QThread):
             dialogues = self.state.active_dialogues()
             total = len(dialogues)
 
-            for idx, item in enumerate(dialogues):
-                if self._check_cancel():
-                    return
-                speaker_name = self.state.get_speaker_safe_name(item.speaker_id)
+            def on_progress(completed: int, total_items: int, itm: DialogueItem):
+                speaker_name = self.state.get_speaker_safe_name(itm.speaker_id)
                 self.signals.sub_progress.emit(
-                    idx + 1, total,
-                    f"ตัดคลิป [{idx+1}/{total}] {item.id_str}_{speaker_name} ({item.format_start()}–{item.format_end()})"
+                    completed, total_items,
+                    f"ตัดคลิป [{completed}/{total_items}] {itm.id_str}_{speaker_name} ({itm.format_start()}–{itm.format_end()})"
                 )
-                gen.generate_clip(item, source_audio, out_dir, speaker_name)
+
+            gen.generate_all_clips(
+                self.state,
+                source_audio,
+                out_dir,
+                progress_cb=on_progress,
+                cancel_check=self._check_cancel
+            )
+            if self._check_cancel():
+                return
 
             self.signals.sub_progress.emit(total, total, f"ตัดคลิปครบ {total} คลิป")
             self._complete_step(step)

@@ -220,22 +220,23 @@ class ExportDialog(QDialog):
                 if not pix.isNull():
                     return pix.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
             else:
-                try:
-                    cmd = [
-                        "ffmpeg", "-y", "-ss", "00:00:01",
-                        "-i", str(self.state.video_path),
-                        "-frames:v", "1",
-                        "-vf", f"scale={width*2}:{height*2}:force_original_aspect_ratio=increase,crop={width*2}:{height*2}",
-                        "-q:v", "3",
-                        str(thumb_cache)
-                    ]
-                    subprocess.run(cmd, capture_output=True, timeout=5, creationflags=SUBPROCESS_FLAGS)
-                    if thumb_cache.exists():
-                        pix = QPixmap(str(thumb_cache))
-                        if not pix.isNull():
-                            return pix.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-                except Exception:
-                    pass
+                # Non-blocking background extraction: ExportDialog opens instantaneously with zero freezing
+                def _gen_thumb():
+                    try:
+                        v_src = self.state.preview_proxy_path if (self.state.preview_proxy_path and self.state.preview_proxy_path.exists()) else self.state.video_path
+                        cmd = [
+                            "ffmpeg", "-y", "-ss", "00:00:01",
+                            "-i", str(v_src),
+                            "-frames:v", "1",
+                            "-vf", f"scale={width*2}:{height*2}:force_original_aspect_ratio=increase,crop={width*2}:{height*2}",
+                            "-q:v", "3",
+                            str(thumb_cache)
+                        ]
+                        subprocess.run(cmd, capture_output=True, timeout=10, creationflags=SUBPROCESS_FLAGS)
+                    except Exception:
+                        pass
+                import threading
+                threading.Thread(target=_gen_thumb, daemon=True).start()
         return None
 
     # ── Page 0: Confirm & Pre-Export ──────────────────────────────────────────

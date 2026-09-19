@@ -114,32 +114,40 @@ class DialogueTable(QWidget):
         self.refresh_table()
 
     def refresh_table(self):
+        if not self.state:
+            self.table.setRowCount(0)
+            self.count_label.setText("0 dialogues / 0 speakers")
+            return
+
         filter_text = self.filter_input.text().lower()
-        self.table.setRowCount(0)
-        
         speakers = set()
         display_items = []
-        
-        if not self.state:
-            return
-            
         for item in self._items:
             speaker_name = self.state.get_speaker_safe_name(item.speaker_id)
             speakers.add(speaker_name)
             if not filter_text or filter_text in speaker_name.lower() or filter_text in item.caption.lower():
                 display_items.append(item)
-                
+
         self.count_label.setText(f"{len(display_items)} dialogues / {len(speakers)} speakers")
-        
+
         speaker_colors = {}
         for idx, spk in enumerate(sorted(speakers)):
             speaker_colors[spk] = self.colors[idx % len(self.colors)]
-            
-        for row, item in enumerate(display_items):
-            self.table.insertRow(row)
-            self._fill_row(row, item, speaker_colors.get(self.state.get_speaker_safe_name(item.speaker_id), "#ffffff"))
+
+        self.table.setUpdatesEnabled(False)
+        self.table.blockSignals(True)
+        try:
+            self.table.setRowCount(len(display_items))
+            for row, item in enumerate(display_items):
+                color_hex = speaker_colors.get(self.state.get_speaker_safe_name(item.speaker_id), "#ffffff")
+                self._fill_row(row, item, color_hex)
+        finally:
+            self.table.blockSignals(False)
+            self.table.setUpdatesEnabled(True)
 
     def _fill_row(self, row: int, item: DialogueItem, color_hex: str):
+        has_img = "Yes" if item.image_path and item.image_path.exists() else "—"
+        has_aud = "Yes" if item.audio_path and item.audio_path.exists() else "—"
         col_data = [
             str(item.index),
             self.state.get_speaker(item.speaker_id).display_name if self.state and item.speaker_id in self.state.speakers else item.speaker_id,
@@ -147,36 +155,61 @@ class DialogueTable(QWidget):
             item.format_end(),
             f"{item.duration:.3f}s",
             item.caption,
-            "Yes" if item.image_path and item.image_path.exists() else "—",
-            "Yes" if item.audio_path and item.audio_path.exists() else "—"
+            has_img,
+            has_aud
         ]
-        
+
         for col, text in enumerate(col_data):
-            t_item = QTableWidgetItem(text)
+            t_item = self.table.item(row, col)
+            if not t_item:
+                t_item = QTableWidgetItem(text)
+                self.table.setItem(row, col, t_item)
+            else:
+                t_item.setText(text)
+
             if col == 1:
                 t_item.setForeground(QColor(color_hex))
-            if col in (6, 7) and text == "Yes":
+            elif col in (6, 7) and text == "Yes":
                 t_item.setForeground(QColor("#3fb950"))
             elif col in (6, 7):
                 t_item.setForeground(QColor("#484f58"))
-            self.table.setItem(row, col, t_item)
-            
-        cb = QCheckBox()
-        cb.setChecked(getattr(item, 'caption_confirmed', False))
-        cb.setToolTip("Mark as verified and approved (Proofread QA)")
-        def _on_confirm_toggled(state, itm=item):
-            itm.caption_confirmed = (state == Qt.CheckState.Checked.value)
-            self.dialogue_changed.emit(itm)
-        cb.stateChanged.connect(_on_confirm_toggled)
-        w = QWidget()
-        l = QHBoxLayout(w)
-        l.addWidget(cb)
-        l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        l.setContentsMargins(0, 0, 0, 0)
-        self.table.setCellWidget(row, 8, w)
+
+        existing_w = self.table.cellWidget(row, 8)
+        if existing_w:
+            cb = existing_w.findChild(QCheckBox)
+            if cb:
+                cb.blockSignals(True)
+                cb.setChecked(getattr(item, 'caption_confirmed', False))
+                cb.blockSignals(False)
+        else:
+            cb = QCheckBox()
+            cb.setChecked(getattr(item, 'caption_confirmed', False))
+            cb.setToolTip("Mark as verified and approved (Proofread QA)")
+            def _on_confirm_toggled(state, itm=item):
+                itm.caption_confirmed = (state == Qt.CheckState.Checked.value)
+                self.dialogue_changed.emit(itm)
+            cb.stateChanged.connect(_on_confirm_toggled)
+            w = QWidget()
+            l = QHBoxLayout(w)
+            l.addWidget(cb)
+            l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            l.setContentsMargins(0, 0, 0, 0)
+            self.table.setCellWidget(row, 8, w)
 
     def update_row(self, item: DialogueItem, state: PipelineState):
         self.state = state
+        for row in range(self.table.rowCount()):
+            item_id = self.table.item(row, 0)
+            if item_id and item_id.text() == str(item.index):
+                speakers = sorted({self.state.get_speaker_safe_name(d.speaker_id) for d in self._items})
+                spk_name = self.state.get_speaker_safe_name(item.speaker_id)
+                try:
+                    spk_idx = speakers.index(spk_name)
+                except ValueError:
+                    spk_idx = 0
+                color_hex = self.colors[spk_idx % len(self.colors)]
+                self._fill_row(row, item, color_hex)
+                return
         self.refresh_table()
 
     def on_filter_changed(self):

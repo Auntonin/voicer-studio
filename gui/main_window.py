@@ -667,6 +667,13 @@ class MainWindow(QMainWindow):
         self._main_v_splitter.setSizes([450, 220, 190, 0])
         root_layout.addWidget(self._main_v_splitter)
 
+        # Debounce timer for fast playhead scrubbing so clip editor doesn't freeze the GUI
+        self._seek_editor_timer = QTimer(self)
+        self._seek_editor_timer.setSingleShot(True)
+        self._seek_editor_timer.setInterval(70)
+        self._pending_seek_item = None
+        self._seek_editor_timer.timeout.connect(self._on_seek_editor_timeout)
+
         # ── Connect Dialogue Table Signals ──
         self._dialogue_table.dialogue_selected.connect(
             lambda item: self._clip_editor.load_item(item, self._state)
@@ -767,9 +774,15 @@ class MainWindow(QMainWindow):
         for item in self._state.active_dialogues():
             if item.start <= t <= item.end:
                 if not self._clip_editor.item or self._clip_editor.item.index != item.index:
-                    self._clip_editor.load_item(item, self._state)
+                    self._pending_seek_item = item
+                    self._seek_editor_timer.start()
                     self._set_active_speaker(item.speaker_id)
                 break
+
+    def _on_seek_editor_timeout(self):
+        if self._pending_seek_item and self._state:
+            self._clip_editor.load_item(self._pending_seek_item, self._state)
+            self._pending_seek_item = None
 
     def _on_select_dialogue(self, item: DialogueItem):
         self._timeline.set_current_time(item.start)
@@ -1154,60 +1167,82 @@ class MainWindow(QMainWindow):
     def _on_regen_audio(self, idx: int):
         for d in self._state.active_dialogues():
             if d.index == idx:
-                try:
-                    from core.clip_generator import ClipGenerator
-                    gen = ClipGenerator()
-                    out_dir = self._output_dir or (self._state.video_path.parent / "output" / "pack")
-                    gen.regenerate_clip(d, self._state, out_dir)
-                    self._mark_dirty(True)
-                    self._dialogue_table.populate(self._state)
-                    self._clip_editor.load_item(d, self._state)
-                    self._log_message(f"Regenerated audio for clip #{d.index}", "ok")
-                except Exception as e:
-                    self._log_message(f"Error regenerating clip: {e}", "error")
+                self._log_message(f"Regenerating audio for clip #{d.index} in background...", "info")
+                out_dir = self._output_dir or (self._state.video_path.parent / "output" / "pack")
+                def _worker(itm=d):
+                    try:
+                        from core.clip_generator import ClipGenerator
+                        gen = ClipGenerator()
+                        gen.regenerate_clip(itm, self._state, out_dir)
+                        def _done():
+                            self._mark_dirty(True)
+                            self._dialogue_table.update_row(itm, self._state)
+                            self._clip_editor.load_item(itm, self._state)
+                            self._log_message(f"Regenerated audio for clip #{itm.index}", "ok")
+                        QTimer.singleShot(0, _done)
+                    except Exception as e:
+                        QTimer.singleShot(0, lambda err=e: self._log_message(f"Error regenerating clip: {err}", "error"))
+                import threading
+                threading.Thread(target=_worker, daemon=True).start()
                 break
 
     def _on_regen_caption(self, idx: int):
         for d in self._state.active_dialogues():
             if d.index == idx:
-                try:
-                    from core.transcriber import Transcriber
-                    t = Transcriber(
-                        model_size=self._settings.get("whisper_model", WHISPER_MODEL_DEFAULT),
-                        language=self._settings.get("whisper_language")
-                    )
-                    t.load_model()
-                    audio_src = self._state.work_audio_path
-                    if audio_src and audio_src.exists():
-                        d.caption = t.transcribe_segment(audio_src, d.start, d.end)
-                        self._mark_dirty(True)
-                        self._dialogue_table.populate(self._state)
-                        self._clip_editor.load_item(d, self._state)
-                        self._log_message(f"Regenerated caption for clip #{d.index}", "ok")
-                except Exception as e:
-                    self._log_message(f"Error transcribing clip: {e}", "error")
+                self._log_message(f"Transcribing clip #{d.index} with Whisper AI in background...", "info")
+                model_size = self._settings.get("whisper_model", WHISPER_MODEL_DEFAULT)
+                lang = self._settings.get("whisper_language")
+                audio_src = self._state.work_audio_path
+                def _worker(itm=d):
+                    try:
+                        from core.transcriber import Transcriber
+                        t = Transcriber(model_size=model_size, language=lang)
+                        t.load_model()
+                        if audio_src and audio_src.exists():
+                            res = t.transcribe_segment(audio_src, itm.start, itm.end)
+                            def _done():
+                                if res:
+                                    itm.caption = res
+                                    self._mark_dirty(True)
+                                    self._dialogue_table.update_row(itm, self._state)
+                                    self._clip_editor.load_item(itm, self._state)
+                                    self._timeline.update()
+                                    self._log_message(f"Re-transcribed clip #{itm.index}: '{res}'", "ok")
+                            QTimer.singleShot(0, _done)
+                    except Exception as e:
+                        QTimer.singleShot(0, lambda err=e: self._log_message(f"Error transcribing clip: {err}", "error"))
+                import threading
+                threading.Thread(target=_worker, daemon=True).start()
                 break
 
     def _on_change_image(self, idx: int):
         for d in self._state.active_dialogues():
             if d.index == idx:
-                try:
-                    from core.frame_extractor import FrameExtractor
-                    if self._state.video_path and self._state.video_path.exists():
-                        ext = FrameExtractor(self._state.video_path)
-                        frame = ext.find_best_frame(d.start, d.end, num_candidates=9)
-                        if frame is not None and self._output_dir:
-                            spk_name = self._state.get_speaker_safe_name(d.speaker_id)
-                            out_img = self._output_dir / f"{d.id_str}_{spk_name}.png"
-                            ext.save_frame(frame, out_img)
-                            d.image_path = out_img
-                            self._mark_dirty(True)
-                            self._dialogue_table.populate(self._state)
-                            self._clip_editor.load_item(d, self._state)
-                            self._pack_info_panel.populate(self._state)
-                            self._log_message(f"Extracted new frame for clip #{d.index}", "ok")
-                except Exception as e:
-                    self._log_message(f"Error changing image: {e}", "error")
+                self._log_message(f"Extracting frame for clip #{d.index} in background...", "info")
+                vid_path = self._state.video_path
+                out_dir = self._output_dir
+                def _worker(itm=d):
+                    try:
+                        from core.frame_extractor import FrameExtractor
+                        if vid_path and vid_path.exists():
+                            ext = FrameExtractor(vid_path)
+                            frame = ext.find_best_frame(itm.start, itm.end, num_candidates=5)
+                            ext.release()
+                            if frame is not None and out_dir:
+                                spk_name = self._state.get_speaker_safe_name(itm.speaker_id)
+                                out_img = out_dir / f"{itm.id_str}_{spk_name}.png"
+                                ext.save_frame(frame, out_img)
+                                def _done():
+                                    itm.image_path = out_img
+                                    self._mark_dirty(True)
+                                    self._dialogue_table.update_row(itm, self._state)
+                                    self._clip_editor.load_item(itm, self._state)
+                                    self._log_message(f"Extracted new frame for clip #{itm.index}", "ok")
+                                QTimer.singleShot(0, _done)
+                    except Exception as e:
+                        QTimer.singleShot(0, lambda err=e: self._log_message(f"Error changing image: {err}", "error"))
+                import threading
+                threading.Thread(target=_worker, daemon=True).start()
                 break
 
     def _on_pack_info_changed(self, info: PackInfo):
