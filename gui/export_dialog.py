@@ -35,13 +35,69 @@ from core.i18n import tr
 from gui.ui_utils import apply_dark_title_bar
 
 
+class ETATracker:
+    """
+    High-precision sliding-window + exponential moving average estimator.
+    Prevents abrupt ETA fluctuations, eliminates jumps, and counts down smoothly in real time.
+    """
+    def __init__(self):
+        self._samples: list[tuple[float, float]] = []  # (timestamp, percent_0_to_100)
+        self._smoothed_eta: Optional[float] = None
+        self._last_calc_time: float = 0.0
+
+    def reset(self):
+        self._samples.clear()
+        self._smoothed_eta = None
+        self._last_calc_time = 0.0
+
+    def update(self, now: float, pct: float):
+        self._samples.append((now, pct))
+        # Keep samples in sliding window of 4.5 seconds
+        self._samples = [(t, p) for (t, p) in self._samples if now - t <= 4.5]
+
+        if len(self._samples) < 3 or (now - self._samples[0][0]) < 1.0:
+            return
+
+        dt = now - self._samples[0][0]
+        dp = pct - self._samples[0][1]
+        if dt > 0.4 and dp > 0.01:
+            recent_rate = dp / dt  # % per second
+            rem_pct = max(0.0, 100.0 - pct)
+            raw_eta = rem_pct / recent_rate
+
+            if self._smoothed_eta is None:
+                self._smoothed_eta = raw_eta
+            else:
+                # 20% new derivative measurement, 80% historical EMA for rock-solid stability
+                self._smoothed_eta = 0.20 * raw_eta + 0.80 * self._smoothed_eta
+            self._last_calc_time = now
+
+    def get_display_eta(self, now: float, current_pct: float) -> str:
+        if current_pct >= 99.5:
+            return tr("exp_almost_done")
+        if self._smoothed_eta is None or self._last_calc_time == 0.0:
+            return tr("exp_estimating")
+
+        elapsed_since_calc = now - self._last_calc_time
+        remaining_sec = max(1.0, self._smoothed_eta - elapsed_since_calc)
+
+        if remaining_sec <= 2.5:
+            return tr("exp_almost_done")
+
+        m = int(remaining_sec // 60)
+        s = int(remaining_sec % 60)
+        if m > 0:
+            return f"~{m}m {s:02d}s"
+        return f"~{s}s"
+
+
 class FullExportWorker(QThread):
     """
     Background worker that runs build_pack and export_zip asynchronously,
     preventing the GUI thread from freezing.
     """
-    progress = Signal(int, str)             # (percent, detail_message)
-    finished = Signal(str, str, float, int) # (zip_path, pack_dir, elapsed_sec, zip_size_bytes)
+    progress = Signal(float, str)             # (percent_float, detail_message)
+    finished = Signal(str, str, float, int)   # (zip_path, pack_dir, elapsed_sec, zip_size_bytes)
     error    = Signal(str)
 
     def __init__(self, state: PipelineState, output_base: Path, zip_path: Path, options: dict, parent=None):
@@ -60,12 +116,13 @@ class FullExportWorker(QThread):
         try:
             builder = PackBuilder()
 
-            def on_progress(pct: int, msg: str):
+            def on_progress(pct: float, msg: str):
                 if self._is_cancelled:
                     raise RuntimeError("Export cancelled by user")
-                self.progress.emit(max(1, min(99, pct)), msg)
+                self.progress.emit(max(0.5, min(99.5, pct)), msg)
 
-            self.progress.emit(2, tr("exp_step_assembling"))
+            has_video = bool(self.options.get('include_dub_video', False) and self.state.video_path and self.state.video_path.exists())
+
             pack_dir = builder.build_pack(
                 self.state, self.output_base, self.options,
                 progress_cb=on_progress
@@ -74,19 +131,31 @@ class FullExportWorker(QThread):
             if self._is_cancelled:
                 raise RuntimeError("Export cancelled by user")
 
-            self.progress.emit(74, tr("exp_step_validating"))
+            if has_video:
+                val_pct = 72.5
+                zip_base = 74.0
+                zip_span = 25.5
+            else:
+                val_pct = 41.0
+                zip_base = 43.0
+                zip_span = 56.5
+
+            self.progress.emit(val_pct, tr("exp_step_validating"))
             checker = QualityChecker()
             checker.check_all(self.state, pack_dir)
 
-            self.progress.emit(78, tr("exp_step_zipping"))
-            PackBuilder.export_zip(pack_dir, self.zip_path, progress_cb=on_progress)
+            if self._is_cancelled:
+                raise RuntimeError("Export cancelled by user")
+
+            self.progress.emit(zip_base, tr("exp_step_zipping"))
+            PackBuilder.export_zip(pack_dir, self.zip_path, base_pct=zip_base, span_pct=zip_span, progress_cb=on_progress)
 
             if self._is_cancelled:
                 raise RuntimeError("Export cancelled by user")
 
             elapsed = time.time() - t0
             zip_size = self.zip_path.stat().st_size if self.zip_path.exists() else 0
-            self.progress.emit(100, tr("exp_step_success"))
+            self.progress.emit(100.0, tr("exp_step_success"))
             self.finished.emit(str(self.zip_path), str(pack_dir), elapsed, zip_size)
 
         except Exception as e:
@@ -111,8 +180,12 @@ class ExportDialog(QDialog):
         self.worker: Optional[FullExportWorker] = None
 
         self.start_time: float = 0.0
-        self.current_percent: int = 0
+        self.target_percent: float = 0.0
+        self.displayed_percent: float = 0.0
+        self.eta_tracker = ETATracker()
+        self._pending_finish_data: Optional[tuple] = None
         self._spinner_idx: int = 0
+        self._spinner_tick: int = 0
 
         self.setWindowTitle(tr("exp_win_title"))
         self.setFixedSize(620, 440)
@@ -199,7 +272,7 @@ class ExportDialog(QDialog):
         self._setup_page_complete()
 
         self.timer = QTimer(self)
-        self.timer.setInterval(200)
+        self.timer.setInterval(33)  # 30 FPS smooth progress animation and responsive countdown
         self.timer.timeout.connect(self._on_timer_tick)
 
         self.stack.setCurrentIndex(0)
@@ -413,8 +486,10 @@ class ExportDialog(QDialog):
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(22)
-        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("0.0%")
         card_layout.addWidget(self.progress_bar)
 
         stats_frame = QFrame()
@@ -554,6 +629,18 @@ class ExportDialog(QDialog):
         pack_title = self.state.pack_info.title or (self.state.video_path.stem if self.state.video_path else "Dialogue_Pack")
         self.lbl_prog_title.setText(pack_title)
 
+        self.target_percent = 0.0
+        self.displayed_percent = 0.0
+        self.eta_tracker.reset()
+        self._pending_finish_data = None
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("0.0%")
+        self.lbl_pct.setText("0.0%")
+        self.lbl_eta.setText(tr("exp_estimating"))
+        self.lbl_elapsed.setText("00:00")
+        self.lbl_step_detail.setText(tr("exp_init_engine"))
+        self.btn_abort.setEnabled(True)
+
         self.stack.setCurrentIndex(1)
         self.start_time = time.time()
         self.timer.start()
@@ -571,37 +658,53 @@ class ExportDialog(QDialog):
         self.worker.error.connect(self._on_worker_error)
         self.worker.start()
 
-    def _on_worker_progress(self, percent: int, msg: str):
-        self.current_percent = percent
-        self.progress_bar.setValue(percent)
+    def _on_worker_progress(self, percent: float, msg: str):
+        self.target_percent = max(self.target_percent, min(100.0, percent))
         self.lbl_step_detail.setText(msg)
-        self.lbl_pct.setText(f"{percent}%")
+        self.eta_tracker.update(time.time(), self.target_percent)
 
     def _on_timer_tick(self):
-        self._spinner_idx = (self._spinner_idx + 1) % len(self.SPINNER_FRAMES)
-        self.lbl_spinner.setText(self.SPINNER_FRAMES[self._spinner_idx])
+        now = time.time()
+        self._spinner_tick += 1
+        if self._spinner_tick % 4 == 0:
+            self._spinner_idx = (self._spinner_idx + 1) % len(self.SPINNER_FRAMES)
+            self.lbl_spinner.setText(self.SPINNER_FRAMES[self._spinner_idx])
 
         if self.start_time <= 0:
             return
-        elapsed = time.time() - self.start_time
+
+        elapsed = now - self.start_time
         em = int(elapsed // 60)
         es = int(elapsed % 60)
         self.lbl_elapsed.setText(f"{em:02d}:{es:02d}")
 
-        if self.current_percent > 3:
-            total_est = elapsed / (self.current_percent / 100.0)
-            remaining = max(0.0, total_est - elapsed)
-            rm = int(remaining // 60)
-            rs = int(remaining % 60)
-            if rm > 0:
-                self.lbl_eta.setText(f"~{rm}m {rs:02d}s")
-            else:
-                self.lbl_eta.setText(f"~{rs}s")
-        else:
-            self.lbl_eta.setText(tr("exp_estimating"))
+        if self._pending_finish_data is not None:
+            # Rapidly and smoothly glide to 100.0% so the user visually perceives completion
+            self.displayed_percent += max(0.6, (100.0 - self.displayed_percent) * 0.35)
+            if self.displayed_percent >= 99.9:
+                self.displayed_percent = 100.0
+                self.progress_bar.setValue(1000)
+                self.progress_bar.setFormat("100.0%")
+                self.lbl_pct.setText("100%")
+                self.timer.stop()
+                self._finalize_completion(*self._pending_finish_data)
+                self._pending_finish_data = None
+                return
+        elif self.displayed_percent < self.target_percent:
+            diff = self.target_percent - self.displayed_percent
+            step = max(0.04, diff * 0.18)
+            self.displayed_percent = min(self.target_percent, self.displayed_percent + step)
+
+        self.progress_bar.setValue(int(self.displayed_percent * 10))
+        self.progress_bar.setFormat(f"{self.displayed_percent:.1f}%")
+        self.lbl_pct.setText(f"{self.displayed_percent:.1f}%")
+        self.lbl_eta.setText(self.eta_tracker.get_display_eta(now, self.displayed_percent))
 
     def _on_worker_finished(self, zip_path: str, pack_dir: str, elapsed: float, size_bytes: int):
-        self.timer.stop()
+        self.target_percent = 100.0
+        self._pending_finish_data = (zip_path, pack_dir, elapsed, size_bytes)
+
+    def _finalize_completion(self, zip_path: str, pack_dir: str, elapsed: float, size_bytes: int):
         size_mb = size_bytes / (1024.0 * 1024.0)
 
         self.lbl_done_path.setText(f"<b>{tr('exp_zip_archive')}</b> {zip_path}")

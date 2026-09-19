@@ -476,5 +476,10 @@
   "dlg_import_video": "นำเข้าวิดีโอ",
   "dlg_filter_video": "ไฟล์วิดีโอ (*.mp4 *.mkv *.mov *.webm *.avi);;ไฟล์ทั้งหมด (*)",
   "dlg_filter_project": "โปรเจกต์ Voicer Studio (*.voicer *.json);;ไฟล์ทั้งหมด (*)",
-  "dlg_filter_project_save": "โปรเจกต์ Voicer Studio (*.voicer);;ไฟล์ JSON (*.json)"
+  "dlg_filter_project_save": "โปรเจกต์ Voicer Studio (*.voicer);;ไฟล์ JSON (*.json)",
+  "exp_almost_done": "ใกล้เสร็จสิ้น...",
+  "exp_step_cues": "กำลังส่งออกข้อมูลบทสนทนา [{current}/{total}]...",
+  "exp_step_copying_source": "กำลังคัดลอกไฟล์วิดีโอต้นฉบับ ({cur}/{total} MB)...",
+  "exp_step_encoding_ogv": "กำลังเข้ารหัสวิดีโอสำหรับเกม ({cur}/{total} วิ - {pct}%)...",
+  "exp_step_compressing_zip": "กำลังบีบอัด ZIP: {name} ({cur}/{total} MB)..."
 }
