@@ -308,7 +308,7 @@ class ClipEditor(QWidget):
 
         # Left Group: Clip operations
         self.btn_split = _make_btn("Split Clip", "split.svg", "Split clip at playhead or midpoint")
-        self.btn_merge = _make_btn("Merge Next", "", "Merge dialogue line with the next clip")
+        self.btn_merge = _make_btn("Merge Next", "merge.svg", "Merge dialogue line with the next clip")
         self.btn_delete = _make_btn("Delete Clip", "trash.svg", "Delete this clip (Del)", is_danger=True)
 
         self.btn_split.clicked.connect(self.on_split)
@@ -323,7 +323,7 @@ class ClipEditor(QWidget):
 
         # Right Group: Utilities & Audio Tools
         self.btn_copy = _make_btn("Copy", "copy.svg", "Copy dialogue caption to clipboard")
-        self.btn_clear = _make_btn("Clear", "", "Clear caption text")
+        self.btn_clear = _make_btn("Clear", "clear.svg", "Clear caption text")
         self.btn_regen_audio = _make_btn("Re-slice Audio", "wave.svg", "Re-extract audio slice for this clip from source")
 
         self.btn_copy.clicked.connect(self._on_copy_caption)
