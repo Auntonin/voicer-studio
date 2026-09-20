@@ -12,7 +12,7 @@ class Transcriber:
     def __init__(self, model_size='medium', language='th', device='auto', initial_prompt: str = None):
         self.model_size = model_size
         self.language = language
-        self.device = 'cuda' if device == 'auto' else device
+        self.device = device
         self.initial_prompt = initial_prompt if initial_prompt is not None else (WHISPER_INITIAL_PROMPT_THAI if language == 'th' else None)
         self.available = False
         self.model = None
@@ -20,21 +20,17 @@ class Transcriber:
     def load_model(self):
         try:
             from faster_whisper import WhisperModel
-            import torch
+            from core.device_manager import device_manager
             
-            use_cuda = (self.device == "cuda" and torch.cuda.is_available())
-            real_device = "cuda" if use_cuda else "cpu"
+            dev_info = device_manager.get_optimal_device(self.device)
+            whisper_kwargs = device_manager.get_whisper_kwargs(dev_info)
             
-            if use_cuda:
-                try:
-                    logger.info(f"Loading faster-whisper model '{self.model_size}' on CUDA (float16)")
-                    self.model = WhisperModel(self.model_size, device="cuda", compute_type="float16")
-                except Exception as e:
-                    logger.warning(f"CUDA float16 compute type failed ({e}), trying int8 on CUDA...")
-                    self.model = WhisperModel(self.model_size, device="cuda", compute_type="int8")
-            else:
-                logger.info(f"Loading faster-whisper model '{self.model_size}' on CPU (int8)")
-                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+            logger.info(f"Loading faster-whisper model '{self.model_size}' on {dev_info.name} ({whisper_kwargs})")
+            try:
+                self.model = WhisperModel(self.model_size, **whisper_kwargs)
+            except Exception as e:
+                logger.warning(f"Failed loading on {dev_info.name} ({e}), falling back to CPU int8...")
+                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=4)
                 
             self.available = True
         except ImportError:

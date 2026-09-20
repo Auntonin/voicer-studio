@@ -70,6 +70,17 @@ class SettingsDialog(QDialog):
         self.chk_auto_save.setChecked(True)
         form_gen.addRow("", self.chk_auto_save)
 
+        # Software Update options
+        update_layout = QHBoxLayout()
+        self.chk_check_updates = QCheckBox(tr("cfg_check_updates_startup"))
+        self.chk_check_updates.setChecked(True)
+        self.btn_check_updates_now = QPushButton(tr("cfg_btn_check_now"))
+        self.btn_check_updates_now.clicked.connect(self._check_updates_now)
+        update_layout.addWidget(self.chk_check_updates)
+        update_layout.addStretch()
+        update_layout.addWidget(self.btn_check_updates_now)
+        form_gen.addRow("", update_layout)
+
         self.tabs.addTab(tab_gen, tr("tab_general"))
 
         # ── Tab 2: AI Models (Whisper, Demucs/BS-RoFormer, Diarization) ──
@@ -77,6 +88,21 @@ class SettingsDialog(QDialog):
         form_ai = QFormLayout(tab_ai)
         form_ai.setContentsMargins(12, 12, 12, 12)
         form_ai.setSpacing(10)
+
+        # Compute Device / Hardware Acceleration Selector
+        self.combo_device = QComboBox()
+        self.lbl_row_device = QLabel(tr("cfg_compute_device"))
+        self.lbl_device_hint = QLabel()
+        self.lbl_device_hint.setStyleSheet("color: #888888; font-size: 8pt;")
+        self.lbl_device_hint.setWordWrap(True)
+        device_box = QVBoxLayout()
+        device_box.setContentsMargins(0, 0, 0, 0)
+        device_box.setSpacing(2)
+        device_box.addWidget(self.combo_device)
+        device_box.addWidget(self.lbl_device_hint)
+        form_ai.addRow(self.lbl_row_device, device_box)
+        self._populate_device_combo()
+        self.combo_device.currentIndexChanged.connect(self._on_device_changed)
         
         hf_layout = QHBoxLayout()
         self.edit_hf = QLineEdit()
@@ -257,6 +283,27 @@ class SettingsDialog(QDialog):
         for code, name in i18n.get_available_languages().items():
             self.combo_app_lang.addItem(name, userData=code)
 
+    def _populate_device_combo(self):
+        """Discovers and populates hardware compute processors (NVIDIA, DirectML, CPU)."""
+        from core.device_manager import device_manager
+        devices = device_manager.detect_available_devices()
+        optimal = device_manager.get_optimal_device()
+        
+        self.combo_device.blockSignals(True)
+        self.combo_device.clear()
+        self.combo_device.addItem(f"{tr('cfg_device_auto')} ({optimal.display_title})", userData="auto")
+        for dev in devices:
+            self.combo_device.addItem(dev.display_title, userData=dev.device_id)
+        self.combo_device.blockSignals(False)
+        self._on_device_changed()
+
+    def _on_device_changed(self):
+        from core.device_manager import device_manager
+        cur_data = self.combo_device.currentData() or "auto"
+        dev = device_manager.get_optimal_device(cur_data)
+        if hasattr(self, 'lbl_device_hint'):
+            self.lbl_device_hint.setText(dev.description)
+
     def _populate_proxy_combo(self):
         """Populate proxy resolution options with localized labels while maintaining index parity."""
         curr_idx = self.combo_proxy_res.currentIndex() if hasattr(self, 'combo_proxy_res') and self.combo_proxy_res.count() > 0 else 0
@@ -304,6 +351,14 @@ class SettingsDialog(QDialog):
             self.lbl_row_lang.setText(tr("cfg_lang_title"))
         if hasattr(self, 'lbl_row_timeline'):
             self.lbl_row_timeline.setText(tr("cfg_timeline_section"))
+        if hasattr(self, 'lbl_row_device'):
+            self.lbl_row_device.setText(tr("cfg_compute_device"))
+        if hasattr(self, 'combo_device'):
+            curr_dev = self.combo_device.currentData() or "auto"
+            self._populate_device_combo()
+            dev_idx = self.combo_device.findData(curr_dev)
+            if dev_idx >= 0:
+                self.combo_device.setCurrentIndex(dev_idx)
         if hasattr(self, 'lbl_row_hf'):
             self.lbl_row_hf.setText(tr("cfg_hf_token"))
         if hasattr(self, 'lbl_row_speakers'):
@@ -338,6 +393,10 @@ class SettingsDialog(QDialog):
         self.lbl_lang_hint.setText(tr("cfg_lang_hint"))
         self.chk_sticky_headers.setText(tr("cfg_pin_headers"))
         self.chk_auto_save.setText(tr("cfg_auto_save"))
+        if hasattr(self, 'chk_check_updates'):
+            self.chk_check_updates.setText(tr("cfg_check_updates_startup"))
+        if hasattr(self, 'btn_check_updates_now'):
+            self.btn_check_updates_now.setText(tr("cfg_btn_check_now"))
         self.btn_test_hf.setText(tr("cfg_hf_test"))
         self.spin_max_speakers.setSuffix(tr("cfg_max_speakers_suffix"))
         self.rb_sep_orig.setText(tr("cfg_sep_orig"))
@@ -358,6 +417,11 @@ class SettingsDialog(QDialog):
         self.btn_ok.setText(tr("btn_ok"))
         self.btn_cancel.setText(tr("btn_cancel"))
         self.btn_apply.setText(tr("btn_apply"))
+
+    def _check_updates_now(self):
+        """Triggers immediate manual update check from Settings dialog."""
+        if self.parent() and hasattr(self.parent(), "on_check_updates"):
+            self.parent().on_check_updates(manual=True)
 
     def _test_hf_token(self):
         token = self.edit_hf.text().strip()
@@ -397,8 +461,17 @@ class SettingsDialog(QDialog):
 
         self.chk_sticky_headers.setChecked(settings.get("timeline_sticky_headers", True))
         self.chk_auto_save.setChecked(settings.get("auto_save_enabled", True))
+        self.chk_check_updates.setChecked(settings.get("check_updates_startup", True))
 
         # 2. AI Models tab
+        compute_dev = settings.get("compute_device", "auto")
+        dev_idx = self.combo_device.findData(compute_dev)
+        if dev_idx >= 0:
+            self.combo_device.setCurrentIndex(dev_idx)
+        else:
+            self.combo_device.setCurrentIndex(0)
+        self._on_device_changed()
+
         self.edit_hf.setText(settings.get("hf_token", ""))
         
         model = settings.get("whisper_model", "large-v3")
@@ -496,6 +569,7 @@ class SettingsDialog(QDialog):
             
         return {
             "app_language":           app_lang,
+            "compute_device":         self.combo_device.currentData() or "auto",
             "hf_token":               self.edit_hf.text().strip(),
             "whisper_model":          self.combo_whisper.currentText(),
             "whisper_language":       lang_map.get(lang_text, "th"),
@@ -507,6 +581,7 @@ class SettingsDialog(QDialog):
             "max_speakers":           self.spin_max_speakers.value(),
             "timeline_sticky_headers": self.chk_sticky_headers.isChecked(),
             "auto_save_enabled":      self.chk_auto_save.isChecked(),
+            "check_updates_startup":  self.chk_check_updates.isChecked(),
             "preview_proxy_enabled":   self.chk_preview_proxy.isChecked(),
             "preview_proxy_height":    proxy_h,
             "image_quality":          self.spin_img.value(),

@@ -21,6 +21,11 @@ APP_AUTHOR = "The Choice Voicer"
 APP_LANGUAGE_DEFAULT = "en"
 SUPPORTED_LANGUAGES = {"en": "English", "th": "ไทย (Thai)"}
 
+# ── Update & Repository Settings ──────────────────────────────────────────────
+GITHUB_REPO = "Auntonin/voicer-studio"
+GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+UPDATE_CHECK_ON_STARTUP_DEFAULT = True
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 APP_DIR = Path(__file__).parent
 MODELS_DIR = APP_DIR / "models"

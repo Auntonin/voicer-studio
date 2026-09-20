@@ -55,7 +55,11 @@ class VoiceSeparator:
 
     def _separate_audio_separator(self, audio_path: Path, output_dir: Path) -> Tuple[Path, Path]:
         from audio_separator.separator import Separator
-        logger.info(f"Running audio-separator (Model: {ROFORMER_MODEL_DEFAULT}) on {audio_path.name}")
+        from core.device_manager import device_manager, DeviceBackend
+        
+        dev_info = device_manager.get_optimal_device(self.device)
+        use_cuda = (dev_info.backend == DeviceBackend.CUDA)
+        logger.info(f"Running audio-separator (Model: {ROFORMER_MODEL_DEFAULT}) on {dev_info.name} (use_cuda={use_cuda})")
 
         out_sep_dir = output_dir / "roformer"
         out_sep_dir.mkdir(parents=True, exist_ok=True)
@@ -63,7 +67,7 @@ class VoiceSeparator:
         separator = Separator(
             output_dir=str(out_sep_dir),
             output_format="WAV",
-            use_cuda=(self.device != 'cpu'),
+            use_cuda=use_cuda,
             log_level=10
         )
 
@@ -92,8 +96,10 @@ class VoiceSeparator:
         return vocals_path, bg_path
 
     def _separate_demucs(self, audio_path: Path, output_dir: Path) -> Tuple[Path, Path]:
+        from core.device_manager import device_manager
+        dev_info = device_manager.get_optimal_device(self.device)
         model = "htdemucs_6s" if self.mode == VoiceSepMode.HIGH_QUALITY else "htdemucs"
-        logger.info(f"Running demucs ({model}) on {audio_path}")
+        logger.info(f"Running demucs ({model}) on {dev_info.name}")
 
         cmd = [
             sys.executable, "-m", "demucs.separate", "-n", model,
@@ -102,8 +108,7 @@ class VoiceSeparator:
             "--overlap", "0.5",
             "--out", str(output_dir),
         ]
-        if self.device != 'auto':
-            cmd.extend(["-d", self.device])
+        cmd.extend(device_manager.get_demucs_device_args(dev_info))
         cmd.append(str(audio_path))
 
         from config import SUBPROCESS_FLAGS

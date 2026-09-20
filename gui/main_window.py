@@ -96,6 +96,10 @@ class MainWindow(QMainWindow):
         self._autosave_timer.timeout.connect(self._on_autosave_timer_tick)
         self._autosave_timer.start()
 
+        # Check for updates in background on startup if enabled
+        if self._settings.get("check_updates_startup", True):
+            QTimer.singleShot(3500, lambda: self.on_check_updates(manual=False))
+
         self._build_menubar()
         self._build_toolbar()
         self._build_central()
@@ -150,6 +154,8 @@ class MainWindow(QMainWindow):
         self._toast_effect = QGraphicsOpacityEffect(self._toast)
         self._toast.setGraphicsEffect(self._toast_effect)
         self._toast_anim = QPropertyAnimation(self._toast_effect, b"opacity")
+        self._toast_on_click = None
+        self._toast.mousePressEvent = lambda event: self._on_toast_clicked()
 
     def _apply_dark_title_bar(self):
         """Apply Windows 10/11 immersive dark mode to native window title bar."""
@@ -189,7 +195,7 @@ class MainWindow(QMainWindow):
         y = self.height() - self._toast.height() - margin_bottom
         self._toast.move(max(10, x), max(10, y))
 
-    def _show_toast(self, title: str = "Dialogue Extraction Complete", msg: str = "Pack exported successfully.", level: str = "ok"):
+    def _show_toast(self, title: str = "Dialogue Extraction Complete", msg: str = "Pack exported successfully.", level: str = "ok", on_click = None):
         colors = {
             "ok": COLORS['accent_green'],
             "info": COLORS['accent'],
@@ -200,6 +206,11 @@ class MainWindow(QMainWindow):
         self._toast_bar.setStyleSheet(f"background-color: {bar_color}; border-radius: 2px;")
         self._toast_title.setText(title)
         self._toast_msg.setText(msg)
+        self._toast_on_click = on_click
+        if on_click:
+            self._toast.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self._toast.setCursor(Qt.CursorShape.ArrowCursor)
 
         self._position_toast()
         self._toast.show()
@@ -211,7 +222,13 @@ class MainWindow(QMainWindow):
         self._toast_anim.setEndValue(1.0)
         self._toast_anim.start()
 
-        QTimer.singleShot(4000, self._hide_toast)
+        QTimer.singleShot(5000 if on_click else 4000, self._hide_toast)
+
+    def _on_toast_clicked(self):
+        cb = getattr(self, "_toast_on_click", None)
+        self._hide_toast()
+        if cb:
+            cb()
 
     def _hide_toast(self):
         self._toast_anim.stop()
@@ -225,21 +242,65 @@ class MainWindow(QMainWindow):
         self._toast_anim.finished.connect(self._toast.hide)
         self._toast_anim.start()
 
+    def _is_busy(self) -> bool:
+        """Returns True if a pipeline worker or export worker is currently running."""
+        worker_running = hasattr(self, '_worker') and self._worker and self._worker.isRunning()
+        export_running = hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning()
+        return bool(worker_running or export_running)
+
+    def closeEvent(self, event):
+        """Defensive window close handler: confirms termination if busy, prompts save if dirty."""
+        if self._is_busy():
+            reply = QMessageBox.question(
+                self,
+                tr("msg_quit_busy_title"),
+                tr("msg_quit_busy_desc"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                if hasattr(self, '_worker') and self._worker and self._worker.isRunning():
+                    self._worker.cancel()
+                    self._worker.wait(1500)
+                if hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning():
+                    self._export_worker.wait(1500)
+                event.accept()
+            else:
+                event.ignore()
+            return
+
+        if self._is_dirty and (self._state.video_path or self._state.dialogues):
+            if not self._check_unsaved_changes():
+                event.ignore()
+                return
+
+        event.accept()
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event):
+        if self._is_busy():
+            self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
+            return
+
         urls = event.mimeData().urls()
-        if urls:
-            path = Path(urls[0].toLocalFile())
-            if path.is_dir():
-                if (path / "_pack_info.ini").exists() or any(path.glob("*.txt")):
-                    self.load_pack_folder(path)
-            elif path.suffix.lower() in {".voicer", ".json"}:
-                self.load_project_file(path)
-            elif path.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
-                self.load_video(path)
+        if not urls:
+            return
+
+        if len(urls) > 1:
+            first_name = Path(urls[0].toLocalFile()).name
+            self._show_toast(tr("msg_multi_file_title"), tr("msg_multi_file_desc", name=first_name), "info")
+
+        path = Path(urls[0].toLocalFile())
+        if path.is_dir():
+            if (path / "_pack_info.ini").exists() or any(path.glob("*.txt")):
+                self.load_pack_folder(path)
+        elif path.suffix.lower() in {".voicer", ".json"}:
+            self.load_project_file(path)
+        elif path.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
+            self.on_import_video_file(path)
 
     # ── Menu Bar & Toolbar ───────────────────────────────────────────────────
 
@@ -353,6 +414,9 @@ class MainWindow(QMainWindow):
         self._act_shortcuts_help.setShortcut("F1")
         self._act_shortcuts_help.triggered.connect(self._show_shortcuts_dialog)
 
+        self._act_check_updates = self._menu_help.addAction(tr("menu_check_updates"))
+        self._act_check_updates.triggered.connect(lambda: self.on_check_updates(manual=True))
+
         self._menu_help.addSeparator()
         self._act_about = self._menu_help.addAction(tr("menu_about"))
         self._act_about.triggered.connect(self._show_about_dialog)
@@ -362,6 +426,68 @@ class MainWindow(QMainWindow):
         from gui.shortcuts_dialog import ShortcutsDialog
         dlg = ShortcutsDialog(self)
         dlg.exec()
+
+    def _show_about_dialog(self):
+        """Displays About Voicer Studio dialog."""
+        QMessageBox.about(
+            self,
+            f"{tr('menu_about')} — {APP_NAME}",
+            f"<h3 style='margin-bottom: 2px;'>{APP_NAME}</h3>"
+            f"<div style='color: #a1a1aa; margin-bottom: 12px;'>Version {APP_VERSION}</div>"
+            f"<p>{tr('app_tagline')}</p>"
+            "<p style='color: #71717a; font-size: 8.5pt;'>Developed for high-fidelity Thai and multi-language game and animation dubbing.<br/>"
+            "Powered by PySide6, Whisper, Demucs/BS-RoFormer, Silero VAD, and FFmpeg.</p>"
+        )
+
+    def on_check_updates(self, manual: bool = False):
+        """Checks for software updates via GitHub Releases API."""
+        from core.updater import check_for_updates
+        from gui.update_dialog import UpdateDialog
+        from PySide6.QtCore import Signal, QThread
+
+        if manual:
+            self.statusBar().showMessage(tr("update_checking"), 4000)
+
+        class UpdateCheckWorker(QThread):
+            result = Signal(bool, object, object)
+
+            def run(self):
+                try:
+                    has_up, info, err = check_for_updates(APP_VERSION)
+                    self.result.emit(has_up, info, err)
+                except Exception as ex:
+                    self.result.emit(False, None, str(ex))
+
+        self._update_worker = UpdateCheckWorker(self)
+
+        def _on_check_finished(has_update: bool, update_info, error: str | None):
+            if error:
+                if manual:
+                    QMessageBox.warning(
+                        self,
+                        tr("update_check_failed_title"),
+                        tr("update_check_failed_msg", error=error)
+                    )
+                return
+
+            if has_update and update_info:
+                if manual:
+                    dlg = UpdateDialog(self, update_info=update_info, is_up_to_date=False)
+                    dlg.exec()
+                else:
+                    self._show_toast(
+                        title=tr("update_toast_title"),
+                        msg=tr("update_toast_msg", version=update_info.version),
+                        level="info",
+                        on_click=lambda: UpdateDialog(self, update_info=update_info, is_up_to_date=False).exec()
+                    )
+            else:
+                if manual:
+                    dlg = UpdateDialog(self, update_info=update_info, is_up_to_date=True)
+                    dlg.exec()
+
+        self._update_worker.result.connect(_on_check_finished)
+        self._update_worker.start()
 
     def _update_shortcuts_tooltip(self):
         if not hasattr(self, '_btn_tl_shortcuts'):
@@ -1444,25 +1570,65 @@ class MainWindow(QMainWindow):
             self.load_pack_folder(Path(dir_str))
 
     def load_project_file(self, path: Path):
-        """Load project from .voicer file."""
+        """Load project from .voicer file with corruption protection & media relink."""
+        from core.edge_guards import find_recoverable_autosave
         try:
             state = ProjectManager.load_project(path)
-            self._state = state
-            self._undo_manager = UndoManager()
+        except Exception as e:
+            autosave_cand = find_recoverable_autosave(path)
+            if autosave_cand:
+                ret = QMessageBox.question(
+                    self,
+                    tr("msg_project_corrupted_title"),
+                    tr("msg_project_corrupted_recover", error=str(e), backup=autosave_cand.name),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                if ret == QMessageBox.StandardButton.Yes:
+                    self.load_project_file(autosave_cand)
+                    return
+            self._log_message(f"Failed to open project: {e}", "error")
+            QMessageBox.critical(self, tr("msg_open_error_title"), tr("msg_open_error", error=str(e)))
+            return
 
-            # If loaded path was an autosave file, sanitize the project path to base project name
-            if ".autosave" in path.name.lower() or path.name.startswith("."):
-                clean = ProjectManager.clean_stem(path.stem)
-                orig_file = path.parent / f"{clean}.voicer"
-                self._current_project_path = orig_file if orig_file.exists() else None
-                self._mark_dirty(True)
-            else:
-                self._current_project_path = path
-                self._is_dirty = False
+        self._state = state
+        self._undo_manager = UndoManager()
 
-            self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+        # If loaded path was an autosave file, sanitize the project path to base project name
+        if ".autosave" in path.name.lower() or path.name.startswith("."):
+            clean = ProjectManager.clean_stem(path.stem)
+            orig_file = path.parent / f"{clean}.voicer"
+            self._current_project_path = orig_file if orig_file.exists() else None
+            self._mark_dirty(True)
+        else:
+            self._current_project_path = path
+            self._is_dirty = False
 
-            if state.video_path and state.video_path.exists():
+        self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+
+        # Edge case: video file moved, renamed, or deleted
+        if state.video_path:
+            if not state.video_path.exists():
+                reply = QMessageBox.question(
+                    self,
+                    tr("msg_video_missing_title"),
+                    tr("msg_video_missing_desc", name=state.video_path.name),
+                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ignore,
+                    QMessageBox.StandardButton.Open
+                )
+                if reply == QMessageBox.StandardButton.Open:
+                    suggested_dir = state.video_path.parent if state.video_path.parent.exists() else path.parent
+                    relink_str, _ = QFileDialog.getOpenFileName(
+                        self,
+                        tr("dlg_relink_video"),
+                        str(suggested_dir),
+                        tr("dlg_filter_video")
+                    )
+                    if relink_str:
+                        state.video_path = Path(relink_str)
+                        self._mark_dirty(True)
+
+            if state.video_path.exists():
                 self._video_panel.load_video(state.video_path)
                 self._video_panel.show_video_info(state)
                 self._status_video.setText(tr("status_file", name=state.video_path.name))
@@ -1474,16 +1640,15 @@ class MainWindow(QMainWindow):
                     self._start_preview_proxy_generation(state.video_path)
             else:
                 self._status_video.setText(tr("status_project_no_video", name=path.name))
+        else:
+            self._status_video.setText(tr("status_project_no_video", name=path.name))
 
-            self._refresh_all_views()
-            self._update_window_title()
-            self._update_save_status()
-            self._add_recent_project(str(path.resolve()))
-            self._log_message(f"Opened project: {path.name} ({len(state.dialogues)} dialogues)", "ok")
-            self._show_toast(tr("msg_project_loaded_title"), tr("msg_project_loaded_desc", count=len(state.dialogues), name=path.name), "ok")
-        except Exception as e:
-            self._log_message(f"Failed to open project: {e}", "error")
-            QMessageBox.critical(self, tr("msg_open_error_title"), tr("msg_open_error", error=str(e)))
+        self._refresh_all_views()
+        self._update_window_title()
+        self._update_save_status()
+        self._add_recent_project(str(path.resolve()))
+        self._log_message(f"Opened project: {path.name} ({len(state.dialogues)} dialogues)", "ok")
+        self._show_toast(tr("msg_project_loaded_title"), tr("msg_project_loaded_desc", count=len(state.dialogues), name=path.name), "ok")
 
     def load_pack_folder(self, pack_dir: Path):
         """Reconstruct project from an exported pack directory."""
@@ -1640,6 +1805,11 @@ class MainWindow(QMainWindow):
     # ── Action Slots ──────────────────────────────────────────────────────────
 
     def on_import_video(self):
+        """User triggered Import Video action from menu or toolbar."""
+        if self._is_busy():
+            QMessageBox.warning(self, tr("msg_busy_title"), tr("msg_busy_desc"))
+            return
+
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             tr("dlg_import_video"),
@@ -1647,26 +1817,129 @@ class MainWindow(QMainWindow):
             tr("dlg_filter_video"),
         )
         if path_str:
-            self.load_video(Path(path_str))
+            self.on_import_video_file(Path(path_str))
 
-    def load_video(self, path: Path):
-        """Load a video file into the pipeline state and update UI."""
+    def on_import_video_file(self, new_video_path: Path):
+        """
+        Safely import a video file with full edge-case protection:
+        - If busy: rejects.
+        - If current project/cues active: prompts user with 4 clear choices (Save & New, Relink Video Only, Discard & New, Cancel).
+        """
+        if self._is_busy():
+            self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
+            return
+
+        has_active_work = (
+            len(self._state.dialogues) > 0 or
+            self._is_dirty or
+            self._current_project_path is not None
+        )
+
+        if has_active_work:
+            choice = self._prompt_active_project_action(new_video_path)
+            if choice == "cancel":
+                return
+            elif choice == "save_new":
+                if not self.on_save_project():
+                    return  # User aborted saving, do not continue
+                self._reset_workspace_for_new_video()
+                self.load_video(new_video_path)
+            elif choice == "relink_video":
+                # Keep existing dialogues & timestamps, replace only the video file!
+                self.load_video(new_video_path, replace_video_only=True)
+            elif choice == "discard_new":
+                self._reset_workspace_for_new_video()
+                self.load_video(new_video_path)
+        else:
+            self.load_video(new_video_path)
+
+    def _prompt_active_project_action(self, new_video_path: Path) -> str:
+        """
+        Displays a professional 4-choice decision dialog when importing over existing work:
+        Returns: 'save_new', 'relink_video', 'discard_new', 'cancel'
+        """
+        cur_name = self._current_project_path.name if self._current_project_path else (
+            self._state.video_path.name if self._state.video_path else tr("untitled_project")
+        )
+        count = len(self._state.dialogues)
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(tr("msg_project_active_title"))
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText(f"<b>{tr('msg_project_active_header')}</b>")
+        msg_box.setInformativeText(tr("msg_project_active_body", name=cur_name, count=count, new_name=new_video_path.name))
+
+        btn_save_new = msg_box.addButton(tr("btn_import_save_new"), QMessageBox.ButtonRole.AcceptRole)
+        btn_relink = msg_box.addButton(tr("btn_import_relink_only"), QMessageBox.ButtonRole.ActionRole)
+        btn_discard = msg_box.addButton(tr("btn_import_discard_new"), QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = msg_box.addButton(tr("btn_cancel"), QMessageBox.ButtonRole.RejectRole)
+
+        msg_box.setDefaultButton(btn_save_new)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == btn_save_new:
+            return "save_new"
+        elif clicked == btn_relink:
+            return "relink_video"
+        elif clicked == btn_discard:
+            return "discard_new"
+        return "cancel"
+
+    def _reset_workspace_for_new_video(self):
+        """Cleans current cues and state for fresh video import."""
+        self._state = PipelineState()
+        self._undo_manager = UndoManager()
+        self._current_project_path = None
+        self._output_dir = None
+        self._is_dirty = False
+        self._last_saved_time = None
+        self._video_panel.reset()
+        self._clip_editor.clear()
+        self._refresh_all_views()
+
+    def load_video(self, path: Path, replace_video_only: bool = False) -> bool:
+        """Load a video file into the pipeline state with deep edge-case validation."""
         if not path.exists():
             self._log_message(f"File not found: {path}", "error")
-            return
+            return False
 
         suffix = path.suffix.lower()
         if suffix not in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
             self._log_message(f"Unsupported format: {suffix}", "warn")
-            return
+            QMessageBox.warning(self, tr("msg_invalid_video_title"), tr("msg_invalid_video_desc", error=f"Unsupported format: {suffix}"))
+            return False
+
+        # Deep integrity verification via ffprobe
+        from core.edge_guards import probe_video_integrity
+        is_valid, err_msg, meta = probe_video_integrity(path)
+        if not is_valid:
+            QMessageBox.warning(
+                self,
+                tr("msg_invalid_video_title"),
+                tr("msg_invalid_video_desc", error=err_msg)
+            )
+            self._log_message(f"Media validation failed: {err_msg}", "error")
+            return False
 
         self._add_recent_video(str(path.resolve()))
         self._state.video_path = path
-        self._state.pack_info.title = path.stem
+
+        if not replace_video_only:
+            self._state.pack_info.title = path.stem
+            self._state.dialogues.clear()
+            self._state.step_completed.clear()
+            self._state.step_errors.clear()
+            self._current_project_path = None
+            self._undo_manager = UndoManager()
+
+        if "duration" in meta and meta["duration"] > 0:
+            self._state.video_duration = meta["duration"]
+            self._timeline.set_duration(meta["duration"])
 
         # Auto-incremental output directory setup
         from core.pack_builder import PackBuilder
-        pack_name = PackBuilder.sanitize_pack_name(path.stem)
+        pack_name = PackBuilder.sanitize_pack_name(self._state.pack_info.title or path.stem)
         out_opt = self._settings.get("output_dir", "")
         base = Path(out_opt) if out_opt else (path.parent / "output")
         self._output_dir = PackBuilder.get_unique_pack_dir(base, pack_name)
@@ -1676,11 +1949,20 @@ class MainWindow(QMainWindow):
 
         self._video_panel.load_video(path)
         self._video_panel.show_video_info(self._state)
-        self._status_video.setText(f"File: {path.name}")
+        self._status_video.setText(tr("status_file", name=path.name))
         self._mark_dirty(True)
+        self._refresh_all_views()
         self._update_toolbar_state()
-        self._log_message(f"Video loaded: {path.name}", "ok")
+
+        if replace_video_only:
+            self._log_message(f"Video relinked successfully: {path.name} (dialogues retained)", "ok")
+            self._show_toast(tr("msg_video_relinked_title"), tr("msg_video_relinked_desc", name=path.name), "ok")
+        else:
+            self._log_message(f"Video loaded: {path.name}", "ok")
+            self._show_toast(tr("msg_video_loaded_title"), path.name, "ok")
+
         self._start_preview_proxy_generation(path)
+        return True
 
     def _on_toggle_proxy_requested(self):
         """User clicked badge to request proxy generation or recreate."""
@@ -1796,9 +2078,18 @@ class MainWindow(QMainWindow):
         if not self._state.video_path:
             return
 
-        if self._worker and self._worker.isRunning():
-            QMessageBox.warning(self, tr("msg_pipeline_running_title"),
-                                tr("msg_pipeline_already_running"))
+        if self._is_busy():
+            QMessageBox.warning(self, tr("msg_busy_title"),
+                                tr("msg_busy_desc"))
+            return
+
+        # Edge guard: verify minimum required free disk space before processing
+        from core.edge_guards import EdgeGuards
+        from config import TEMP_DIR
+        has_space, free_gb, _ = EdgeGuards.check_disk_space(TEMP_DIR, min_required_gb=1.0)
+        if not has_space:
+            QMessageBox.critical(self, tr("msg_low_disk_title"),
+                                 tr("msg_low_disk_desc", free=f"{free_gb:.2f}"))
             return
 
         # Update pack info from panel
@@ -1983,6 +2274,10 @@ class MainWindow(QMainWindow):
 
     def on_export(self):
         """Open Adobe-style Export Dialog with real-time progress, ETA, and background rendering."""
+        if self._is_busy():
+            QMessageBox.warning(self, tr("msg_busy_title"),
+                                tr("msg_busy_desc"))
+            return
         from gui.export_dialog import ExportDialog
         dlg = ExportDialog(self, self._state, self._settings)
         dlg.exec_()
@@ -2048,6 +2343,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_menu_help'):
             self._menu_help.setTitle(tr("menu_help"))
             self._act_shortcuts_help.setText(tr("menu_shortcuts"))
+            if hasattr(self, '_act_check_updates'):
+                self._act_check_updates.setText(tr("menu_check_updates"))
             self._act_about.setText(tr("menu_about"))
 
         self._rebuild_recent_projects_menu()

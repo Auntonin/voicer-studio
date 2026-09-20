@@ -183,7 +183,7 @@ class PipelineWorker(QThread):
             from core.diarization import SpeakerDiarizer
             diarizer = SpeakerDiarizer(
                 hf_token=self.options.get("hf_token", ""),
-                device=self.options.get("device", "auto"),
+                device=self.options.get("compute_device", "auto"),
                 min_speakers=self.options.get("min_speakers", 2),
                 max_speakers=self.options.get("max_speakers", 8),
             )
@@ -212,6 +212,7 @@ class PipelineWorker(QThread):
             transcriber = Transcriber(
                 model_size=self.options.get("whisper_model", WHISPER_MODEL_DEFAULT),
                 language=self.options.get("whisper_language", WHISPER_LANGUAGE_DEFAULT),
+                device=self.options.get("compute_device", "auto"),
                 initial_prompt=self.options.get("whisper_initial_prompt"),
             )
             self.signals.sub_progress.emit(0, 1, tr("pipe_loading_whisper"))
@@ -307,7 +308,7 @@ class PipelineWorker(QThread):
         self._begin_step(step)
         try:
             from core.separator import VoiceSeparator
-            sep = VoiceSeparator(mode=mode)
+            sep = VoiceSeparator(mode=mode, device=self.options.get("compute_device", "auto"))
             sep_dir = TEMP_DIR / "separated"
             sep_dir.mkdir(exist_ok=True)
             self.signals.sub_progress.emit(0, 1, tr("pipe_separating_voices"))
@@ -567,6 +568,18 @@ class PipelineWorker(QThread):
         self._start_time = time.time()
         self._log(f"Pipeline started for: {self.state.video_path.name}", "info")
         try:
+            # 1. Initialize and configure optimal compute hardware (CUDA / DirectML / CPU)
+            from core.device_manager import device_manager
+            active_dev = device_manager.get_optimal_device(self.options.get("compute_device", "auto"))
+            device_manager.configure_runtime_environment(active_dev)
+            self._log(f"Compute Engine: {active_dev.display_title}", "info")
+
+            # 2. Check disk space safety before processing
+            from core.edge_guards import check_disk_space
+            has_space, free_gb, _ = check_disk_space(TEMP_DIR, min_required_gb=1.0)
+            if not has_space:
+                self._log(f"Low disk space warning: {free_gb:.1f} GB available on temporary drive", "warn")
+
             steps = [
                 self._step_audio_extract,
                 self._step_vad,
@@ -658,6 +671,7 @@ def build_options_from_settings(settings: dict) -> dict:
         "audio_bitrate":             settings.get("audio_bitrate", "256k"),
         "image_quality":             settings.get("image_quality", 95),
         "backing_track_original":    settings.get("backing_track_original", False),
-        "device":                    "auto",
+        "compute_device":            settings.get("compute_device", "auto"),
+        "device":                    settings.get("compute_device", "auto"),
     }
 

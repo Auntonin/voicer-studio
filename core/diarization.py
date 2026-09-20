@@ -58,8 +58,12 @@ class SpeakerDiarizer:
                         token=self.hf_token
                     )
 
-                if self.device == 'cuda' and torch.cuda.is_available() and self.pipeline:
+                from core.device_manager import device_manager, DeviceBackend
+                dev_info = device_manager.get_optimal_device(self.device)
+                if dev_info.backend == DeviceBackend.CUDA and torch.cuda.is_available() and self.pipeline:
                     self.pipeline.to(torch.device("cuda"))
+                elif self.pipeline:
+                    self.pipeline.to(torch.device("cpu"))
                 self.available = self.pipeline is not None
             except ImportError:
                 logger.warning("pyannote.audio not installed. Using acoustic clustering fallback.")
