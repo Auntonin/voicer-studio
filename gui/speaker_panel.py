@@ -168,25 +168,30 @@ class SpeakerPanel(QWidget):
             cnt_lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 8.5pt; border: none;")
             row_layout.addWidget(cnt_lbl)
             
-            # Delete speaker button
+            # Delete speaker button (neutral studio styling with subtle dark rose hover)
             btn_del = QPushButton(tr("spk_btn_delete"))
             del_icon_path = ASSETS_DIR / "icons" / "user-minus.svg"
             if del_icon_path.exists():
                 btn_del.setIcon(QIcon(str(del_icon_path)))
                 btn_del.setIconSize(QSize(12, 12))
-            btn_del.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {COLORS['bg_input']};
-                    color: {COLORS['accent_red']};
-                    border: 1px solid {COLORS['border']};
-                    border-radius: 3px;
+            btn_del.setStyleSheet("""
+                QPushButton {
+                    background-color: #1a1a1e;
+                    color: #a1a1aa;
+                    border: 1px solid #282830;
+                    border-radius: 4px;
                     padding: 3px 8px;
                     font-size: 8pt;
-                }}
-                QPushButton:hover {{
-                    background-color: {COLORS['accent_red']};
-                    color: white;
-                }}
+                    font-weight: 500;
+                }
+                QPushButton:hover {
+                    background-color: #27161b;
+                    border-color: #4a2028;
+                    color: #fca5a5;
+                }
+                QPushButton:pressed {
+                    background-color: #381922;
+                }
             """)
             btn_del.clicked.connect(lambda _, sid=spk_id: self._on_delete_speaker(sid))
             row_layout.addWidget(btn_del)

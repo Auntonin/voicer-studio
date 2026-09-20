@@ -85,94 +85,195 @@ class ClipEditor(QWidget):
                 background-color: {COLORS['bg_secondary']};
                 color: {COLORS['text_primary']};
                 font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
-                font-size: 9pt;
+                font-size: 8.5pt;
             }}
             QFrame#editor_card {{
-                background-color: #222222;
-                border: 1px solid #383838;
-                border-radius: 8px;
+                background-color: #17171a;
+                border: 1px solid #26262c;
+                border-radius: 6px;
             }}
             QLabel {{
                 color: {COLORS['text_primary']};
             }}
             QLabel#section_title {{
-                font-size: 9.5pt;
-                font-weight: bold;
-                color: #ffffff;
+                font-size: 7.5pt;
+                font-weight: 700;
+                letter-spacing: 0.8px;
+                color: #71717a;
+                text-transform: uppercase;
                 background: transparent;
-                border-left: 3px solid #1473E6;
-                padding-left: 8px;
+                border: none;
+                padding: 0px 0px 2px 0px;
+            }}
+            QLabel#lbl_duration_pill {{
+                background-color: #072115;
+                border: 1px solid #134e32;
+                border-radius: 4px;
+                color: #34d399;
+                font-size: 8pt;
+                font-weight: 700;
+                font-family: 'Consolas', monospace;
+                padding: 2px 8px;
+            }}
+            QLineEdit, QDoubleSpinBox, QComboBox {{
+                background-color: #101013;
+                color: #f4f4f5;
+                border: 1px solid #27272c;
+                border-radius: 4px;
+                padding: 3px 6px;
+                font-size: 8.5pt;
+                font-family: 'Consolas', 'Segoe UI', monospace;
+                min-height: 22px;
+            }}
+            QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus {{
+                border: 1px solid #0284c7;
+                background-color: #0c0c0f;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 18px;
+                border-left: 1px solid #27272c;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: #18181c;
+                border: 1px solid #2e2e34;
+                color: #f4f4f5;
+                selection-background-color: #0284c7;
+                selection-color: #ffffff;
             }}
             QPushButton {{
-                background-color: {COLORS['bg_input']};
-                color: {COLORS['text_primary']};
-                border: 1px solid #383838;
+                background-color: #1a1a1e;
+                color: #d4d4d8;
+                border: 1px solid #282830;
                 border-radius: 4px;
-                padding: 5px 12px;
-                font-size: 8.5pt;
+                padding: 4px 10px;
+                font-size: 8pt;
                 font-weight: 600;
+                min-height: 22px;
             }}
             QPushButton:hover {{
-                background-color: #323232;
-                border-color: {COLORS['accent']};
+                background-color: #26262e;
+                border-color: #3f3f4a;
                 color: #ffffff;
             }}
-            QPushButton#btn_primary {{
-                background-color: {COLORS['accent']};
+            QPushButton:pressed {{
+                background-color: #141418;
+            }}
+            QPushButton:disabled {{
+                background-color: #141417;
+                color: #52525b;
+                border-color: #222226;
+            }}
+            QPushButton#btn_audio_play {{
+                background-color: #142333;
+                border: 1px solid #1e3a5f;
+                color: #38bdf8;
+            }}
+            QPushButton#btn_audio_play:hover {{
+                background-color: #1b324d;
+                border-color: #0284c7;
+                color: #7dd3fc;
+            }}
+            QPushButton#btn_audio_playing {{
+                background-color: #0369a1;
+                border: 1px solid #38bdf8;
                 color: #ffffff;
-                border: none;
-                font-weight: bold;
-                padding: 6px 14px;
             }}
-            QPushButton#btn_primary:hover {{
-                background-color: {COLORS['accent_hover']};
+            QPushButton#btn_audio_stop {{
+                background-color: #1a1a1e;
+                border: 1px solid #282830;
+                color: #94a3b8;
             }}
-            QPushButton#btn_danger {{
-                background-color: #2b1d24;
-                color: {COLORS['accent_red']};
-                border: 1px solid #4a2028;
-                font-weight: bold;
+            QPushButton#btn_audio_stop:hover {{
+                background-color: #26262e;
+                border-color: #3f3f4a;
+                color: #e2e8f0;
             }}
-            QPushButton#btn_danger:hover {{
-                background-color: {COLORS['accent_red']};
-                color: #ffffff;
-                border-color: {COLORS['accent_red']};
-            }}
-            QLineEdit, QPlainTextEdit, QDoubleSpinBox, QComboBox {{
-                background-color: #181818;
-                color: {COLORS['text_primary']};
-                border: 1px solid #383838;
+            QPushButton#btn_ai_action {{
+                background-color: #171628;
+                border: 1px solid #3730a3;
+                color: #c7d2fe;
+                font-size: 8pt;
+                font-weight: 600;
                 border-radius: 4px;
-                padding: 4px 8px;
+                padding: 3px 9px;
             }}
-            QLineEdit:focus, QPlainTextEdit:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-                border-color: {COLORS['accent']};
+            QPushButton#btn_ai_action:hover {{
+                background-color: #232047;
+                border-color: #6366f1;
+                color: #e0e7ff;
+            }}
+            QPushButton#btn_ai_action:disabled {{
+                background-color: #12111d;
+                border-color: #22203d;
+                color: #6366f1;
+            }}
+            QPushButton#btn_delete {{
+                background-color: #1a1a1e;
+                color: #d4d4d8;
+                border: 1px solid #282830;
+            }}
+            QPushButton#btn_delete:hover {{
+                background-color: #27161b;
+                border-color: #4a2028;
+                color: #fca5a5;
+            }}
+            QPushButton#btn_delete:pressed {{
+                background-color: #381922;
+                border-color: #5a2530;
+            }}
+            QPushButton#btn_clear {{
+                background-color: #1a1a1e;
+                color: #d4d4d8;
+                border: 1px solid #282830;
+            }}
+            QPushButton#btn_clear:hover {{
+                background-color: #27161b;
+                border-color: #4a2028;
+                color: #fca5a5;
+            }}
+            QPushButton#btn_clear:pressed {{
+                background-color: #381922;
+                border-color: #5a2530;
             }}
         """)
 
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setContentsMargins(6, 4, 6, 6)
         main_layout.setSpacing(8)
 
         # ── Frame Card (Col 1: Image & Audio Controls) ──
         frame_card = QFrame()
         frame_card.setObjectName("editor_card")
         fc_layout = QVBoxLayout(frame_card)
-        fc_layout.setContentsMargins(10, 10, 10, 10)
-        fc_layout.setSpacing(6)
+        fc_layout.setContentsMargins(8, 8, 8, 8)
+        fc_layout.setSpacing(5)
 
         self.image_preview = QLabel(tr("ed_no_frame"))
-        self.image_preview.setFixedSize(160, 90)
+        self.image_preview.setFixedSize(152, 86)
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview.setStyleSheet(
-            "background-color: #181818; border: 1px solid #383838; border-radius: 6px; color: #888888;"
+            "background-color: #0c0c0e; border: 1px solid #222227; border-radius: 5px; color: #52525b; font-size: 8pt; font-weight: 500;"
         )
-        fc_layout.addWidget(self.image_preview)
+        fc_layout.addWidget(self.image_preview, alignment=Qt.AlignmentFlag.AlignCenter)
 
         play_layout = QHBoxLayout()
         play_layout.setSpacing(4)
         self.btn_play = QPushButton(tr("ed_play_audio"))
+        self.btn_play.setObjectName("btn_audio_play")
+        play_icon = ASSETS_DIR / "icons" / "play.svg"
+        if play_icon.exists():
+            self.btn_play.setIcon(QIcon(str(play_icon)))
+            self.btn_play.setIconSize(QSize(12, 12))
+
         self.btn_stop = QPushButton(tr("ed_stop_audio"))
+        self.btn_stop.setObjectName("btn_audio_stop")
+        stop_icon = ASSETS_DIR / "icons" / "stop.svg"
+        if stop_icon.exists():
+            self.btn_stop.setIcon(QIcon(str(stop_icon)))
+            self.btn_stop.setIconSize(QSize(12, 12))
+
         play_layout.addWidget(self.btn_play)
         play_layout.addWidget(self.btn_stop)
         fc_layout.addLayout(play_layout)
@@ -188,23 +289,26 @@ class ClipEditor(QWidget):
         time_card = QFrame()
         time_card.setObjectName("editor_card")
         tc_layout = QVBoxLayout(time_card)
-        tc_layout.setContentsMargins(10, 10, 10, 10)
-        tc_layout.setSpacing(6)
+        tc_layout.setContentsMargins(10, 8, 10, 8)
+        tc_layout.setSpacing(5)
 
         self.lbl_title_timing = QLabel(tr("ed_timing_title"), objectName="section_title")
         tc_layout.addWidget(self.lbl_title_timing)
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(6)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(4)
 
         self.lbl_spk = QLabel(tr("ed_speaker_label"))
+        self.lbl_spk.setStyleSheet("color: #82828e; font-size: 8pt; font-weight: 600;")
         grid.addWidget(self.lbl_spk, 0, 0)
         self.combo_speaker = QComboBox()
         self.combo_speaker.currentIndexChanged.connect(self._on_speaker_changed)
         grid.addWidget(self.combo_speaker, 0, 1)
 
         self.lbl_start = QLabel(tr("ed_start_label"))
+        self.lbl_start.setStyleSheet("color: #82828e; font-size: 8pt; font-weight: 600;")
         grid.addWidget(self.lbl_start, 1, 0)
         self.spin_start = QDoubleSpinBox()
         self.spin_start.setDecimals(3)
@@ -214,6 +318,7 @@ class ClipEditor(QWidget):
         grid.addWidget(self.spin_start, 1, 1)
 
         self.lbl_end = QLabel(tr("ed_end_label"))
+        self.lbl_end.setStyleSheet("color: #82828e; font-size: 8pt; font-weight: 600;")
         grid.addWidget(self.lbl_end, 2, 0)
         self.spin_end = QDoubleSpinBox()
         self.spin_end.setDecimals(3)
@@ -223,7 +328,8 @@ class ClipEditor(QWidget):
         grid.addWidget(self.spin_end, 2, 1)
 
         self.lbl_duration = QLabel(tr("ed_duration_val", dur=0.0))
-        self.lbl_duration.setStyleSheet(f"color: {COLORS['accent_green']}; font-weight: bold;")
+        self.lbl_duration.setObjectName("lbl_duration_pill")
+        self.lbl_duration.setAlignment(Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.lbl_duration, 3, 0, 1, 2)
 
         tc_layout.addLayout(grid)
@@ -235,8 +341,8 @@ class ClipEditor(QWidget):
         cap_card = QFrame()
         cap_card.setObjectName("editor_card")
         cc_layout = QVBoxLayout(cap_card)
-        cc_layout.setContentsMargins(12, 10, 12, 10)
-        cc_layout.setSpacing(8)
+        cc_layout.setContentsMargins(12, 8, 12, 8)
+        cc_layout.setSpacing(6)
 
         # Header with title, active clip badge, live metrics, and AI Re-Transcribe
         cap_header = QHBoxLayout()
@@ -248,8 +354,8 @@ class ClipEditor(QWidget):
 
         self.lbl_clip_badge = QLabel(tr("ed_no_selection"))
         self.lbl_clip_badge.setStyleSheet(
-            "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #132338; "
-            "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
+            "font-size: 7.5pt; font-weight: 700; color: #38bdf8; background: #08283d; "
+            "border: 1px solid #075985; border-radius: 4px; padding: 2px 7px;"
         )
         cap_header.addWidget(self.lbl_clip_badge)
 
@@ -257,65 +363,69 @@ class ClipEditor(QWidget):
 
         self.lbl_caption_stats = QLabel(f"0 {tr('ed_chars_unit')}")
         self.lbl_caption_stats.setStyleSheet(
-            "font-size: 8pt; color: #888888; margin-right: 4px;"
+            "font-size: 7.5pt; color: #71717a; font-weight: 500; margin-right: 4px;"
         )
         cap_header.addWidget(self.lbl_caption_stats)
 
         self.btn_regen_caption = QPushButton(tr("ed_retranscribe"))
+        self.btn_regen_caption.setObjectName("btn_ai_action")
         self.btn_regen_caption.setToolTip(tr("ed_retranscribe_tip"))
         sparkles_icon = ASSETS_DIR / "icons" / "sparkles.svg"
         if sparkles_icon.exists():
             self.btn_regen_caption.setIcon(QIcon(str(sparkles_icon)))
-            self.btn_regen_caption.setIconSize(QSize(13, 13))
+            self.btn_regen_caption.setIconSize(QSize(12, 12))
         self.btn_regen_caption.clicked.connect(self.on_regen_caption)
         cap_header.addWidget(self.btn_regen_caption)
         cc_layout.addLayout(cap_header)
 
-        # Minimalist Adobe Dark Text Area with full Undo/Redo support
+        # Minimalist Studio Dark Text Area with full Undo/Redo support
         self.txt_caption = CaptionTextEdit()
+        self.txt_caption.setObjectName("txt_caption")
         self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
-        self.txt_caption.setMinimumHeight(64)
-        self.txt_caption.setMaximumHeight(74)
-        self.txt_caption.setStyleSheet(f"""
-            QPlainTextEdit {{
-                background-color: #171717;
-                color: #f3f4f6;
-                border: 1px solid #333333;
+        self.txt_caption.setMinimumHeight(60)
+        self.txt_caption.setMaximumHeight(70)
+        self.txt_caption.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #101013;
+                color: #f4f4f5;
+                border: 1px solid #27272c;
                 border-radius: 5px;
                 padding: 6px 8px;
                 font-size: 9.5pt;
-                line-height: 1.4;
-            }}
-            QPlainTextEdit:focus {{
-                border-color: {COLORS['accent']};
-                background-color: #141414;
-            }}
+                line-height: 1.45;
+                selection-background-color: #1e3a5f;
+                selection-color: #ffffff;
+            }
+            QPlainTextEdit:focus {
+                border-color: #0284c7;
+                background-color: #0d0d10;
+            }
         """)
         self.txt_caption.textChanged.connect(self._on_caption_text_changed)
         cc_layout.addWidget(self.txt_caption)
 
-        # Balanced 2-Sided Action Buttons Row
+        # Segmented Action Buttons Row
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(6)
+        btn_layout.setSpacing(5)
 
-        def _make_btn(text: str, icon_name: str = "", tip: str = "", is_danger: bool = False) -> QPushButton:
+        def _make_btn(text: str, icon_name: str = "", tip: str = "", obj_name: str = "") -> QPushButton:
             b = QPushButton(text)
             if icon_name:
                 p = ASSETS_DIR / "icons" / icon_name
                 if p.exists():
                     b.setIcon(QIcon(str(p)))
-                    b.setIconSize(QSize(13, 13))
+                    b.setIconSize(QSize(12, 12))
             if tip:
                 b.setToolTip(tip)
-            if is_danger:
-                b.setObjectName("btn_danger")
+            if obj_name:
+                b.setObjectName(obj_name)
             return b
 
         # Left Group: Clip operations
         self.btn_split = _make_btn(tr("ed_split_clip"), "split.svg", tr("ed_split_clip_tip"))
         self.btn_merge = _make_btn(tr("ed_merge_next"), "merge.svg", tr("ed_merge_next_tip"))
-        self.btn_delete = _make_btn(tr("ed_delete_clip"), "trash.svg", tr("ed_delete_clip_tip"), is_danger=True)
+        self.btn_delete = _make_btn(tr("ed_delete_clip"), "trash.svg", tr("ed_delete_clip_tip"), obj_name="btn_delete")
 
         self.btn_split.clicked.connect(self.on_split)
         self.btn_merge.clicked.connect(self.on_merge)
@@ -329,7 +439,7 @@ class ClipEditor(QWidget):
 
         # Right Group: Utilities & Audio Tools
         self.btn_copy = _make_btn(tr("ed_copy"), "copy.svg", tr("ed_copy_tip"))
-        self.btn_clear = _make_btn(tr("ed_clear"), "clear.svg", tr("ed_clear_tip"))
+        self.btn_clear = _make_btn(tr("ed_clear"), "clear.svg", tr("ed_clear_tip"), obj_name="btn_clear")
         self.btn_regen_audio = _make_btn(tr("ed_reslice_audio"), "wave.svg", tr("ed_reslice_audio_tip"))
 
         self.btn_copy.clicked.connect(self._on_copy_caption)
@@ -349,8 +459,25 @@ class ClipEditor(QWidget):
         self.player.setAudioOutput(self.audio_output)
         self.btn_play.clicked.connect(self.play_audio)
         self.btn_stop.clicked.connect(self.player.stop)
+        self.player.playbackStateChanged.connect(self._on_audio_state_changed)
 
         self.clear()
+
+    def _on_audio_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_play.setText(tr("ed_stop_audio"))
+            stop_icon = ASSETS_DIR / "icons" / "stop.svg"
+            if stop_icon.exists():
+                self.btn_play.setIcon(QIcon(str(stop_icon)))
+            self.btn_play.setObjectName("btn_audio_playing")
+        else:
+            self.btn_play.setText(tr("ed_play_audio"))
+            play_icon = ASSETS_DIR / "icons" / "play.svg"
+            if play_icon.exists():
+                self.btn_play.setIcon(QIcon(str(play_icon)))
+            self.btn_play.setObjectName("btn_audio_play")
+        self.btn_play.style().unpolish(self.btn_play)
+        self.btn_play.style().polish(self.btn_play)
 
     def _on_time_changed(self):
         dur = max(0.0, self.spin_end.value() - self.spin_start.value())
@@ -428,7 +555,7 @@ class ClipEditor(QWidget):
 
     def _on_frame_qimage_ready(self, req_id: int, qimg: QImage):
         if req_id == self._frame_preview_req_id and not qimg.isNull():
-            pix = QPixmap.fromImage(qimg).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pix = QPixmap.fromImage(qimg).scaled(152, 86, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.image_preview.setPixmap(pix)
 
     def _on_preview_audio_ready(self, file_path_str: str):
@@ -514,7 +641,7 @@ class ClipEditor(QWidget):
 
         # Image preview (immediate if on disk, non-blocking async seek if not)
         if item.image_path and item.image_path.exists():
-            pix = QPixmap(str(item.image_path)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pix = QPixmap(str(item.image_path)).scaled(152, 86, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.image_preview.setPixmap(pix)
         else:
             self._seek_frame_preview()
@@ -523,6 +650,9 @@ class ClipEditor(QWidget):
 
     def play_audio(self):
         if not self.item:
+            return
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.stop()
             return
             
         self.play_started.emit()
@@ -601,20 +731,20 @@ class ClipEditor(QWidget):
             self.btn_regen_caption.setText(tr("ed_transcribing"))
             self.lbl_clip_badge.setText(f"⏳ {tr('ed_transcribing')}")
             self.lbl_clip_badge.setStyleSheet(
-                "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #0c4a6e; "
-                "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
+                "font-size: 7.5pt; font-weight: 700; color: #38bdf8; background: #0c4a6e; "
+                "border: 1px solid #0284c7; border-radius: 4px; padding: 2px 7px;"
             )
             self.txt_caption.setReadOnly(True)
             self.txt_caption.setPlaceholderText(tr("ed_transcribing_placeholder"))
             self.txt_caption.setStyleSheet("""
                 QPlainTextEdit {
-                    background-color: #0c1929;
+                    background-color: #0b1726;
                     color: #7dd3fc;
-                    border: 1.5px solid #0284c7;
+                    border: 1px solid #0284c7;
                     border-radius: 5px;
                     padding: 6px 8px;
                     font-size: 9.5pt;
-                    line-height: 1.4;
+                    line-height: 1.45;
                 }
             """)
         else:
@@ -628,8 +758,8 @@ class ClipEditor(QWidget):
             else:
                 self.lbl_clip_badge.setText(tr("ed_no_selection"))
             self.lbl_clip_badge.setStyleSheet(
-                "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #132338; "
-                "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
+                "font-size: 7.5pt; font-weight: 700; color: #38bdf8; background: #08283d; "
+                "border: 1px solid #075985; border-radius: 4px; padding: 2px 7px;"
             )
             self.txt_caption.setReadOnly(False)
             self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
@@ -637,33 +767,35 @@ class ClipEditor(QWidget):
             self._update_caption_stats()
 
     def _restore_caption_style(self):
-        self.txt_caption.setStyleSheet(f"""
-            QPlainTextEdit {{
-                background-color: #171717;
-                color: #f3f4f6;
-                border: 1px solid #333333;
+        self.txt_caption.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #101013;
+                color: #f4f4f5;
+                border: 1px solid #27272c;
                 border-radius: 5px;
                 padding: 6px 8px;
                 font-size: 9.5pt;
-                line-height: 1.4;
-            }}
-            QPlainTextEdit:focus {{
-                border-color: {COLORS['accent']};
-                background-color: #141414;
-            }}
+                line-height: 1.45;
+                selection-background-color: #1e3a5f;
+                selection-color: #ffffff;
+            }
+            QPlainTextEdit:focus {
+                border-color: #0284c7;
+                background-color: #0d0d10;
+            }
         """)
 
     def flash_success(self):
         """Brief pulse to highlight successfully transcribed text."""
         self.txt_caption.setStyleSheet("""
             QPlainTextEdit {
-                background-color: #052e16;
+                background-color: #062415;
                 color: #86efac;
-                border: 1.5px solid #22c55e;
+                border: 1px solid #22c55e;
                 border-radius: 5px;
                 padding: 6px 8px;
                 font-size: 9.5pt;
-                line-height: 1.4;
+                line-height: 1.45;
             }
         """)
         QTimer.singleShot(900, self._restore_caption_style)
@@ -689,7 +821,10 @@ class ClipEditor(QWidget):
 
     def retranslate_ui(self):
         """Refreshes all labels and button texts in the Clip Editor."""
-        self.btn_play.setText(tr("ed_play_audio"))
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_play.setText(tr("ed_stop_audio"))
+        else:
+            self.btn_play.setText(tr("ed_play_audio"))
         self.btn_stop.setText(tr("ed_stop_audio"))
         self.btn_change_image.setText(tr("ed_recapture_frame"))
         self.btn_change_image.setToolTip(tr("ed_recapture_frame_tip"))
