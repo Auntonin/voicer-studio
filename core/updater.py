@@ -326,47 +326,60 @@ echo               Voicer Studio — Updating Application...
 echo ======================================================================
 echo.
 
-set PID={current_pid}
-set SOURCE_FILE="{str(downloaded_file)}"
-set TARGET_DIR="{str(target_app_dir)}"
-set TARGET_EXE="{str(target_exe)}"
-set IS_ZIP={"1" if is_zip else "0"}
+set "PID={current_pid}"
+set "SOURCE_FILE={str(downloaded_file)}"
+set "TARGET_DIR={str(target_app_dir)}"
+set "TARGET_EXE={str(target_exe)}"
+set "IS_ZIP={'1' if is_zip else '0'}"
 
 echo [1/4] Waiting for Voicer Studio (PID %PID%) to close...
 set RETRIES=0
-:WAIT_LOOP
+:WAIT_PID
 tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
 if not errorlevel 1 (
     set /a RETRIES+=1
-    if %RETRIES% GEQ 30 (
-        echo [INFO] Process still active after 30s. Terminating gracefully...
+    if %RETRIES% GEQ 25 (
+        echo [INFO] Terminating process %PID% gracefully...
         taskkill /F /PID %PID% >nul 2>&1
     )
     timeout /t 1 /nobreak >nul
-    goto WAIT_LOOP
+    goto WAIT_PID
 )
 
-echo [2/4] Process terminated. Releasing OS file handles...
+:: Wait for VoicerStudio launcher process to also release locks
+set RETRIES_EXE=0
+:WAIT_EXE
+tasklist /FI "IMAGENAME eq VoicerStudio.exe" 2>NUL | find /I "VoicerStudio.exe" >NUL
+if not errorlevel 1 (
+    set /a RETRIES_EXE+=1
+    if %RETRIES_EXE% GEQ 10 (
+        taskkill /F /IM VoicerStudio.exe >nul 2>&1
+    )
+    timeout /t 1 /nobreak >nul
+    goto WAIT_EXE
+)
+
+echo [2/4] Processes closed. Releasing Windows file handles...
 timeout /t 1 /nobreak >nul
 
 echo [3/4] Installing updated files...
 if "%IS_ZIP%"=="1" (
     echo [INFO] Extracting update archive into %TARGET_DIR%...
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ErrorActionPreference = 'Stop'; try {{ Expand-Archive -LiteralPath %SOURCE_FILE% -DestinationPath %TARGET_DIR% -Force; exit 0 }} catch {{ Write-Error $_; exit 1 }}"
+        "$ErrorActionPreference = 'Stop'; try {{ $src = $env:SOURCE_FILE; $dst = $env:TARGET_DIR; $temp = Join-Path $env:TEMP ('voicer_upd_' + [System.Guid]::NewGuid().ToString('N')); Expand-Archive -LiteralPath $src -DestinationPath $temp -Force; $items = Get-ChildItem -Path $temp; if ($items.Count -eq 1 -and $items[0].PSIsContainer) {{ Copy-Item -Path (Join-Path $items[0].FullName '*') -Destination $dst -Recurse -Force }} else {{ Copy-Item -Path (Join-Path $temp '*') -Destination $dst -Recurse -Force }}; Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue; exit 0 }} catch {{ Write-Error $_; exit 1 }}"
 ) else (
     echo [INFO] Updating executable: %TARGET_EXE%...
-    if exist %TARGET_EXE% (
-        copy /y %TARGET_EXE% "%TARGET_EXE%.bak" >nul 2>&1
+    if exist "%TARGET_EXE%" (
+        copy /y "%TARGET_EXE%" "%TARGET_EXE%.bak" >nul 2>&1
     )
-    copy /y %SOURCE_FILE% %TARGET_EXE% >nul
+    copy /y "%SOURCE_FILE%" "%TARGET_EXE%" >nul
 )
 
 if errorlevel 1 (
     echo.
     echo ======================================================================
     echo [ERROR] Update installation failed! 
-    echo If access was denied, please run the updater as Administrator.
+    echo If access was denied, please run the application as Administrator.
     echo ======================================================================
     pause
     exit /b 1
@@ -374,11 +387,12 @@ if errorlevel 1 (
 
 echo.
 echo [4/4] Update applied successfully! Relaunching Voicer Studio...
-start "" %TARGET_EXE%
+timeout /t 1 /nobreak >nul
+start "" "%TARGET_EXE%"
 
 :: Clean up downloaded update package
-if exist %SOURCE_FILE% (
-    del /f /q %SOURCE_FILE% >nul 2>&1
+if exist "%SOURCE_FILE%" (
+    del /f /q "%SOURCE_FILE%" >nul 2>&1
 )
 
 echo Done.

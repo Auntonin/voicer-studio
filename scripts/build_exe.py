@@ -114,6 +114,16 @@ def step_compile():
 
     # Step 2: Compile launcher.c + launcher.res -> VoicerStudio.exe
     log(f"Compiling standalone GUI executable ({target_exe.name})...", "INFO")
+    if target_exe.exists():
+        try:
+            with open(target_exe, "r+b"):
+                pass
+        except PermissionError:
+            log(f"{target_exe.name} is currently running! Attempting to close running process...", "WARN")
+            subprocess.run(["taskkill", "/F", "/IM", target_exe.name], capture_output=True)
+            import time
+            time.sleep(0.8)
+
     cmd_gcc = [
         gcc,
         "-O2",
