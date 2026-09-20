@@ -14,6 +14,17 @@ import os
 import time
 from pathlib import Path
 
+# ── Null-safe stdio for GUI Windows execution ──
+class _NullWriter:
+    def write(self, s): pass
+    def flush(self): pass
+    def isatty(self): return False
+
+if sys.stdout is None:
+    sys.stdout = _NullWriter()
+if sys.stderr is None:
+    sys.stderr = _NullWriter()
+
 # ── Ensure project root is in sys.path ────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))

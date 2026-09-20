@@ -21,12 +21,12 @@ from PySide6.QtWidgets import (
     QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog,
     QToolTip
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEvent
+from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEvent, Signal, QThread
 from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette, QKeySequence, QShortcut
 
 from config import (
     APP_NAME, APP_VERSION, COLORS, SETTINGS_FILE,
-    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WHISPER_MODEL_DEFAULT, ASSETS_DIR
+    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WHISPER_MODEL_DEFAULT, WHISPER_LANGUAGE_DEFAULT, ASSETS_DIR
 )
 from core.models import PipelineState, PipelineStep, UndoManager, SpeakerInfo, DialogueItem, PackInfo
 from core.project_manager import ProjectManager, PROJECT_FILE_EXTENSION
@@ -42,6 +42,54 @@ from gui.settings_dialog import SettingsDialog
 from gui.preview_dialog import PreviewDialog
 from gui.video_panel import VideoPanel
 from gui.ui_utils import apply_dark_title_bar
+
+
+class SingleClipTranscribeWorker(QThread):
+    finished = Signal(int, str)  # clip_index, transcribed_caption
+    failed = Signal(int, str)    # clip_index, error_message
+
+    def __init__(
+        self,
+        item_index: int,
+        audio_src: Path,
+        start_time: float,
+        end_time: float,
+        model_size: str,
+        language: str | None,
+        device: str,
+        shared_transcriber=None
+    ):
+        super().__init__()
+        self.item_index = item_index
+        self.audio_src = audio_src
+        self.start_time = start_time
+        self.end_time = end_time
+        self.model_size = model_size
+        self.language = language
+        self.device = device
+        self.transcriber = shared_transcriber
+
+    def run(self):
+        try:
+            from core.transcriber import Transcriber
+            t = self.transcriber
+            if (t is None or
+                getattr(t, 'model_size', None) != self.model_size or
+                getattr(t, 'language', None) != self.language or
+                getattr(t, 'device', None) != self.device or
+                not getattr(t, 'available', False) or
+                not getattr(t, 'model', None)):
+                t = Transcriber(model_size=self.model_size, language=self.language, device=self.device)
+                t.load_model()
+                self.transcriber = t
+
+            if not getattr(t, 'available', False) or not getattr(t, 'model', None):
+                raise RuntimeError("Whisper AI model could not be loaded")
+
+            res = t.transcribe_segment(self.audio_src, self.start_time, self.end_time)
+            self.finished.emit(self.item_index, res or "")
+        except Exception as e:
+            self.failed.emit(self.item_index, str(e))
 
 
 class MainWindow(QMainWindow):
@@ -88,6 +136,8 @@ class MainWindow(QMainWindow):
         self._output_dir: Path | None = None
         self._current_project_path: Path | None = None
         self._is_dirty: bool = False
+        self._shared_transcriber = None
+        self._clip_transcribe_worker: SingleClipTranscribeWorker | None = None
         self._last_saved_time: str | None = None
 
         # Background Auto-Save timer (checks dirty flag every 30 seconds)
@@ -1365,33 +1415,108 @@ class MainWindow(QMainWindow):
                 break
 
     def _on_regen_caption(self, idx: int):
+        target_item = None
         for d in self._state.active_dialogues():
             if d.index == idx:
-                self._log_message(f"Transcribing clip #{d.index} with Whisper AI in background...", "info")
-                model_size = self._settings.get("whisper_model", WHISPER_MODEL_DEFAULT)
-                lang = self._settings.get("whisper_language")
-                audio_src = self._state.work_audio_path
-                def _worker(itm=d):
-                    try:
-                        from core.transcriber import Transcriber
-                        t = Transcriber(model_size=model_size, language=lang)
-                        t.load_model()
-                        if audio_src and audio_src.exists():
-                            res = t.transcribe_segment(audio_src, itm.start, itm.end)
-                            def _done():
-                                if res:
-                                    itm.caption = res
-                                    self._mark_dirty(True)
-                                    self._dialogue_table.update_row(itm, self._state)
-                                    self._clip_editor.load_item(itm, self._state)
-                                    self._timeline.update()
-                                    self._log_message(f"Re-transcribed clip #{itm.index}: '{res}'", "ok")
-                            QTimer.singleShot(0, _done)
-                    except Exception as e:
-                        QTimer.singleShot(0, lambda err=e: self._log_message(f"Error transcribing clip: {err}", "error"))
-                import threading
-                threading.Thread(target=_worker, daemon=True).start()
+                target_item = d
                 break
+
+        if not target_item:
+            self._clip_editor.set_transcribing(False)
+            return
+
+        # 1. Determine best available audio source
+        audio_src = None
+        seg_start = target_item.start
+        seg_end = target_item.end
+
+        if target_item.audio_path and Path(target_item.audio_path).exists():
+            # Highest accuracy & fastest: transcribe sliced clip audio directly without re-slicing
+            audio_src = Path(target_item.audio_path)
+            seg_start = 0.0
+            seg_end = max(0.1, target_item.duration)
+        elif self._state.separated_vocals_path and Path(self._state.separated_vocals_path).exists():
+            audio_src = Path(self._state.separated_vocals_path)
+        elif self._state.work_audio_path and Path(self._state.work_audio_path).exists():
+            audio_src = Path(self._state.work_audio_path)
+        elif self._state.video_path and Path(self._state.video_path).exists():
+            audio_src = Path(self._state.video_path)
+
+        if not audio_src or not audio_src.exists():
+            self._clip_editor.set_transcribing(False)
+            self._log_message(tr("msg_transcribe_no_audio"), "warn")
+            self._show_toast(tr("msg_transcribe_err_title"), tr("msg_transcribe_no_audio"), "warn")
+            return
+
+        # 2. Lock UI & activate loading cues
+        self._clip_editor.set_transcribing(True)
+        self._log_message(
+            f"Transcribing clip #{target_item.index} ({seg_start:.2f}s - {seg_end:.2f}s) with Whisper AI in background...",
+            "info"
+        )
+
+        model_size = self._settings.get("whisper_model", WHISPER_MODEL_DEFAULT)
+        lang = self._settings.get("whisper_language", WHISPER_LANGUAGE_DEFAULT)
+        device = self._settings.get("compute_device", "auto")
+
+        self._clip_transcribe_worker = SingleClipTranscribeWorker(
+            item_index=target_item.index,
+            audio_src=audio_src,
+            start_time=seg_start,
+            end_time=seg_end,
+            model_size=model_size,
+            language=lang,
+            device=device,
+            shared_transcriber=self._shared_transcriber
+        )
+        self._clip_transcribe_worker.finished.connect(self._on_single_clip_transcribe_done)
+        self._clip_transcribe_worker.failed.connect(self._on_single_clip_transcribe_failed)
+        self._clip_transcribe_worker.start()
+
+    def _on_single_clip_transcribe_done(self, idx: int, text: str):
+        if self._clip_transcribe_worker:
+            self._shared_transcriber = self._clip_transcribe_worker.transcriber
+        self._clip_editor.set_transcribing(False)
+
+        target_item = None
+        for d in self._state.active_dialogues():
+            if d.index == idx:
+                target_item = d
+                break
+
+        if not target_item:
+            return
+
+        cleaned = text.strip()
+        if cleaned:
+            target_item.caption = cleaned
+            self._mark_dirty(True)
+            if self._clip_editor.item and self._clip_editor.item.index == target_item.index:
+                self._clip_editor.txt_caption.blockSignals(True)
+                self._clip_editor.txt_caption.setPlainText(cleaned)
+                self._clip_editor.txt_caption.blockSignals(False)
+                self._clip_editor._update_caption_stats()
+                self._clip_editor.flash_success()
+            self._dialogue_table.update_row(target_item, self._state)
+            self._timeline.update()
+            self._log_message(f"Re-transcribed clip #{target_item.index}: '{cleaned}'", "ok")
+            self._show_toast(
+                tr("msg_transcribe_done_title"),
+                tr("msg_transcribe_done_desc", index=target_item.index, text=cleaned[:40]),
+                "ok"
+            )
+        else:
+            self._log_message(f"No speech detected in clip #{target_item.index}", "warn")
+            self._show_toast(
+                tr("msg_transcribe_empty_title"),
+                tr("msg_transcribe_empty_desc", index=target_item.index),
+                "warn"
+            )
+
+    def _on_single_clip_transcribe_failed(self, idx: int, err_msg: str):
+        self._clip_editor.set_transcribing(False)
+        self._log_message(f"Error transcribing clip #{idx}: {err_msg}", "error")
+        self._show_toast(tr("msg_transcribe_err_title"), err_msg, "error")
 
     def _on_change_image(self, idx: int):
         for d in self._state.active_dialogues():

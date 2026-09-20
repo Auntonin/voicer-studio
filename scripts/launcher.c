@@ -47,15 +47,15 @@ static bool FindSystemPython(wchar_t *outPath, DWORD maxLen) {
 
 static void EnsureSettingsExist(const wchar_t *exeDir) {
     wchar_t settingsPath[MAX_PATH];
-    swprintf(settingsPath, MAX_PATH, L"%s\\settings.json", exeDir);
+    wsprintfW(settingsPath, L"%s\\settings.json", exeDir);
 
     if (!FileExists(settingsPath)) {
         wchar_t examplePath[MAX_PATH];
-        swprintf(examplePath, MAX_PATH, L"%s\\settings.example.json", exeDir);
+        wsprintfW(examplePath, L"%s\\settings.example.json", exeDir);
         if (FileExists(examplePath)) {
             CopyFileW(examplePath, settingsPath, TRUE);
         } else {
-            swprintf(examplePath, MAX_PATH, L"%s\\scripts\\settings.example.json", exeDir);
+            wsprintfW(examplePath, L"%s\\scripts\\settings.example.json", exeDir);
             if (FileExists(examplePath)) {
                 CopyFileW(examplePath, settingsPath, TRUE);
             }
@@ -63,23 +63,32 @@ static void EnsureSettingsExist(const wchar_t *exeDir) {
     }
 }
 
-static bool CheckEnvironmentReady(const wchar_t *exeDir, wchar_t *outPythonw, wchar_t *outMainPy) {
-    swprintf(outPythonw, MAX_PATH, L"%s\\.venv\\Scripts\\pythonw.exe", exeDir);
-    swprintf(outMainPy, MAX_PATH, L"%s\\main.py", exeDir);
+static bool CheckEnvironmentReady(const wchar_t *exeDir, wchar_t *outRunner, wchar_t *outMainPy) {
+    wchar_t hostExe[MAX_PATH];
+    wsprintfW(hostExe, L"%s\\.venv\\Scripts\\VoicerStudio.exe", exeDir);
+    wchar_t pythonw[MAX_PATH];
+    wsprintfW(pythonw, L"%s\\.venv\\Scripts\\pythonw.exe", exeDir);
+    wsprintfW(outMainPy, L"%s\\main.py", exeDir);
 
     wchar_t pysideDir[MAX_PATH];
-    swprintf(pysideDir, MAX_PATH, L"%s\\.venv\\Lib\\site-packages\\PySide6", exeDir);
+    wsprintfW(pysideDir, L"%s\\.venv\\Lib\\site-packages\\PySide6", exeDir);
 
-    // Both pythonw.exe, main.py and PySide6 site-packages must exist
-    return FileExists(outPythonw) && FileExists(outMainPy) && DirectoryExists(pysideDir);
+    if (FileExists(hostExe) && FileExists(outMainPy) && DirectoryExists(pysideDir)) {
+        wcscpy(outRunner, hostExe);
+        return true;
+    } else if (FileExists(pythonw) && FileExists(outMainPy) && DirectoryExists(pysideDir)) {
+        wcscpy(outRunner, pythonw);
+        return true;
+    }
+    return false;
 }
 
-static int LaunchVoicerStudio(const wchar_t *exeDir, const wchar_t *pythonw, const wchar_t *mainScript, PWSTR pCmdLine) {
+static int LaunchVoicerStudio(const wchar_t *exeDir, const wchar_t *runner, const wchar_t *mainScript, PWSTR pCmdLine) {
     wchar_t cmdLine[4096];
     if (pCmdLine && wcslen(pCmdLine) > 0) {
-        swprintf(cmdLine, 4096, L"\"%s\" \"%s\" %s", pythonw, mainScript, pCmdLine);
+        wsprintfW(cmdLine, L"\"%s\" \"%s\" %s", runner, mainScript, pCmdLine);
     } else {
-        swprintf(cmdLine, 4096, L"\"%s\" \"%s\"", pythonw, mainScript);
+        wsprintfW(cmdLine, L"\"%s\" \"%s\"", runner, mainScript);
     }
 
     STARTUPINFOW si;
@@ -90,9 +99,9 @@ static int LaunchVoicerStudio(const wchar_t *exeDir, const wchar_t *pythonw, con
     si.wShowWindow = SW_SHOWNORMAL;
     ZeroMemory(&pi, sizeof(pi));
 
-    // Launch pythonw directly as detached GUI process (ZERO console window)
+    // Launch directly as detached GUI process (ZERO console window)
     BOOL success = CreateProcessW(
-        pythonw,
+        runner,
         cmdLine,
         NULL,
         NULL,
@@ -107,7 +116,7 @@ static int LaunchVoicerStudio(const wchar_t *exeDir, const wchar_t *pythonw, con
     if (!success) {
         // Fallback without breakaway flag
         success = CreateProcessW(
-            pythonw,
+            runner,
             cmdLine,
             NULL,
             NULL,
@@ -123,13 +132,20 @@ static int LaunchVoicerStudio(const wchar_t *exeDir, const wchar_t *pythonw, con
     if (!success) {
         DWORD err = GetLastError();
         wchar_t errMsg[512];
-        swprintf(errMsg, 512, L"Failed to start Voicer Studio.\nWindows Error Code: %lu\n\nTarget: %s", err, pythonw);
+        wsprintfW(errMsg, L"Failed to start Voicer Studio.\nWindows Error Code: %lu\n\nTarget: %s", err, runner);
         MessageBoxW(NULL, errMsg, L"Voicer Studio — Launch Error", MB_OK | MB_ICONERROR);
         return 1;
     }
 
-    // Keep VoicerStudio.exe active as parent process host so Task Manager
-    // displays "Voicer Studio" with official brand icon instead of generic python.
+    // If runner is already VoicerStudio.exe, hand over cleanly to the host process
+    // so Task Manager displays a single top-level "Voicer Studio" app without lingering processes.
+    if (wcsstr(runner, L"VoicerStudio.exe") != NULL) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        return 0;
+    }
+
+    // Fallback runner (pythonw.exe): wait and monitor crash logs
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD exitCode = 0;
     GetExitCodeProcess(pi.hProcess, &exitCode);
@@ -139,10 +155,10 @@ static int LaunchVoicerStudio(const wchar_t *exeDir, const wchar_t *pythonw, con
     // If app crashed with non-zero code, inspect crash.log
     if (exitCode != 0) {
         wchar_t crashLogPath[MAX_PATH];
-        swprintf(crashLogPath, MAX_PATH, L"%s\\crash.log", exeDir);
+        wsprintfW(crashLogPath, L"%s\\crash.log", exeDir);
         if (FileExists(crashLogPath)) {
             wchar_t alertMsg[1024];
-            swprintf(alertMsg, 1024,
+            wsprintfW(alertMsg,
                 L"Voicer Studio closed unexpectedly (Exit code %lu).\n\n"
                 L"A crash log has been saved to:\n%s\n\n"
                 L"Please check the log for details.",
@@ -219,9 +235,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     // Locate setup.bat (check scripts\\setup.bat first, then root setup.bat)
     wchar_t setupBat[MAX_PATH];
-    swprintf(setupBat, MAX_PATH, L"%s\\scripts\\setup.bat", exeDir);
+    wsprintfW(setupBat, L"%s\\scripts\\setup.bat", exeDir);
     if (!FileExists(setupBat)) {
-        swprintf(setupBat, MAX_PATH, L"%s\\setup.bat", exeDir);
+        wsprintfW(setupBat, L"%s\\setup.bat", exeDir);
     }
 
     if (!FileExists(setupBat)) {

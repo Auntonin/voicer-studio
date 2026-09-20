@@ -589,8 +589,84 @@ class ClipEditor(QWidget):
             self.regenerate_audio_requested.emit(self.item.index)
 
     def on_regen_caption(self):
-        if self.item:
+        if self.item and not getattr(self, '_is_transcribing', False):
+            self.set_transcribing(True)
             self.regenerate_caption_requested.emit(self.item.index)
+
+    def set_transcribing(self, running: bool):
+        """Toggle active AI transcription visual cues and controls state."""
+        self._is_transcribing = running
+        if running:
+            self.btn_regen_caption.setEnabled(False)
+            self.btn_regen_caption.setText(tr("ed_transcribing"))
+            self.lbl_clip_badge.setText(f"⏳ {tr('ed_transcribing')}")
+            self.lbl_clip_badge.setStyleSheet(
+                "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #0c4a6e; "
+                "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
+            )
+            self.txt_caption.setReadOnly(True)
+            self.txt_caption.setPlaceholderText(tr("ed_transcribing_placeholder"))
+            self.txt_caption.setStyleSheet("""
+                QPlainTextEdit {
+                    background-color: #0c1929;
+                    color: #7dd3fc;
+                    border: 1.5px solid #0284c7;
+                    border-radius: 5px;
+                    padding: 6px 8px;
+                    font-size: 9.5pt;
+                    line-height: 1.4;
+                }
+            """)
+        else:
+            self.btn_regen_caption.setEnabled(True)
+            self.btn_regen_caption.setText(tr("ed_retranscribe"))
+            sparkles_icon = ASSETS_DIR / "icons" / "sparkles.svg"
+            if sparkles_icon.exists():
+                self.btn_regen_caption.setIcon(QIcon(str(sparkles_icon)))
+            if self.item:
+                self.lbl_clip_badge.setText(tr("ed_clip_badge", index=self.item.index))
+            else:
+                self.lbl_clip_badge.setText(tr("ed_no_selection"))
+            self.lbl_clip_badge.setStyleSheet(
+                "font-size: 7.5pt; font-weight: bold; color: #38bdf8; background: #132338; "
+                "border: 1px solid #0284c7; border-radius: 3px; padding: 1px 6px;"
+            )
+            self.txt_caption.setReadOnly(False)
+            self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
+            self._restore_caption_style()
+            self._update_caption_stats()
+
+    def _restore_caption_style(self):
+        self.txt_caption.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: #171717;
+                color: #f3f4f6;
+                border: 1px solid #333333;
+                border-radius: 5px;
+                padding: 6px 8px;
+                font-size: 9.5pt;
+                line-height: 1.4;
+            }}
+            QPlainTextEdit:focus {{
+                border-color: {COLORS['accent']};
+                background-color: #141414;
+            }}
+        """)
+
+    def flash_success(self):
+        """Brief pulse to highlight successfully transcribed text."""
+        self.txt_caption.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #052e16;
+                color: #86efac;
+                border: 1.5px solid #22c55e;
+                border-radius: 5px;
+                padding: 6px 8px;
+                font-size: 9.5pt;
+                line-height: 1.4;
+            }
+        """)
+        QTimer.singleShot(900, self._restore_caption_style)
 
     def on_delete(self):
         if self.item:
@@ -628,14 +704,18 @@ class ClipEditor(QWidget):
             self.lbl_clip_badge.setText(tr("ed_no_selection"))
             self.image_preview.setText(tr("ed_no_frame"))
             self.lbl_duration.setText(tr("ed_duration_val", dur=0.0))
+        if not getattr(self, '_is_transcribing', False):
+            self.btn_regen_caption.setText(tr("ed_retranscribe"))
+            self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
+            if not self.item:
+                self.lbl_clip_badge.setText(tr("ed_no_selection"))
+            else:
+                self.lbl_clip_badge.setText(tr("ed_clip_badge", index=self.item.index))
         else:
-            self.lbl_clip_badge.setText(tr("ed_clip_badge", index=self.item.index))
-            self.lbl_duration.setText(tr("ed_duration_val", dur=self.item.duration))
-        self._update_caption_stats()
-
-        self.btn_regen_caption.setText(tr("ed_retranscribe"))
+            self.btn_regen_caption.setText(tr("ed_transcribing"))
+            self.txt_caption.setPlaceholderText(tr("ed_transcribing_placeholder"))
+            self.lbl_clip_badge.setText(f"⏳ {tr('ed_transcribing')}")
         self.btn_regen_caption.setToolTip(tr("ed_retranscribe_tip"))
-        self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
 
         self.btn_split.setText(tr("ed_split_clip"))
         self.btn_split.setToolTip(tr("ed_split_clip_tip"))

@@ -137,8 +137,35 @@ def step_compile():
     ]
     res_gcc = subprocess.run(cmd_gcc, cwd=str(ROOT_DIR), capture_output=True, text=True)
     if res_gcc.returncode != 0:
-        log(f"gcc failed: {res_gcc.stderr}", "ERR")
+        log(f"gcc failed for launcher: {res_gcc.stderr}", "ERR")
         return False
+
+    size_kb = target_exe.stat().st_size / 1024.0
+    log(f"Successfully compiled launcher {target_exe.name} ({size_kb:.1f} KB) at {target_exe}!", "OK")
+
+    # Step 3: Compile host.c + launcher.res -> .venv/Scripts/VoicerStudio.exe
+    venv_scripts = ROOT_DIR / ".venv" / "Scripts"
+    host_c = SCRIPTS_DIR / "host.c"
+    if venv_scripts.exists() and host_c.exists():
+        host_exe = venv_scripts / "VoicerStudio.exe"
+        log(f"Compiling native process host ({host_exe.name}) into {venv_scripts}...", "INFO")
+        cmd_host = [
+            gcc,
+            "-O2",
+            "-mwindows",
+            "-municode",
+            "-s",
+            str(host_c),
+            str(res_file),
+            "-o",
+            str(host_exe)
+        ]
+        res_host = subprocess.run(cmd_host, cwd=str(ROOT_DIR), capture_output=True, text=True)
+        if res_host.returncode != 0:
+            log(f"gcc failed for host: {res_host.stderr}", "WARN")
+        else:
+            h_size_kb = host_exe.stat().st_size / 1024.0
+            log(f"Successfully compiled host {host_exe.name} ({h_size_kb:.1f} KB)!", "OK")
 
     # Clean up intermediate object
     if res_file.exists():
@@ -147,8 +174,6 @@ def step_compile():
         except Exception:
             pass
 
-    size_kb = target_exe.stat().st_size / 1024.0
-    log(f"Successfully compiled {target_exe.name} ({size_kb:.1f} KB) at {target_exe}!", "OK")
     return True
 
 if __name__ == "__main__":
