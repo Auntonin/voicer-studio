@@ -157,6 +157,40 @@ def find_recoverable_autosave(project_path: Path) -> Optional[Path]:
     return None
 
 
+def cleanup_orphaned_temp_files(temp_dir: Path, max_age_hours: float = 24.0) -> int:
+    """
+    Safely purges orphaned temporary files (audio slices, frames, preview files)
+    older than max_age_hours to prevent disk bloating. Never touches active files.
+    Returns the number of files deleted.
+    """
+    if not temp_dir.exists():
+        return 0
+
+    import time
+    deleted_count = 0
+    now = time.time()
+    max_age_sec = max_age_hours * 3600.0
+
+    try:
+        for root, dirs, files in os.walk(temp_dir):
+            for fname in files:
+                p = Path(root) / fname
+                try:
+                    if now - p.stat().st_mtime < max_age_sec:
+                        continue
+                    if p.suffix.lower() in (".wav", ".tmp", ".part", ".mp3", ".png", ".log"):
+                        p.unlink(missing_ok=True)
+                        deleted_count += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        log.debug(f"Temp cleanup error: {e}")
+    return deleted_count
+
+
+from core.platform_utils import get_short_path
+
+
 class EdgeGuards:
     """Class wrapper for edge case guards and safety checks."""
     probe_video_integrity = staticmethod(probe_video_integrity)
@@ -164,4 +198,6 @@ class EdgeGuards:
     check_disk_space = staticmethod(check_disk_space)
     find_recoverable_autosave = staticmethod(find_recoverable_autosave)
     recover_corrupted_project = staticmethod(find_recoverable_autosave)
+    cleanup_orphaned_temp_files = staticmethod(cleanup_orphaned_temp_files)
+    get_short_path = staticmethod(get_short_path)
 

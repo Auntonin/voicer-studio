@@ -17,15 +17,18 @@ class AudioExtractor:
         cmd = [
             "ffmpeg", "-y", "-i", str(video_path),
             "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "2",
+            "-threads", "0",
             str(output_path)
         ]
         from config import SUBPROCESS_FLAGS
+        file_mb = (video_path.stat().st_size / (1024 * 1024)) if video_path.exists() else 0
+        timeout_sec = max(600, int(file_mb * 0.5) + 300)
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec, creationflags=SUBPROCESS_FLAGS)
         except FileNotFoundError:
             raise RuntimeError("ffmpeg not found. Please install ffmpeg.")
         except subprocess.TimeoutExpired:
-            raise RuntimeError("ffmpeg audio extraction timed out.")
+            raise RuntimeError(f"ffmpeg audio extraction timed out after {timeout_sec}s.")
         if res.returncode != 0:
             logger.error(f"FFmpeg extract_audio failed: {res.stderr}")
             raise RuntimeError(f"FFmpeg audio extraction failed: {res.stderr[:200]}")

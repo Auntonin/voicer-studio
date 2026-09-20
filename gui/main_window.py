@@ -293,38 +293,12 @@ class MainWindow(QMainWindow):
         self._toast_anim.start()
 
     def _is_busy(self) -> bool:
-        """Returns True if a pipeline worker or export worker is currently running."""
+        """Returns True if a pipeline worker, transcribe worker, or export worker is currently running."""
         worker_running = hasattr(self, '_worker') and self._worker and self._worker.isRunning()
         export_running = hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning()
-        return bool(worker_running or export_running)
+        transcribe_running = hasattr(self, '_transcribe_worker') and self._transcribe_worker and self._transcribe_worker.isRunning()
+        return bool(worker_running or export_running or transcribe_running)
 
-    def closeEvent(self, event):
-        """Defensive window close handler: confirms termination if busy, prompts save if dirty."""
-        if self._is_busy():
-            reply = QMessageBox.question(
-                self,
-                tr("msg_quit_busy_title"),
-                tr("msg_quit_busy_desc"),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                if hasattr(self, '_worker') and self._worker and self._worker.isRunning():
-                    self._worker.cancel()
-                    self._worker.wait(1500)
-                if hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning():
-                    self._export_worker.wait(1500)
-                event.accept()
-            else:
-                event.ignore()
-            return
-
-        if self._is_dirty and (self._state.video_path or self._state.dialogues):
-            if not self._check_unsaved_changes():
-                event.ignore()
-                return
-
-        event.accept()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -2203,8 +2177,8 @@ class MainWindow(QMainWindow):
             self._log_message(f"Preview proxy error: {e}", "warn")
 
     def on_open_export_folder(self):
-        """Open the output pack folder in Windows File Explorer."""
-        import os
+        """Open the output pack folder in system File Manager (Explorer/Finder/FileManager)."""
+        from core.platform_utils import platform_utils
         out_dir = self._output_dir
         if not out_dir or not out_dir.exists():
             out_opt = self._settings.get("output_dir", "")
@@ -2214,7 +2188,7 @@ class MainWindow(QMainWindow):
                 out_dir = self._state.video_path.parent / "output"
 
         if out_dir and out_dir.exists():
-            os.startfile(out_dir)
+            platform_utils.open_in_file_manager(out_dir)
             self._log_message(f"Opened folder: {out_dir}", "info")
         else:
             QMessageBox.information(
@@ -2308,9 +2282,7 @@ class MainWindow(QMainWindow):
         self._worker = PipelineWorker(self._state, options)
         self._worker.signals.step_started.connect(self._progress_panel.set_step)
         self._worker.signals.step_completed.connect(self._progress_panel.on_step_complete)
-        self._worker.signals.step_failed.connect(
-            lambda step, msg: self._progress_panel.on_step_error(step)
-        )
+        self._worker.signals.step_failed.connect(self._on_pipeline_failed)
         self._worker.signals.progress.connect(self._progress_panel.set_progress)
         self._worker.signals.log_message.connect(self._progress_panel.log)
         self._worker.signals.dialogues_ready.connect(self._on_dialogues_ready)
@@ -2413,6 +2385,15 @@ class MainWindow(QMainWindow):
             self._worker.cancel()
             self._progress_panel.btn_cancel.setEnabled(False)
             self._act_analyze.setEnabled(True)
+
+    def _on_pipeline_failed(self, step: str, msg: str):
+        """Called if any pipeline step encounters an unhandled error."""
+        self._progress_panel.on_step_error(step)
+        self._act_analyze.setEnabled(True)
+        self._act_export.setEnabled(bool(self._state.dialogues))
+        self._progress_panel.btn_cancel.setEnabled(False)
+        self._log_message(f"Pipeline error at step '{step}': {msg}", "error")
+        self._show_toast(tr("msg_error_title") if "msg_error_title" in i18n._current_translations else "Error", f"{step}: {msg}", "error")
 
     def _ensure_all_clip_files_exist(self):
         """Ensures that all active dialogues have corresponding .m4a, .jpg, and .txt files in self._output_dir."""
@@ -2632,19 +2613,30 @@ class MainWindow(QMainWindow):
             self._log_message(f"Could not save settings: {e}", "warn")
 
     def closeEvent(self, event):
-        if self._worker and self._worker.isRunning():
+        if self._is_busy():
             reply = QMessageBox.question(
                 self,
-                tr("msg_pipeline_running_title"),
-                tr("msg_pipeline_running_cancel_prompt"),
+                tr("msg_quit_busy_title"),
+                tr("msg_quit_busy_desc"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
             if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
-            self._worker.cancel()
-            self._worker.wait(3000)
+
+            # Gracefully terminate background workers
+            if hasattr(self, '_worker') and self._worker and self._worker.isRunning():
+                self._worker.cancel()
+                self._worker.wait(2000)
+            if hasattr(self, '_transcribe_worker') and self._transcribe_worker and self._transcribe_worker.isRunning():
+                self._transcribe_worker.wait(1500)
+            if hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning():
+                if hasattr(self._export_worker, 'cancel'):
+                    self._export_worker.cancel()
+                self._export_worker.wait(2000)
+            if hasattr(self, '_proxy_thread') and self._proxy_thread and self._proxy_thread.isRunning():
+                self._proxy_thread.wait(1000)
 
         # Prompt for unsaved project changes
         if self._is_dirty and (self._state.video_path or self._state.dialogues):
@@ -2678,14 +2670,23 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+        # Release GPU resources and memory on exit
+        try:
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
+        except Exception:
+            pass
+
         event.accept()
 
     def _build_stylesheet(self) -> str:
+        from core.platform_utils import platform_utils
+        font_fam = platform_utils.get_default_font_family()
         return f"""
         QMainWindow, QWidget {{
             background-color: {COLORS['bg_primary']};
             color: {COLORS['text_primary']};
-            font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
+            font-family: {font_fam};
             font-size: 9.5pt;
         }}
         QMenuBar {{

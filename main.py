@@ -54,11 +54,22 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     import traceback
     err_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     try:
-        (PROJECT_ROOT / "crash.log").write_text(err_text, encoding="utf-8")
+        from core.platform_utils import get_crash_log_path
+        crash_log = get_crash_log_path()
+        crash_log.write_text(err_text, encoding="utf-8")
     except Exception:
-        pass
+        try:
+            (PROJECT_ROOT / "crash.log").write_text(err_text, encoding="utf-8")
+        except Exception:
+            pass
 
+def handle_thread_exception(args):
+    handle_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
+import threading
 sys.excepthook = handle_exception
+if hasattr(threading, "excepthook"):
+    threading.excepthook = handle_thread_exception
 
 # ── App config ────────────────────────────────────────────────────────────────
 from config import APP_NAME, APP_VERSION, COLORS, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
@@ -234,9 +245,19 @@ def main():
     elif ico_path.exists():
         icon_pixmap = QPixmap(str(ico_path))
 
-    # App-wide font
-    font = QFont("Segoe UI", 10)
+    # App-wide cross-platform typography with native Thai font fallbacks
+    from core.platform_utils import get_default_font_family, get_thai_font_family
+    font = QFont(get_default_font_family(), 9)
+    font.setFamilies([get_default_font_family(), get_thai_font_family(), "sans-serif"])
     app.setFont(font)
+
+    # Safe background cleanup of orphaned temp files from past sessions
+    try:
+        from core.edge_guards import EdgeGuards
+        from config import TEMP_DIR
+        EdgeGuards.cleanup_orphaned_temp_files(TEMP_DIR, max_age_hours=24)
+    except Exception:
+        pass
 
     # ── Modern Adobe-Style Splash Screen ───────────────────────────────────────
     splash = StudioSplashScreen(icon_pixmap)

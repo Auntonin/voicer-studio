@@ -15,6 +15,7 @@ from PySide6.QtGui import QIcon, QFont
 
 from config import ASSETS_DIR
 from core.i18n import tr
+from core.platform_utils import platform_utils
 from gui.ui_utils import apply_dark_title_bar
 
 
@@ -278,18 +279,19 @@ class ShortcutsDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        badge_style = """
-            QLabel {
+        font_family = platform_utils.get_default_font_family()
+        badge_style = f"""
+            QLabel {{
                 background-color: #27272a;
                 border: 1px solid #3f3f46;
                 border-bottom: 2px solid #52525b;
                 border-radius: 4px;
                 padding: 2px 7px;
                 color: #f4f4f5;
-                font-family: 'Segoe UI', 'Leelawadee UI', 'Tahoma', system-ui, sans-serif;
+                font-family: {font_family};
                 font-weight: 600;
                 font-size: 8pt;
-            }
+            }}
         """
         sep_style = "color: #71717a; font-size: 8pt; font-weight: 500; border: none;"
         or_style = "color: #52525b; font-size: 7.5pt; font-weight: bold; margin: 0 3px; border: none;"
@@ -307,12 +309,12 @@ class ShortcutsDialog(QDialog):
                         plus_lbl = QLabel("+")
                         plus_lbl.setStyleSheet(sep_style)
                         layout.addWidget(plus_lbl)
-                    txt = tr(token) if token.startswith("sc_key_") else token
+                    txt = tr(token) if token.startswith("sc_key_") else platform_utils.format_shortcut(token)
                     k_lbl = QLabel(txt)
                     k_lbl.setStyleSheet(badge_style)
                     layout.addWidget(k_lbl)
             else:
-                txt = tr(combo_str) if combo_str.startswith("sc_key_") else combo_str
+                txt = tr(combo_str) if combo_str.startswith("sc_key_") else platform_utils.format_shortcut(combo_str)
                 k_lbl = QLabel(txt)
                 k_lbl.setStyleSheet(badge_style)
                 layout.addWidget(k_lbl)

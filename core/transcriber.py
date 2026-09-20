@@ -29,8 +29,9 @@ class Transcriber:
             try:
                 self.model = WhisperModel(self.model_size, **whisper_kwargs)
             except Exception as e:
-                logger.warning(f"Failed loading on {dev_info.name} ({e}), falling back to CPU int8...")
-                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=4)
+                logger.warning(f"Failed loading on {dev_info.name} ({e}), releasing memory and falling back to CPU int8...")
+                device_manager.release_gpu_memory()
+                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=max(1, min(os.cpu_count() or 4, 8)))
                 
             self.available = True
         except ImportError:
@@ -77,7 +78,8 @@ class Transcriber:
                 transcribed_ok = False
 
         if not transcribed_ok:
-            temp_wav = TEMP_DIR / f"temp_transcribe_{start:.2f}_{end:.2f}.wav"
+            import uuid, os
+            temp_wav = TEMP_DIR / f"temp_transcribe_{os.getpid()}_{uuid.uuid4().hex[:8]}.wav"
             cmd = [
                 "ffmpeg", "-y",
                 "-ss", f"{start:.3f}",
@@ -91,12 +93,12 @@ class Transcriber:
                 subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, creationflags=SUBPROCESS_FLAGS)
                 segments, _ = self.model.transcribe(str(temp_wav), **transcribe_kwargs)
                 raw_text = " ".join([segment.text.strip() for segment in segments]).strip()
-                temp_wav.unlink(missing_ok=True)
             except Exception as e2:
                 logger.error(f"Error transcribing segment: {e2}")
+                return ""
+            finally:
                 if temp_wav.exists():
                     temp_wav.unlink(missing_ok=True)
-                return ""
 
         # Apply ThaiTextCleaner post-processing if language is explicitly Thai
         if self.language == 'th':

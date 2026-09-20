@@ -17,7 +17,16 @@ class FrameExtractor:
         try:
             import cv2
             self.cv2 = cv2
-            self.cap = cv2.VideoCapture(str(video_path))
+            self._frame_cache = {}
+            v_str = str(video_path)
+            self.cap = cv2.VideoCapture(v_str)
+            if not self.cap.isOpened():
+                # Fallback to short path for Thai / non-ASCII unicode paths on Windows
+                from core.platform_utils import get_short_path
+                short_v = get_short_path(v_str)
+                if short_v != v_str:
+                    self.cap = cv2.VideoCapture(short_v)
+
             self.available = self.cap.isOpened()
             if not self.available:
                 logger.error(f"Failed to open video: {video_path}")
@@ -36,10 +45,20 @@ class FrameExtractor:
     def extract_frame(self, timestamp_sec: float) -> np.ndarray:
         if not self.available or self.cv2 is None:
             return None
+
+        # Check in-memory frame cache first
+        ts_key = round(timestamp_sec, 1)
+        if hasattr(self, '_frame_cache') and ts_key in self._frame_cache:
+            return self._frame_cache[ts_key]
+
         try:
             self.cap.set(self.cv2.CAP_PROP_POS_MSEC, timestamp_sec * 1000)
             ret, frame = self.cap.read()
-            if ret:
+            if ret and frame is not None:
+                if hasattr(self, '_frame_cache'):
+                    if len(self._frame_cache) >= 50:
+                        self._frame_cache.pop(next(iter(self._frame_cache)))
+                    self._frame_cache[ts_key] = frame
                 return frame
         except Exception as e:
             logger.warning(f"Error reading frame at {timestamp_sec:.2f}s: {e}")

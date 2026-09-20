@@ -670,7 +670,9 @@ class ClipEditor(QWidget):
             item_idx = self.item.index
             def _async_slice():
                 try:
-                    tmp = Path(tempfile.gettempdir()) / f"preview_clip_{item_idx}.wav"
+                    import uuid
+                    uid = uuid.uuid4().hex[:8]
+                    tmp = Path(tempfile.gettempdir()) / f"preview_clip_{item_idx}_{uid}.wav"
                     cmd = [
                         "ffmpeg", "-y", "-ss", f"{item_start:.3f}",
                         "-i", str(audio_src), "-t", f"{item_dur:.3f}",

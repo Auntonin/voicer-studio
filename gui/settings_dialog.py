@@ -103,6 +103,32 @@ class SettingsDialog(QDialog):
         form_ai.addRow(self.lbl_row_device, device_box)
         self._populate_device_combo()
         self.combo_device.currentIndexChanged.connect(self._on_device_changed)
+
+        # Concurrency & Performance Profile Selector
+        self.combo_perf_profile = QComboBox()
+        self.lbl_row_perf_profile = QLabel(tr("cfg_perf_profile"))
+        self.lbl_perf_hint = QLabel()
+        self.lbl_perf_hint.setStyleSheet("color: #888888; font-size: 8pt;")
+        self.lbl_perf_hint.setWordWrap(True)
+        perf_box = QVBoxLayout()
+        perf_box.setContentsMargins(0, 0, 0, 0)
+        perf_box.setSpacing(2)
+        perf_box.addWidget(self.combo_perf_profile)
+        perf_box.addWidget(self.lbl_perf_hint)
+        form_ai.addRow(self.lbl_row_perf_profile, perf_box)
+
+        self.spin_custom_workers = QSpinBox()
+        self.spin_custom_workers.setRange(1, 32)
+        self.spin_custom_workers.setValue(4)
+        self.spin_custom_workers.setSuffix(" threads")
+        self.lbl_row_custom_workers = QLabel(tr("cfg_custom_workers"))
+        form_ai.addRow(self.lbl_row_custom_workers, self.spin_custom_workers)
+        self.lbl_row_custom_workers.setVisible(False)
+        self.spin_custom_workers.setVisible(False)
+
+        self._populate_perf_combo()
+        self.combo_perf_profile.currentIndexChanged.connect(self._on_perf_profile_changed)
+        self.spin_custom_workers.valueChanged.connect(self._on_perf_profile_changed)
         
         hf_layout = QHBoxLayout()
         self.edit_hf = QLineEdit()
@@ -303,6 +329,50 @@ class SettingsDialog(QDialog):
         dev = device_manager.get_optimal_device(cur_data)
         if hasattr(self, 'lbl_device_hint'):
             self.lbl_device_hint.setText(dev.description)
+        if hasattr(self, 'combo_perf_profile') and hasattr(self, '_on_perf_profile_changed'):
+            self._on_perf_profile_changed()
+
+    def _populate_perf_combo(self):
+        """Populate performance & concurrency profile options."""
+        if not hasattr(self, 'combo_perf_profile'):
+            return
+        curr_data = self.combo_perf_profile.currentData() if self.combo_perf_profile.count() > 0 else "auto"
+        self.combo_perf_profile.blockSignals(True)
+        self.combo_perf_profile.clear()
+        self.combo_perf_profile.addItem(tr("cfg_perf_auto"), userData="auto")
+        self.combo_perf_profile.addItem(tr("cfg_perf_high"), userData="high")
+        self.combo_perf_profile.addItem(tr("cfg_perf_balanced"), userData="balanced")
+        self.combo_perf_profile.addItem(tr("cfg_perf_eco"), userData="eco")
+        self.combo_perf_profile.addItem(tr("cfg_perf_custom"), userData="custom")
+        idx = self.combo_perf_profile.findData(curr_data)
+        if idx >= 0:
+            self.combo_perf_profile.setCurrentIndex(idx)
+        self.combo_perf_profile.blockSignals(False)
+        self._on_perf_profile_changed()
+
+    def _on_perf_profile_changed(self):
+        if not hasattr(self, 'combo_perf_profile'):
+            return
+        from core.device_manager import device_manager
+        cur_data = self.combo_perf_profile.currentData() or "auto"
+        is_custom = (cur_data == "custom")
+        if hasattr(self, 'lbl_row_custom_workers') and hasattr(self, 'spin_custom_workers'):
+            self.lbl_row_custom_workers.setVisible(is_custom)
+            self.spin_custom_workers.setVisible(is_custom)
+
+        custom_w = self.spin_custom_workers.value() if (is_custom and hasattr(self, 'spin_custom_workers')) else None
+        cfg = device_manager.get_optimal_concurrency_config(profile=cur_data, custom_workers=custom_w)
+        desc_map = {
+            "auto": tr("cfg_perf_desc_auto"),
+            "high": tr("cfg_perf_desc_high"),
+            "balanced": tr("cfg_perf_desc_balanced"),
+            "eco": tr("cfg_perf_desc_eco"),
+            "custom": tr("cfg_perf_desc_custom"),
+        }
+        desc = desc_map.get(cur_data, "")
+        info = f"{desc} [{cfg.tier.value.upper()} Tier | Workers: {cfg.clip_workers} | Whisper: {cfg.whisper_threads}T | RAM: {cfg.ram_gb:.1f}GB]"
+        if hasattr(self, 'lbl_perf_hint'):
+            self.lbl_perf_hint.setText(info)
 
     def _populate_proxy_combo(self):
         """Populate proxy resolution options with localized labels while maintaining index parity."""
@@ -359,6 +429,12 @@ class SettingsDialog(QDialog):
             dev_idx = self.combo_device.findData(curr_dev)
             if dev_idx >= 0:
                 self.combo_device.setCurrentIndex(dev_idx)
+        if hasattr(self, 'lbl_row_perf_profile'):
+            self.lbl_row_perf_profile.setText(tr("cfg_perf_profile"))
+        if hasattr(self, 'lbl_row_custom_workers'):
+            self.lbl_row_custom_workers.setText(tr("cfg_custom_workers"))
+        if hasattr(self, 'combo_perf_profile'):
+            self._populate_perf_combo()
         if hasattr(self, 'lbl_row_hf'):
             self.lbl_row_hf.setText(tr("cfg_hf_token"))
         if hasattr(self, 'lbl_row_speakers'):
@@ -472,6 +548,15 @@ class SettingsDialog(QDialog):
             self.combo_device.setCurrentIndex(0)
         self._on_device_changed()
 
+        perf_profile = settings.get("performance_profile", "auto")
+        p_idx = self.combo_perf_profile.findData(perf_profile)
+        if p_idx >= 0:
+            self.combo_perf_profile.setCurrentIndex(p_idx)
+        else:
+            self.combo_perf_profile.setCurrentIndex(0)
+        self.spin_custom_workers.setValue(settings.get("custom_workers", 4))
+        self._on_perf_profile_changed()
+
         self.edit_hf.setText(settings.get("hf_token", ""))
         
         model = settings.get("whisper_model", "large-v3")
@@ -570,6 +655,8 @@ class SettingsDialog(QDialog):
         return {
             "app_language":           app_lang,
             "compute_device":         self.combo_device.currentData() or "auto",
+            "performance_profile":    self.combo_perf_profile.currentData() or "auto",
+            "custom_workers":         self.spin_custom_workers.value(),
             "hf_token":               self.edit_hf.text().strip(),
             "whisper_model":          self.combo_whisper.currentText(),
             "whisper_language":       lang_map.get(lang_text, "th"),

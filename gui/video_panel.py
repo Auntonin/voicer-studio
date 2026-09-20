@@ -58,6 +58,7 @@ class VideoPanel(QFrame):
 
         self.player.positionChanged.connect(self._on_player_position_changed)
         self.player.durationChanged.connect(self._on_player_duration_changed)
+        self.player.errorOccurred.connect(self._on_player_error)
 
         # ── Main Layout ─────────────────────────────────────────────────
         main_layout = QVBoxLayout(self)
@@ -483,4 +484,13 @@ class VideoPanel(QFrame):
         self._info_label.setText("")
         self._update_badge("ORIGINAL")
         self.btn_play.setText(tr("vp_btn_play"))
+
+    def _on_player_error(self, error, error_string: str = ""):
+        """Gracefully handle playback errors such as audio device disconnect or corrupt media frame."""
+        import logging
+        log = logging.getLogger("VoicerStudio")
+        log.warning(f"VideoPanel playback error ({error}): {error_string}")
+        if hasattr(self, 'btn_play'):
+            self.btn_play.setText(tr("vp_btn_play"))
+
 

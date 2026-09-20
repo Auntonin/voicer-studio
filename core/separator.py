@@ -93,6 +93,7 @@ class VoiceSeparator:
             bg_path = audio_path
 
         logger.info(f"RoFormer separation complete! Vocals: {vocals_path.name}, Backing Track: {bg_path.name}")
+        device_manager.release_gpu_memory()
         return vocals_path, bg_path
 
     def _separate_demucs(self, audio_path: Path, output_dir: Path) -> Tuple[Path, Path]:

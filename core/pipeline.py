@@ -610,7 +610,12 @@ class PipelineWorker(QThread):
             elapsed = time.time() - self._start_time
             self._log(f"Pipeline error after {elapsed:.1f}s: {e}", "error")
             self._log(tb, "error")
+            err_step = self.state.current_step or PipelineStep.ERROR
             self.state.current_step = PipelineStep.ERROR
+            self.signals.step_failed.emit(err_step, str(e))
+        finally:
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
 
 
 # ── Export Worker ─────────────────────────────────────────────────────────────

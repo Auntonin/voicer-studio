@@ -31,6 +31,7 @@ class ClipGenerator:
             "-c:a", "libmp3lame",
             "-b:a", AUDIO_EXPORT_BITRATE,
             "-ar", str(AUDIO_SAMPLE_RATE),
+            "-threads", "1",
             str(output_path)
         ]
         from config import SUBPROCESS_FLAGS
@@ -64,7 +65,11 @@ class ClipGenerator:
         if total == 0:
             return
 
-        workers = max_workers or min(8, max(2, os.cpu_count() or 4))
+        if max_workers is not None:
+            workers = max_workers
+        else:
+            from core.device_manager import device_manager
+            workers = device_manager.get_optimal_concurrency_config().clip_workers
 
         def _task(item: DialogueItem):
             if cancel_check and cancel_check():
@@ -78,6 +83,10 @@ class ClipGenerator:
             future_to_item = {executor.submit(_task, item): item for item in dialogues}
             for future in as_completed(future_to_item):
                 if cancel_check and cancel_check():
+                    try:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        executor.shutdown(wait=False)
                     break
                 try:
                     item, ok = future.result()

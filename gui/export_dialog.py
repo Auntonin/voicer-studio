@@ -739,8 +739,9 @@ class ExportDialog(QDialog):
             self.reject()
 
     def _open_output_folder(self):
-        folder = self.target_zip_path.parent
-        if sys.platform == "win32" and self.target_zip_path.exists():
-            subprocess.run(["explorer", f"/select,{self.target_zip_path}"], creationflags=SUBPROCESS_FLAGS)
+        from core.platform_utils import platform_utils
+        if self.target_zip_path and self.target_zip_path.exists():
+            platform_utils.reveal_in_file_manager(self.target_zip_path)
         else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+            folder = self.target_zip_path.parent if self.target_zip_path else Path.cwd()
+            platform_utils.open_in_file_manager(folder)

@@ -101,8 +101,10 @@ def check_for_updates(
         (has_update: bool, update_info: Optional[UpdateInfo], error_message: Optional[str])
     """
     url = custom_url or f"https://api.github.com/repos/{repo}/releases/latest"
+    import platform
+    os_name = "macOS" if sys.platform == "darwin" else ("Linux" if sys.platform.startswith("linux") else "Windows")
     headers = {
-        "User-Agent": f"VoicerStudio/{current_version} (Windows; x64)",
+        "User-Agent": f"VoicerStudio/{current_version} ({os_name}; {platform.machine()})",
         "Accept": "application/vnd.github.v3+json",
     }
     
@@ -134,20 +136,26 @@ def check_for_updates(
     remote_version = tag_name.lstrip("vV")
     has_update = is_version_newer(remote_version, current_version)
     
-    # Find best downloadable asset
+    # Find best downloadable asset for current OS
     assets = data.get("assets", [])
     best_asset = None
     
-    # Priority 1: .exe or .zip that matches VoicerStudio
+    os_tag = "mac" if sys.platform == "darwin" else ("linux" if sys.platform.startswith("linux") else "win")
+    
+    # Priority 1: VoicerStudio asset matching current OS tag
     for asset in assets:
         name = asset.get("name", "").lower()
-        if "voicer" in name and (name.endswith(".exe") or name.endswith(".zip")):
+        if "voicer" in name and os_tag in name and (name.endswith(".zip") or name.endswith(".dmg") or name.endswith(".appimage") or name.endswith(".exe")):
             best_asset = asset
             break
             
-    # Priority 2: Any .zip or .exe asset
+    # Priority 2: Any matching VoicerStudio package
     if not best_asset:
         for asset in assets:
+            name = asset.get("name", "").lower()
+            if "voicer" in name and (name.endswith(".exe") or name.endswith(".zip") or name.endswith(".dmg")):
+                best_asset = asset
+                break
             name = asset.get("name", "").lower()
             if name.endswith(".zip") or name.endswith(".exe"):
                 best_asset = asset
