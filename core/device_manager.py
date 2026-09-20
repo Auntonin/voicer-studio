@@ -80,15 +80,30 @@ class DeviceManager:
 
         devices: List[ComputeDevice] = []
 
+        # Query Windows GPU controllers if on Windows
+        win_gpus: List[str] = []
+        if sys.platform == "win32":
+            try:
+                res = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", 
+                     "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
+                    capture_output=True, text=True, timeout=3
+                )
+                if res.returncode == 0:
+                    win_gpus = [line.strip() for line in res.stdout.splitlines() if line.strip() and "virtual" not in line.lower()]
+            except Exception:
+                pass
+
         # ── 1. Check NVIDIA CUDA ──────────────────────────────────────────────
+        cuda_found = False
         try:
             import torch
             if torch.cuda.is_available():
+                cuda_found = True
                 for i in range(torch.cuda.device_count()):
                     name = torch.cuda.get_device_name(i)
                     props = torch.cuda.get_device_properties(i)
                     total_vram = props.total_memory
-                    # Compute capability >= 7.0 supports fast Tensor Core FP16
                     cap = props.major + props.minor / 10.0
                     fp16 = cap >= 5.3
                     devices.append(ComputeDevice(
@@ -101,12 +116,30 @@ class DeviceManager:
                         description=f"NVIDIA CUDA Hardware Acceleration (Compute {cap:.1f})"
                     ))
         except Exception as e:
-            log.debug(f"CUDA check failed or not present: {e}")
+            log.debug(f"CUDA check error: {e}")
+
+        # If NVIDIA GPU exists in Windows hardware but PyTorch is running CPU build
+        if not cuda_found:
+            for gname in win_gpus:
+                gl = gname.lower()
+                if "nvidia" in gl or "geforce" in gl or "rtx" in gl or "gtx" in gl:
+                    devices.append(ComputeDevice(
+                        backend=DeviceBackend.CUDA,
+                        device_id="cuda",
+                        name=f"{gname} (NVENC HW Accel)",
+                        vram_bytes=0,
+                        is_gpu=True,
+                        fp16_supported=False,
+                        description="NVIDIA GPU detected. Video encoding accelerated via NVENC (CPU AI Pipeline)"
+                    ))
+                    break
 
         # ── 2. Check DirectML (AMD Radeon / Intel Arc / Windows DirectX 12) ───
+        directml_found = False
         try:
             import torch_directml
             if torch_directml.is_available():
+                directml_found = True
                 for i in range(torch_directml.device_count()):
                     name = torch_directml.device_name(i)
                     devices.append(ComputeDevice(
@@ -118,33 +151,32 @@ class DeviceManager:
                         fp16_supported=False,
                         description="DirectX 12 Hardware Acceleration via DirectML"
                     ))
-        except ImportError:
-            # Check if an AMD or Intel GPU exists on Windows so we can at least detect it
-            if sys.platform == "win32":
-                try:
-                    res = subprocess.run(
-                        ["powershell", "-NoProfile", "-Command", 
-                         "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
-                        capture_output=True, text=True, timeout=3
-                    )
-                    if res.returncode == 0:
-                        gpu_names = [line.strip() for line in res.stdout.splitlines() if line.strip()]
-                        for gname in gpu_names:
-                            gl = gname.lower()
-                            if ("amd" in gl or "radeon" in gl or "intel" in gl or "arc" in gl) and "virtual" not in gl:
-                                devices.append(ComputeDevice(
-                                    backend=DeviceBackend.DIRECTML,
-                                    device_id="directml",
-                                    name=f"{gname} (DirectX 12)",
-                                    vram_bytes=0,
-                                    is_gpu=True,
-                                    fp16_supported=False,
-                                    description="DirectX 12 GPU Detected (DirectML / HW Encoding)"
-                                ))
-                except Exception:
-                    pass
-        except Exception as e:
-            log.debug(f"DirectML check error: {e}")
+        except Exception:
+            pass
+
+        if not directml_found:
+            for gname in win_gpus:
+                gl = gname.lower()
+                if "amd" in gl or "radeon" in gl:
+                    devices.append(ComputeDevice(
+                        backend=DeviceBackend.DIRECTML,
+                        device_id="directml",
+                        name=f"{gname} (DirectX 12 / AMF)",
+                        vram_bytes=0,
+                        is_gpu=True,
+                        fp16_supported=False,
+                        description="AMD Radeon GPU detected. Video encoding accelerated via AMF (CPU AI Pipeline)"
+                    ))
+                elif "intel" in gl or "arc" in gl or "iris" in gl:
+                    devices.append(ComputeDevice(
+                        backend=DeviceBackend.DIRECTML,
+                        device_id="directml",
+                        name=f"{gname} (DirectX 12 / QSV)",
+                        vram_bytes=0,
+                        is_gpu=True,
+                        fp16_supported=False,
+                        description="Intel GPU detected. Video encoding accelerated via QuickSync (CPU AI Pipeline)"
+                    ))
 
         # ── 3. Check Apple Silicon Metal (MPS) ────────────────────────────────
         try:
@@ -263,12 +295,26 @@ class DeviceManager:
         Ensures safe compute types (avoids 'Half not implemented on CPU' crashes).
         """
         if device.backend == DeviceBackend.CUDA:
-            # Use float16 for CUDA, with int8 fallback
-            return {
-                "device": "cuda",
-                "compute_type": "float16" if device.fp16_supported else "int8",
-                "cpu_threads": 4,
-            }
+            cuda_ready = False
+            try:
+                import torch
+                cuda_ready = torch.cuda.is_available()
+            except Exception:
+                pass
+
+            if cuda_ready:
+                return {
+                    "device": "cuda",
+                    "compute_type": "float16" if device.fp16_supported else "int8",
+                    "cpu_threads": 4,
+                }
+            else:
+                # GPU is present on host, but PyTorch runtime is CPU-only
+                return {
+                    "device": "cpu",
+                    "compute_type": "int8",
+                    "cpu_threads": max(1, min(os.cpu_count() or 4, 8)),
+                }
         elif device.backend == DeviceBackend.CPU:
             # int8 on CPU is 3-4x faster than float32 on modern x86/ARM CPUs
             return {
@@ -290,13 +336,21 @@ class DeviceManager:
         Returns CLI parameters for Demucs vocal separation.
         """
         if device.backend == DeviceBackend.CUDA:
-            return ["-d", "cuda"]
-        elif device.backend == DeviceBackend.MPS:
+            cuda_ready = False
+            try:
+                import torch
+                cuda_ready = torch.cuda.is_available()
+            except Exception:
+                pass
+            if cuda_ready:
+                return ["-d", "cuda"]
+
+        if device.backend == DeviceBackend.MPS:
             return ["-d", "mps"]
-        else:
-            # CPU multi-threaded
-            jobs = max(1, (os.cpu_count() or 4) // 2)
-            return ["-d", "cpu", "-j", str(jobs)]
+
+        # CPU multi-threaded
+        jobs = max(1, (os.cpu_count() or 4) // 2)
+        return ["-d", "cpu", "-j", str(jobs)]
 
     @classmethod
     def get_ffmpeg_hwaccel_encoder(cls) -> Tuple[str, List[str]]:
@@ -320,18 +374,17 @@ class DeviceManager:
 
             devices = cls.detect_available_devices()
             has_cuda = any(d.backend == DeviceBackend.CUDA for d in devices)
-            has_directml = any(d.backend == DeviceBackend.DIRECTML for d in devices)
 
             # NVIDIA NVENC
-            if has_cuda and "h264_nvenc" in out:
+            if (has_cuda or any("nvidia" in d.name.lower() or "geforce" in d.name.lower() for d in devices)) and "h264_nvenc" in out:
                 return "h264_nvenc", ["-preset", "p4", "-cq", "23"]
 
             # AMD AMF
-            if has_directml and "h264_amf" in out:
-                return "h264_amf", ["-quality", "speed"]
+            if any("amd" in d.name.lower() or "radeon" in d.name.lower() for d in devices) and "h264_amf" in out:
+                return "h264_amf", ["-quality", "speed", "-usage", "transcoding"]
 
             # Intel QSV
-            if "h264_qsv" in out and (has_directml or not has_cuda):
+            if (any("intel" in d.name.lower() or "arc" in d.name.lower() for d in devices) or not has_cuda) and "h264_qsv" in out:
                 return "h264_qsv", ["-preset", "faster"]
 
         except Exception as e:

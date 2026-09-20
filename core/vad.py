@@ -79,7 +79,7 @@ class VADDetector:
         
         wav = read_audio(str(audio_path), sampling_rate=16000)
         speech_timestamps = get_speech_timestamps(
-            wav, model, sampling_rate=16000, 
+            wav, self._silero_model, sampling_rate=16000, 
             threshold=threshold,
             min_speech_duration_ms=min_speech_ms,
             min_silence_duration_ms=min_silence_ms

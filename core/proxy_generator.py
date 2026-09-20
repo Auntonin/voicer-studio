@@ -89,21 +89,28 @@ class ProxyGenerator:
         if temp_proxy.exists():
             temp_proxy.unlink(missing_ok=True)
 
-        use_nvenc = check_nvenc_available()
-        logger.info(f"Generating preview proxy (height={target_height}, nvenc={use_nvenc}) for {video_path.name}")
+        from core.device_manager import device_manager
+        encoder, _ = device_manager.get_ffmpeg_hwaccel_encoder()
+        logger.info(f"Generating preview proxy (height={target_height}, encoder={encoder}) for {video_path.name}")
 
         vf_filter = f"scale=-2:{target_height}"
         gop_str = str(PREVIEW_PROXY_GOP)
 
-        if use_nvenc:
+        if encoder != "libx264":
+            if encoder == "h264_nvenc":
+                enc_args = ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-cq", "28"]
+            elif encoder == "h264_amf":
+                enc_args = ["-c:v", "h264_amf", "-quality", "speed", "-usage", "transcoding"]
+            elif encoder == "h264_qsv":
+                enc_args = ["-c:v", "h264_qsv", "-preset", "veryfast"]
+            else:
+                enc_args = ["-c:v", encoder]
+
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(video_path),
                 "-vf", vf_filter,
-                "-c:v", "h264_nvenc",
-                "-preset", "p1",
-                "-tune", "ll",
-                "-cq", "28",
+                *enc_args,
                 "-g", gop_str,
                 "-c:a", "aac",
                 "-b:a", "128k",
@@ -114,12 +121,12 @@ class ProxyGenerator:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, creationflags=SUBPROCESS_FLAGS)
                 if res.returncode == 0 and temp_proxy.exists() and temp_proxy.stat().st_size > 1024:
                     temp_proxy.replace(proxy_path)
-                    logger.info(f"NVENC Proxy successfully generated: {proxy_path}")
+                    logger.info(f"{encoder.upper()} Proxy successfully generated: {proxy_path}")
                     return proxy_path
                 else:
-                    logger.warning(f"NVENC proxy generation failed (code {res.returncode}), falling back to CPU...")
+                    logger.warning(f"{encoder} proxy generation failed (code {res.returncode}), falling back to CPU...")
             except Exception as e:
-                logger.warning(f"NVENC proxy error ({e}), falling back to CPU...")
+                logger.warning(f"{encoder} proxy error ({e}), falling back to CPU...")
 
         # Fallback to libx264 ultrafast
         cmd_cpu = [
