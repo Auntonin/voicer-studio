@@ -62,15 +62,16 @@ class ETATracker:
         dp = pct - self._samples[0][1]
         if dt > 0.4 and dp > 0.01:
             recent_rate = dp / dt  # % per second
-            rem_pct = max(0.0, 100.0 - pct)
-            raw_eta = rem_pct / recent_rate
+            if recent_rate > 0.0001:
+                rem_pct = max(0.0, 100.0 - pct)
+                raw_eta = rem_pct / recent_rate
 
-            if self._smoothed_eta is None:
-                self._smoothed_eta = raw_eta
-            else:
-                # 20% new derivative measurement, 80% historical EMA for rock-solid stability
-                self._smoothed_eta = 0.20 * raw_eta + 0.80 * self._smoothed_eta
-            self._last_calc_time = now
+                if self._smoothed_eta is None:
+                    self._smoothed_eta = raw_eta
+                else:
+                    # 20% new derivative measurement, 80% historical EMA for rock-solid stability
+                    self._smoothed_eta = 0.20 * raw_eta + 0.80 * self._smoothed_eta
+                self._last_calc_time = now
 
     def get_display_eta(self, now: float, current_pct: float) -> str:
         if current_pct >= 99.5:

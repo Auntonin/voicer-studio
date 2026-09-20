@@ -313,11 +313,15 @@ class MainWindow(QMainWindow):
         if not urls:
             return
 
+        local_file = urls[0].toLocalFile()
+        if not local_file:
+            return
+
         if len(urls) > 1:
-            first_name = Path(urls[0].toLocalFile()).name
+            first_name = Path(local_file).name
             self._show_toast(tr("msg_multi_file_title"), tr("msg_multi_file_desc", name=first_name), "info")
 
-        path = Path(urls[0].toLocalFile())
+        path = Path(local_file)
         if path.is_dir():
             if (path / "_pack_info.ini").exists() or any(path.glob("*.txt")):
                 self.load_pack_folder(path)
@@ -2605,10 +2609,12 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self, settings: dict):
         try:
-            SETTINGS_FILE.write_text(
+            tmp = SETTINGS_FILE.with_suffix(".tmp")
+            tmp.write_text(
                 json.dumps(settings, indent=2, ensure_ascii=False),
                 encoding="utf-8"
             )
+            tmp.replace(SETTINGS_FILE)
         except Exception as e:
             self._log_message(f"Could not save settings: {e}", "warn")
 

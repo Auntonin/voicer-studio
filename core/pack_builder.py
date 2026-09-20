@@ -58,8 +58,8 @@ class PackBuilder:
         image_name = item.image_path.name if item.image_path else f"{item.filename_base(speaker_safe_name)}.png"
 
         lines = ["[data]"]
-        # Escape quotes in caption
-        caption = item.caption.replace('"', '\\"')
+        # Escape backslashes and double quotes, and clean newlines in caption
+        caption = (item.caption or "").replace("\\", "\\\\").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
         lines.append(f'caption="{caption}"')
         lines.append(f'image="{image_name}"')
 
@@ -81,7 +81,7 @@ class PackBuilder:
             chars = [state.speakers[item.speaker_id].display_name
                      if item.speaker_id in state.speakers
                      else state.get_speaker_safe_name(item.speaker_id)]
-        chars_str = ", ".join(f'"{c}"' for c in chars)
+        chars_str = ", ".join(f'"{str(c).replace(chr(34), chr(92) + chr(34))}"' for c in chars if c)
         lines.append(f"dub_characters=[{chars_str}]")
 
         return "\n".join(lines) + "\n"
@@ -93,13 +93,17 @@ class PackBuilder:
     def get_unique_pack_dir(output_dir: Path, title: str) -> Path:
         sanitized = PackBuilder.sanitize_pack_name(title)
         target = output_dir / sanitized
-        if not target.exists() or not any(target.iterdir()):
+        if not target.exists():
+            return target
+        if target.is_dir() and not any(target.iterdir()):
             return target
             
         counter = 1
         while True:
             candidate = output_dir / f"{sanitized}_{counter}"
-            if not candidate.exists() or not any(candidate.iterdir()):
+            if not candidate.exists():
+                return candidate
+            if candidate.is_dir() and not any(candidate.iterdir()):
                 return candidate
             counter += 1
 

@@ -251,7 +251,7 @@ class ProjectManager:
 
             if end <= start:
                 # Measure audio duration from companion audio clip
-                audio_dur = cls._get_audio_file_duration(audio_path) if audio_path.exists() else 2.5
+                audio_dur = cls._get_audio_file_duration(audio_path) if (audio_path and audio_path.exists()) else 2.5
                 end = start + audio_dur
 
             item = DialogueItem(

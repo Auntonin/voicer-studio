@@ -87,6 +87,9 @@ class VoiceSeparator:
 
         if not vocals_path and output_files:
             vocals_path = out_sep_dir / output_files[0]
+        elif not vocals_path:
+            vocals_path = audio_path
+
         if not bg_path and len(output_files) > 1:
             bg_path = out_sep_dir / output_files[1]
         elif not bg_path:
@@ -121,6 +124,8 @@ class VoiceSeparator:
         vocals_path = model_dir / "vocals.wav"
         bg_path = model_dir / "no_vocals.wav"
 
+        if not vocals_path.exists():
+            vocals_path = audio_path
         if not bg_path.exists():
             bg_path = audio_path
 

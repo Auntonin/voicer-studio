@@ -174,6 +174,8 @@ class FrameExtractor:
             item.image_path = out_path
             
     def release(self):
+        if hasattr(self, '_frame_cache'):
+            self._frame_cache.clear()
         if hasattr(self, 'cap') and self.cap and self.cap.isOpened():
             self.cap.release()
             

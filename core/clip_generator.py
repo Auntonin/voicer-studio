@@ -16,8 +16,8 @@ class ClipGenerator:
         output_path = output_dir / filename
         
         duration = max(0.05, item.end - item.start)
-        # Apply 15ms micro-fade in/out to prevent audio pops/clicks at clip boundaries
-        fade_ms = 0.015
+        # Apply adaptive micro-fade in/out (up to 15ms or 1/3 of clip duration) to prevent boundary clicks
+        fade_ms = min(0.015, duration / 3.0)
         fade_out_st = max(0.0, duration - fade_ms)
         afade_filter = f"afade=t=in:ss=0:d={fade_ms:.3f},afade=t=out:st={fade_out_st:.3f}:d={fade_ms:.3f}"
         

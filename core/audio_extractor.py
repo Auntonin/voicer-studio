@@ -63,7 +63,10 @@ class AudioExtractor:
             return {"duration": 0.0, "width": 0, "height": 0, "fps": 0.0, "audio_tracks": 0}
 
         duration_raw = data.get("format", {}).get("duration", 0.0)
-        duration = float(duration_raw) if duration_raw is not None else 0.0
+        try:
+            duration = float(duration_raw) if (duration_raw and duration_raw != "N/A") else 0.0
+        except (ValueError, TypeError):
+            duration = 0.0
         
         info = {
             "duration": duration,
@@ -77,23 +80,34 @@ class AudioExtractor:
             if stream.get("codec_type") == "video" and info["width"] == 0:
                 info["width"] = int(stream.get("width", 0))
                 info["height"] = int(stream.get("height", 0))
-                fps_str = stream.get("r_frame_rate", "0/1")
-                try:
-                    num, den = map(int, fps_str.split("/"))
-                    info["fps"] = num / den if den != 0 else 0.0
-                except:
-                    pass
+                fps_str = str(stream.get("r_frame_rate", "0/1"))
+                if "/" in fps_str:
+                    try:
+                        num, den = map(int, fps_str.split("/"))
+                        info["fps"] = round(num / den, 3) if den != 0 else 0.0
+                    except (ValueError, TypeError, ZeroDivisionError):
+                        pass
+                else:
+                    try:
+                        info["fps"] = round(float(fps_str), 3)
+                    except (ValueError, TypeError):
+                        pass
+
                 if info["duration"] == 0.0 and "duration" in stream:
                     try:
-                        info["duration"] = float(stream["duration"])
-                    except:
+                        d_val = stream.get("duration")
+                        if d_val and d_val != "N/A":
+                            info["duration"] = float(d_val)
+                    except (ValueError, TypeError):
                         pass
             elif stream.get("codec_type") == "audio":
                 info["audio_tracks"] += 1
                 if info["duration"] == 0.0 and "duration" in stream:
                     try:
-                        info["duration"] = float(stream["duration"])
-                    except:
+                        d_val = stream.get("duration")
+                        if d_val and d_val != "N/A":
+                            info["duration"] = float(d_val)
+                    except (ValueError, TypeError):
                         pass
                 
         return info

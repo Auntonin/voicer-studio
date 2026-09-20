@@ -225,11 +225,13 @@ class PackInfo:
     include_dub_video: bool = True
 
     def to_ini_string(self) -> str:
-        authors_str = "[" + ", ".join(f'"{a}"' for a in self.authors) + "]"
+        esc_title = (self.title or "").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
+        esc_icon = (self.icon or "").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
+        authors_str = "[" + ", ".join(f'"{str(a).replace(chr(34), chr(92) + chr(34))}"' for a in self.authors if a) + "]"
         return (
             "[data]\n"
-            f'title="{self.title}"\n'
-            f'icon="{self.icon}"\n'
+            f'title="{esc_title}"\n'
+            f'icon="{esc_icon}"\n'
             f"authors={authors_str}\n"
         )
 

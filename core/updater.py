@@ -240,17 +240,12 @@ class UpdateDownloaderThread(QThread):
                     except ValueError:
                         pass
 
+                cancelled = False
                 with open(dest_path, "wb") as f:
                     while True:
                         if self._is_cancelled:
-                            f.close()
-                            if dest_path.exists():
-                                try:
-                                    dest_path.unlink()
-                                except Exception:
-                                    pass
-                            self.error.emit("Download was cancelled.")
-                            return
+                            cancelled = True
+                            break
 
                         chunk = response.read(chunk_size)
                         if not chunk:
@@ -275,6 +270,15 @@ class UpdateDownloaderThread(QThread):
                             remaining_bytes = max(0, total - downloaded)
                             eta = remaining_bytes / speed_bps if speed_bps > 0 else 0.0
                             self.progress.emit(downloaded, total, speed_bps, eta)
+
+                if cancelled:
+                    if dest_path.exists():
+                        try:
+                            dest_path.unlink()
+                        except Exception:
+                            pass
+                    self.error.emit("Download was cancelled.")
+                    return
 
             # Final 100% progress emit
             self.progress.emit(downloaded, total or downloaded, speed_bps, 0.0)
