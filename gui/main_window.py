@@ -693,59 +693,70 @@ class MainWindow(QMainWindow):
             sep = QFrame()
             sep.setFrameShape(QFrame.Shape.VLine)
             sep.setFixedWidth(1)
-            sep.setFixedHeight(18)
-            sep.setStyleSheet("background-color: #383838; border: none; margin: 4px 6px;")
+            sep.setFixedHeight(16)
+            sep.setStyleSheet("background-color: #272730; border: none; margin: 3px 4px;")
             return sep
 
-        # CapCut Style minimal flat toolbar buttons with clear hotkey tooltips
+        # Studio / NLE minimal toolbar buttons with clear hotkey tooltips
         def capcut_btn(text: str, icon_file: str, tip: str = "", compact: bool = False) -> QPushButton:
             b = QPushButton(text if not compact else "")
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             path = ASSETS_DIR / "icons" / icon_file
             if path.exists():
                 b.setIcon(QIcon(str(path)))
-                b.setIconSize(QSize(18, 18) if compact else QSize(14, 14))
+                b.setIconSize(QSize(15, 15) if compact else QSize(13, 13))
             if tip:
                 b.setToolTip(tip)
             if compact:
-                b.setFixedSize(32, 28)
+                b.setFixedSize(28, 26)
                 b.setStyleSheet("""
                     QPushButton {
-                        background-color: transparent;
-                        border: none;
-                        border-radius: 5px;
-                        padding: 3px;
+                        background-color: #17171b;
+                        border: 1px solid #282832;
+                        border-radius: 4px;
+                        padding: 2px;
+                        color: #a1a1aa;
                     }
                     QPushButton:hover {
-                        background-color: rgba(255, 255, 255, 0.12);
+                        background-color: #262630;
+                        border-color: #38bdf8;
+                        color: #ffffff;
                     }
                     QPushButton:pressed {
-                        background-color: rgba(255, 255, 255, 0.22);
+                        background-color: #0c1c2b;
+                        border-color: #0284c7;
                     }
                     QPushButton:disabled {
-                        background-color: transparent;
+                        background-color: #121215;
+                        border-color: #1c1c22;
                         opacity: 0.35;
                     }
                 """)
             else:
-                b.setFixedHeight(28)
+                b.setFixedHeight(26)
                 b.setStyleSheet("""
                     QPushButton {
-                        background-color: transparent;
-                        border: 1px solid #383838;
-                        border-radius: 5px;
-                        padding: 3px 10px;
-                        color: #cccccc;
-                        font-size: 8.5pt;
+                        background-color: #17171b;
+                        border: 1px solid #282832;
+                        border-radius: 4px;
+                        padding: 2px 9px;
+                        color: #cbd5e1;
+                        font-size: 8pt;
                         font-weight: 500;
                     }
                     QPushButton:hover {
-                        background-color: rgba(255, 255, 255, 0.10);
-                        border-color: #555555;
+                        background-color: #262630;
+                        border-color: #38bdf8;
                         color: #ffffff;
                     }
                     QPushButton:pressed {
-                        background-color: rgba(255, 255, 255, 0.20);
+                        background-color: #0c1c2b;
+                        border-color: #0284c7;
+                    }
+                    QPushButton:disabled {
+                        background-color: #121215;
+                        border-color: #1c1c22;
+                        color: #52525b;
                     }
                 """)
             return b
@@ -753,7 +764,16 @@ class MainWindow(QMainWindow):
         # Timeline Header Controls Bar
         tl_header = QHBoxLayout()
         self._lbl_tl_title = QLabel(tr("tl_title"), objectName="section_title")
-        self._lbl_tl_title.setStyleSheet("font-size: 9.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 8px; margin-right: 4px;")
+        self._lbl_tl_title.setStyleSheet("""
+            font-size: 7.5pt;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            color: #71717a;
+            text-transform: uppercase;
+            background: transparent;
+            padding: 2px 4px;
+            margin-right: 2px;
+        """)
         tl_header.addWidget(self._lbl_tl_title)
 
         # Minimal info/keyboard shortcut button (hover shows clean cheat-sheet, click opens full shortcuts dialog)
@@ -764,7 +784,7 @@ class MainWindow(QMainWindow):
 
         tl_header.addStretch()
 
-        # CapCut Style Quick Edit Tools:
+        # Studio Style Quick Edit Tools:
         self._btn_tl_undo       = capcut_btn("", "undo.svg", tr("tl_btn_undo_tip"), compact=True)
         self._btn_tl_redo       = capcut_btn("", "redo.svg", tr("tl_btn_redo_tip"), compact=True)
 
@@ -778,8 +798,8 @@ class MainWindow(QMainWindow):
 
         self._btn_tl_play    = capcut_btn(tr("tl_btn_play"), "play.svg", tr("tl_btn_play_tip"))
         self._btn_tl_stop    = capcut_btn(tr("tl_btn_stop"), "stop.svg", tr("tl_btn_stop_tip"))
-        self._btn_tl_zoomin  = capcut_btn(tr("tl_btn_zoomin"), "zoom-in.svg", tr("tl_btn_zoom_in_tip"))
-        self._btn_tl_zoomout = capcut_btn(tr("tl_btn_zoomout"), "zoom-out.svg", tr("tl_btn_zoom_out_tip"))
+        self._btn_tl_zoomin  = capcut_btn("", "zoom-in.svg", tr("tl_btn_zoom_in_tip"), compact=True)
+        self._btn_tl_zoomout = capcut_btn("", "zoom-out.svg", tr("tl_btn_zoom_out_tip"), compact=True)
 
         tl_header.addWidget(self._btn_tl_undo)
         tl_header.addWidget(self._btn_tl_redo)
@@ -812,6 +832,49 @@ class MainWindow(QMainWindow):
         self._timeline_scroll.setMinimumHeight(160)
         self._timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self._timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._timeline_scroll.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #222228;
+                border-radius: 4px;
+                background-color: #111114;
+            }
+            QScrollBar:horizontal {
+                border: none;
+                background: #111114;
+                height: 8px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #272730;
+                min-width: 30px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #3f3f4e;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+                background: none;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #111114;
+                width: 8px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #272730;
+                min-height: 30px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #3f3f4e;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                background: none;
+            }
+        """)
         tl_layout.addWidget(self._timeline_scroll)
 
         self._timeline.set_sticky_headers(self._settings.get("timeline_sticky_headers", True))
@@ -2512,9 +2575,7 @@ class MainWindow(QMainWindow):
             self._btn_tl_play.setToolTip(tr("tl_btn_play_tip"))
             self._btn_tl_stop.setText(tr("tl_btn_stop"))
             self._btn_tl_stop.setToolTip(tr("tl_btn_stop_tip"))
-            self._btn_tl_zoomin.setText(tr("tl_btn_zoomin"))
             self._btn_tl_zoomin.setToolTip(tr("tl_btn_zoom_in_tip"))
-            self._btn_tl_zoomout.setText(tr("tl_btn_zoomout"))
             self._btn_tl_zoomout.setToolTip(tr("tl_btn_zoom_out_tip"))
 
         self._update_shortcuts_tooltip()
