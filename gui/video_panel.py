@@ -185,8 +185,10 @@ class VideoPanel(QFrame):
 
         self.btn_play = QPushButton(tr("vp_btn_play"))
         self.btn_stop = QPushButton(tr("vp_btn_stop"))
-        self.btn_play.setFixedWidth(68)
-        self.btn_stop.setFixedWidth(68)
+        self.btn_play.setMinimumWidth(68)
+        self.btn_stop.setMinimumWidth(68)
+        self.btn_play.setToolTip(tr("tip_sc_space"))
+        self.btn_stop.setToolTip(tr("vp_btn_stop"))
 
         self.btn_play.clicked.connect(self.toggle_playback)
         self.btn_stop.clicked.connect(self.stop_playback)

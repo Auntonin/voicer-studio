@@ -429,7 +429,9 @@ STRINGS_EN: Dict[str, str] = {
     "vp_drop_sub": "Supports: MP4, MKV, MOV, WEBM, AVI\nAudio separation & dialogue extraction pipeline",
     "vp_browse_btn": "  Browse Video File...  ",
     "vp_btn_play": "Play",
+    "vp_btn_pause": "Pause",
     "vp_btn_stop": "Stop",
+    "btn_close": "Close",
     "vp_badge_original": "ORIGINAL",
     "vp_badge_proxy": "PROXY 540p",
 
@@ -1041,7 +1043,9 @@ STRINGS_TH: Dict[str, str] = {
     "vp_drop_sub": "รองรับ: MP4, MKV, MOV, WEBM, AVI\nกระบวนการแยกเสียงและถอดบทสนทนาอัตโนมัติ",
     "vp_browse_btn": "  เลือกไฟล์วิดีโอ...  ",
     "vp_btn_play": "เล่น",
+    "vp_btn_pause": "พัก",
     "vp_btn_stop": "หยุด",
+    "btn_close": "ปิด",
     "vp_badge_original": "ต้นฉบับ",
     "vp_badge_proxy": "พร็อกซี 540p",
 
