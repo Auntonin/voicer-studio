@@ -374,6 +374,10 @@ class PipelineState:
         spk = self.get_speaker(speaker_id)
         return spk.safe_name if spk else speaker_id
 
+    def get_speaker_display_name(self, speaker_id: str) -> str:
+        spk = self.get_speaker(speaker_id)
+        return spk.display_name if spk else speaker_id
+
     def active_dialogues(self) -> List[DialogueItem]:
         """Return non-deleted dialogues sorted by start time."""
         return sorted(
