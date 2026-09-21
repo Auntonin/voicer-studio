@@ -165,9 +165,38 @@ def test_auto_save():
 
         print("-> Auto save PASSED.")
 
+
+def test_pack_import_preserves_escaped_metadata():
+    """Cue cards produced by PackBuilder must round-trip quotes and backslashes."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        pack_dir = Path(tmp_dir) / "Escaped_Pack"
+        pack_dir.mkdir()
+        (pack_dir / "_pack_info.ini").write_text(
+            '[data]\n'
+            'title="A \\"quoted\\" pack"\n'
+            'authors=["Studio \\"A\\"", "Path\\\\Team"]\n',
+            encoding="utf-8",
+        )
+        (pack_dir / "001_Hero.txt").write_text(
+            '[data]\n'
+            'caption="He said: \\"hello\\" from C:\\\\audio"\n'
+            'image="001_Hero.png"\n'
+            'dub_timestamps=[1.000, 2.000]\n'
+            'dub_characters=["Hero \\"One\\"", "Path\\\\Team"]\n',
+            encoding="utf-8",
+        )
+
+        state = ProjectManager.load_from_pack_folder(pack_dir)
+        assert state.pack_info.title == 'A "quoted" pack'
+        assert state.pack_info.authors == ['Studio "A"', 'Path\\Team']
+        assert state.dialogues[0].caption == 'He said: "hello" from C:\\audio'
+        assert state.get_speaker(state.dialogues[0].speaker_id).display_name == 'Hero "One"'
+        assert state.dialogues[0].extra_speakers == ['Path\\Team']
+        print("-> Escaped pack metadata round-trip PASSED.")
+
 if __name__ == "__main__":
     test_project_save_and_load()
     test_pack_folder_import()
     test_auto_save()
+    test_pack_import_preserves_escaped_metadata()
     print("\nALL PROJECT MANAGER TESTS PASSED SUCCESSFULLY!")
-

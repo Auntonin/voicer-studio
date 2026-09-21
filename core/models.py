@@ -227,7 +227,9 @@ class PackInfo:
     def to_ini_string(self) -> str:
         esc_title = (self.title or "").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
         esc_icon = (self.icon or "").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
-        authors_str = "[" + ", ".join(f'"{str(a).replace(chr(34), chr(92) + chr(34))}"' for a in self.authors if a) + "]"
+        def _escape_author(author: object) -> str:
+            return str(author).replace("\\", "\\\\").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
+        authors_str = "[" + ", ".join(f'"{_escape_author(a)}"' for a in self.authors if a) + "]"
         return (
             "[data]\n"
             f'title="{esc_title}"\n'
@@ -387,6 +389,38 @@ class PipelineState:
     def is_step_done(self, step: PipelineStep) -> bool:
         return self.step_completed.get(step, False)
 
+    def invalidate_from(self, step: PipelineStep) -> None:
+        """Mark *step* and every dependent pipeline step as needing a rebuild.
+
+        The processing pipeline deliberately caches expensive AI stages.  UI edits
+        must therefore invalidate the generated artefacts they affect; otherwise a
+        subsequent Analyze run can incorrectly skip pack generation.
+        """
+        ordered_steps = [
+            PipelineStep.AUDIO_EXTRACT,
+            PipelineStep.VAD,
+            PipelineStep.TRANSCRIPTION,
+            PipelineStep.DIARIZATION,
+            PipelineStep.VOICE_SEPARATION,
+            PipelineStep.CLIP_GENERATION,
+            PipelineStep.FRAME_EXTRACTION,
+            PipelineStep.BACKING_TRACK,
+            PipelineStep.PACK_BUILD,
+            PipelineStep.VALIDATION,
+            PipelineStep.EXPORT,
+        ]
+        try:
+            start = ordered_steps.index(step)
+        except ValueError:
+            return
+
+        for dependent_step in ordered_steps[start:]:
+            self.step_completed.pop(dependent_step, None)
+            self.step_errors.pop(dependent_step, None)
+
+        if self.current_step in (PipelineStep.DONE, PipelineStep.ERROR):
+            self.current_step = PipelineStep.IDLE
+
     def to_dict(self, base_dir: Optional[Path] = None) -> dict:
         def _rel_or_abs(p: Optional[Path]) -> Optional[str]:
             if not p:
@@ -533,5 +567,3 @@ class UndoManager:
         current_state.speakers = snap["speakers"]
         current_state.speaker_order = snap.get("speaker_order", list(snap["speakers"].keys()))
         return True
-
-

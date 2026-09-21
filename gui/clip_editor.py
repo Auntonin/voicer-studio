@@ -88,154 +88,132 @@ class ClipEditor(QWidget):
                 font-size: 8.5pt;
             }}
             QFrame#editor_card {{
-                background-color: #17171a;
-                border: 1px solid #26262c;
-                border-radius: 6px;
+                background-color: {COLORS['bg_panel']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
             }}
             QLabel {{
                 color: {COLORS['text_primary']};
             }}
             QLabel#section_title {{
-                font-size: 7.5pt;
-                font-weight: 700;
-                letter-spacing: 0.8px;
-                color: #71717a;
-                text-transform: uppercase;
+                font-size: 8.5pt;
+                font-weight: bold;
+                color: #ffffff;
                 background: transparent;
-                border: none;
-                padding: 0px 0px 2px 0px;
+                border-left: 3px solid #1473E6;
+                padding-left: 6px;
             }}
             QLabel#lbl_duration_pill {{
-                background-color: #072115;
-                border: 1px solid #134e32;
-                border-radius: 4px;
-                color: #34d399;
-                font-size: 8pt;
-                font-weight: 700;
-                font-family: 'Consolas', monospace;
-                padding: 2px 8px;
+                background: transparent;
+                border: none;
+                color: {COLORS['accent_green']};
+                font-size: 8.5pt;
+                font-weight: bold;
+                font-family: 'Segoe UI', 'Leelawadee UI', sans-serif;
+                padding-left: 2px;
+                padding-top: 2px;
             }}
             QLineEdit, QDoubleSpinBox, QComboBox {{
-                background-color: #101013;
-                color: #f4f4f5;
-                border: 1px solid #27272c;
-                border-radius: 4px;
+                background-color: {COLORS['bg_input']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
                 padding: 3px 6px;
                 font-size: 8.5pt;
-                font-family: 'Consolas', 'Segoe UI', monospace;
                 min-height: 22px;
             }}
             QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-                border: 1px solid #0284c7;
-                background-color: #0c0c0f;
+                border: 1px solid #1473E6;
+                background-color: #1a1a1a;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 18px;
-                border-left: 1px solid #27272c;
+                border-left: 1px solid {COLORS['border']};
             }}
             QComboBox QAbstractItemView {{
-                background-color: #18181c;
-                border: 1px solid #2e2e34;
-                color: #f4f4f5;
-                selection-background-color: #0284c7;
+                background-color: {COLORS['bg_panel']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text_primary']};
+                selection-background-color: #1473E6;
                 selection-color: #ffffff;
             }}
             QPushButton {{
-                background-color: #1a1a1e;
-                color: #d4d4d8;
-                border: 1px solid #282830;
-                border-radius: 4px;
+                background-color: {COLORS['bg_input']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
                 padding: 4px 10px;
                 font-size: 8pt;
-                font-weight: 600;
+                font-weight: 500;
                 min-height: 22px;
             }}
             QPushButton:hover {{
-                background-color: #26262e;
-                border-color: #3f3f4a;
+                background-color: #383838;
+                border-color: #555555;
                 color: #ffffff;
             }}
             QPushButton:pressed {{
-                background-color: #141418;
+                background-color: #161616;
             }}
             QPushButton:disabled {{
-                background-color: #141417;
-                color: #52525b;
-                border-color: #222226;
+                background-color: #1e1e1e;
+                color: #555555;
+                border-color: #2e2e2e;
             }}
             QPushButton#btn_audio_play {{
-                background-color: #142333;
-                border: 1px solid #1e3a5f;
-                color: #38bdf8;
+                background-color: {COLORS['bg_input']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text_primary']};
             }}
             QPushButton#btn_audio_play:hover {{
-                background-color: #1b324d;
-                border-color: #0284c7;
-                color: #7dd3fc;
+                background-color: #383838;
+                border-color: #555555;
+                color: #ffffff;
             }}
             QPushButton#btn_audio_playing {{
-                background-color: #0369a1;
-                border: 1px solid #38bdf8;
+                background-color: #1473E6;
+                border: 1px solid #2563EB;
                 color: #ffffff;
             }}
             QPushButton#btn_audio_stop {{
-                background-color: #1a1a1e;
-                border: 1px solid #282830;
-                color: #94a3b8;
+                background-color: {COLORS['bg_input']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text_primary']};
             }}
             QPushButton#btn_audio_stop:hover {{
-                background-color: #26262e;
-                border-color: #3f3f4a;
-                color: #e2e8f0;
+                background-color: #383838;
+                border-color: #555555;
+                color: #ffffff;
             }}
             QPushButton#btn_ai_action {{
-                background-color: #171628;
-                border: 1px solid #3730a3;
-                color: #c7d2fe;
-                font-size: 8pt;
-                font-weight: 600;
-                border-radius: 4px;
-                padding: 3px 9px;
+                background-color: {COLORS['bg_input']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text_primary']};
             }}
             QPushButton#btn_ai_action:hover {{
-                background-color: #232047;
-                border-color: #6366f1;
-                color: #e0e7ff;
-            }}
-            QPushButton#btn_ai_action:disabled {{
-                background-color: #12111d;
-                border-color: #22203d;
-                color: #6366f1;
-            }}
-            QPushButton#btn_delete {{
-                background-color: #1a1a1e;
-                color: #d4d4d8;
-                border: 1px solid #282830;
+                background-color: #383838;
+                border-color: #1473E6;
+                color: #ffffff;
             }}
             QPushButton#btn_delete:hover {{
-                background-color: #27161b;
-                border-color: #4a2028;
+                background-color: #381a1c;
+                border-color: #5a2528;
                 color: #fca5a5;
             }}
             QPushButton#btn_delete:pressed {{
-                background-color: #381922;
-                border-color: #5a2530;
-            }}
-            QPushButton#btn_clear {{
-                background-color: #1a1a1e;
-                color: #d4d4d8;
-                border: 1px solid #282830;
+                background-color: #481e22;
+                border-color: #6e2b30;
             }}
             QPushButton#btn_clear:hover {{
-                background-color: #27161b;
-                border-color: #4a2028;
+                background-color: #381a1c;
+                border-color: #5a2528;
                 color: #fca5a5;
             }}
             QPushButton#btn_clear:pressed {{
-                background-color: #381922;
-                border-color: #5a2530;
+                background-color: #481e22;
+                border-color: #6e2b30;
             }}
         """)
 
@@ -254,7 +232,7 @@ class ClipEditor(QWidget):
         self.image_preview.setFixedSize(152, 86)
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview.setStyleSheet(
-            "background-color: #0c0c0e; border: 1px solid #222227; border-radius: 5px; color: #52525b; font-size: 8pt; font-weight: 500;"
+            f"background-color: {COLORS['bg_input']}; border: 1px solid {COLORS['border']}; border-radius: 3px; color: {COLORS['text_muted']}; font-size: 8pt; font-weight: 500;"
         )
         fc_layout.addWidget(self.image_preview, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -301,14 +279,14 @@ class ClipEditor(QWidget):
         grid.setVerticalSpacing(4)
 
         self.lbl_spk = QLabel(tr("ed_speaker_label"))
-        self.lbl_spk.setStyleSheet("color: #82828e; font-size: 8pt; font-weight: 600;")
+        self.lbl_spk.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8pt; font-weight: 500;")
         grid.addWidget(self.lbl_spk, 0, 0)
         self.combo_speaker = QComboBox()
         self.combo_speaker.currentIndexChanged.connect(self._on_speaker_changed)
         grid.addWidget(self.combo_speaker, 0, 1)
 
         self.lbl_start = QLabel(tr("ed_start_label"))
-        self.lbl_start.setStyleSheet("color: #82828e; font-size: 8pt; font-weight: 600;")
+        self.lbl_start.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8pt; font-weight: 500;")
         grid.addWidget(self.lbl_start, 1, 0)
         self.spin_start = QDoubleSpinBox()
         self.spin_start.setDecimals(3)
@@ -318,7 +296,7 @@ class ClipEditor(QWidget):
         grid.addWidget(self.spin_start, 1, 1)
 
         self.lbl_end = QLabel(tr("ed_end_label"))
-        self.lbl_end.setStyleSheet("color: #82828e; font-size: 8pt; font-weight: 600;")
+        self.lbl_end.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8pt; font-weight: 500;")
         grid.addWidget(self.lbl_end, 2, 0)
         self.spin_end = QDoubleSpinBox()
         self.spin_end.setDecimals(3)
@@ -329,7 +307,7 @@ class ClipEditor(QWidget):
 
         self.lbl_duration = QLabel(tr("ed_duration_val", dur=0.0))
         self.lbl_duration.setObjectName("lbl_duration_pill")
-        self.lbl_duration.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_duration.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         grid.addWidget(self.lbl_duration, 3, 0, 1, 2)
 
         tc_layout.addLayout(grid)
@@ -354,8 +332,8 @@ class ClipEditor(QWidget):
 
         self.lbl_clip_badge = QLabel(tr("ed_no_selection"))
         self.lbl_clip_badge.setStyleSheet(
-            "font-size: 7.5pt; font-weight: 700; color: #38bdf8; background: #08283d; "
-            "border: 1px solid #075985; border-radius: 4px; padding: 2px 7px;"
+            f"font-size: 8pt; font-weight: bold; color: {COLORS['accent']}; background: #1b2636; "
+            f"border: 1px solid #234066; border-radius: 3px; padding: 2px 7px;"
         )
         cap_header.addWidget(self.lbl_clip_badge)
 
@@ -363,7 +341,7 @@ class ClipEditor(QWidget):
 
         self.lbl_caption_stats = QLabel(f"0 {tr('ed_chars_unit')}")
         self.lbl_caption_stats.setStyleSheet(
-            "font-size: 7.5pt; color: #71717a; font-weight: 500; margin-right: 4px;"
+            f"font-size: 8pt; color: {COLORS['text_secondary']}; font-weight: normal; margin-right: 4px; padding-left: 4px;"
         )
         cap_header.addWidget(self.lbl_caption_stats)
 
@@ -384,22 +362,22 @@ class ClipEditor(QWidget):
         self.txt_caption.setPlaceholderText(tr("ed_placeholder_caption"))
         self.txt_caption.setMinimumHeight(60)
         self.txt_caption.setMaximumHeight(70)
-        self.txt_caption.setStyleSheet("""
-            QPlainTextEdit {
-                background-color: #101013;
-                color: #f4f4f5;
-                border: 1px solid #27272c;
-                border-radius: 5px;
+        self.txt_caption.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: {COLORS['bg_input']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
                 padding: 6px 8px;
                 font-size: 9.5pt;
                 line-height: 1.45;
-                selection-background-color: #1e3a5f;
+                selection-background-color: {COLORS['accent']};
                 selection-color: #ffffff;
-            }
-            QPlainTextEdit:focus {
-                border-color: #0284c7;
-                background-color: #0d0d10;
-            }
+            }}
+            QPlainTextEdit:focus {{
+                border-color: {COLORS['accent']};
+                background-color: #1a1a1a;
+            }}
         """)
         self.txt_caption.textChanged.connect(self._on_caption_text_changed)
         cc_layout.addWidget(self.txt_caption)
@@ -456,6 +434,8 @@ class ClipEditor(QWidget):
         # Audio player setup
         self.player = QMediaPlayer()
         self.audio_output = QAudioOutput()
+        self.audio_output.setVolume(1.0)
+        self.audio_output.setMuted(False)
         self.player.setAudioOutput(self.audio_output)
         self.btn_play.clicked.connect(self.play_audio)
         self.btn_stop.clicked.connect(self.player.stop)
@@ -731,7 +711,7 @@ class ClipEditor(QWidget):
         if running:
             self.btn_regen_caption.setEnabled(False)
             self.btn_regen_caption.setText(tr("ed_transcribing"))
-            self.lbl_clip_badge.setText(f"⏳ {tr('ed_transcribing')}")
+            self.lbl_clip_badge.setText(tr("ed_transcribing"))
             self.lbl_clip_badge.setStyleSheet(
                 "font-size: 7.5pt; font-weight: 700; color: #38bdf8; background: #0c4a6e; "
                 "border: 1px solid #0284c7; border-radius: 4px; padding: 2px 7px;"
@@ -851,7 +831,7 @@ class ClipEditor(QWidget):
         else:
             self.btn_regen_caption.setText(tr("ed_transcribing"))
             self.txt_caption.setPlaceholderText(tr("ed_transcribing_placeholder"))
-            self.lbl_clip_badge.setText(f"⏳ {tr('ed_transcribing')}")
+            self.lbl_clip_badge.setText(tr("ed_transcribing"))
         self.btn_regen_caption.setToolTip(tr("ed_retranscribe_tip"))
 
         self.btn_split.setText(tr("ed_split_clip"))

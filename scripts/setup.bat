@@ -69,9 +69,16 @@ echo        [OK] FFmpeg found
 :: ── Create Virtual Environment ────────────────────────────
 echo.
 echo [3/7] Creating virtual environment (.venv)...
-if exist ".venv\" (
-    echo        [SKIP] .venv already exists
-) else (
+set VENV_HEALTHY=0
+if exist ".venv\Scripts\python.exe" (
+    .venv\Scripts\python.exe -c "import sys; assert sys.prefix != sys.base_prefix" >nul 2>&1
+    if not errorlevel 1 set VENV_HEALTHY=1
+)
+if "%VENV_HEALTHY%"=="0" (
+    if exist ".venv\" (
+        echo        [INFO] Existing .venv is invalid; recreating it...
+        rmdir /s /q ".venv"
+    )
     python -m venv .venv
     if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment.
@@ -79,6 +86,8 @@ if exist ".venv\" (
         exit /b 1
     )
     echo        [OK] .venv created
+) else (
+    echo        [OK] Existing .venv is healthy
 )
 
 :: ── Activate venv ─────────────────────────────────────────

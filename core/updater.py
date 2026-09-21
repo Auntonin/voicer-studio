@@ -21,6 +21,7 @@ import sys
 import re
 import time
 import json
+import hashlib
 import logging
 import subprocess
 import urllib.request
@@ -49,6 +50,7 @@ class UpdateInfo:
     asset_url: str
     asset_size: int
     is_zip: bool
+    sha256_url: str = ""
 
 
 def parse_version(version_str: str) -> tuple[int, ...]:
@@ -145,7 +147,7 @@ def check_for_updates(
     # Priority 1: VoicerStudio asset matching current OS tag
     for asset in assets:
         name = asset.get("name", "").lower()
-        if "voicer" in name and os_tag in name and (name.endswith(".zip") or name.endswith(".dmg") or name.endswith(".appimage") or name.endswith(".exe")):
+        if "voicer" in name and os_tag in name and (name.endswith(".zip") or name.endswith(".exe")):
             best_asset = asset
             break
             
@@ -153,7 +155,7 @@ def check_for_updates(
     if not best_asset:
         for asset in assets:
             name = asset.get("name", "").lower()
-            if "voicer" in name and (name.endswith(".exe") or name.endswith(".zip") or name.endswith(".dmg")):
+            if "voicer" in name and (name.endswith(".exe") or name.endswith(".zip")):
                 best_asset = asset
                 break
             name = asset.get("name", "").lower()
@@ -167,11 +169,19 @@ def check_for_updates(
         asset_size = best_asset.get("size", 0)
         is_zip = asset_name.lower().endswith(".zip")
     else:
-        # Fallback to source zipball if no compiled assets attached
-        asset_name = f"{tag_name}.zip"
-        asset_url = data.get("zipball_url", "")
-        asset_size = 0
-        is_zip = True
+        if has_update:
+            return False, None, "The release has no supported update package. Download it from the release page instead."
+        return False, None, None
+
+    # Update packages must ship a sibling SHA-256 file.  Do not silently fall
+    # back to a GitHub source archive: it is not an installable release package.
+    checksum_asset = next(
+        (asset for asset in assets if asset.get("name", "") == f"{asset_name}.sha256"),
+        None,
+    )
+    if has_update and not checksum_asset:
+        return False, None, "The release is missing its SHA-256 checksum; automatic installation is disabled for safety."
+    sha256_url = checksum_asset.get("browser_download_url", "") if checksum_asset else ""
 
     update_info = UpdateInfo(
         version=remote_version,
@@ -184,6 +194,7 @@ def check_for_updates(
         asset_url=asset_url,
         asset_size=asset_size,
         is_zip=is_zip,
+        sha256_url=sha256_url,
     )
 
     return has_update, update_info, None
@@ -210,10 +221,15 @@ class UpdateDownloaderThread(QThread):
 
     def run(self):
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        dest_path = self.save_dir / self.update_info.asset_name
+        asset_path = Path(self.update_info.asset_name)
+        if asset_path.name != self.update_info.asset_name or asset_path.suffix.lower() not in {".zip", ".exe"}:
+            self.error.emit("Update package has an invalid filename.")
+            return
+        dest_path = self.save_dir / asset_path.name
+        temp_path = dest_path.with_name(f".{dest_path.name}.part")
 
         url = self.update_info.asset_url
-        if not url:
+        if not url or not self.update_info.sha256_url:
             self.error.emit("No valid download URL provided for this release.")
             return
 
@@ -232,6 +248,14 @@ class UpdateDownloaderThread(QThread):
         speed_bps = 0.0
 
         try:
+            checksum_req = urllib.request.Request(self.update_info.sha256_url, headers=headers)
+            with urllib.request.urlopen(checksum_req, timeout=15) as checksum_response:
+                checksum_text = checksum_response.read(1024 * 1024).decode("utf-8", errors="replace")
+            checksum_match = re.search(r"\b([a-fA-F0-9]{64})\b", checksum_text)
+            if not checksum_match:
+                raise RuntimeError("Release checksum file does not contain a valid SHA-256 value.")
+            expected_hash = checksum_match.group(1).lower()
+
             with urllib.request.urlopen(req, timeout=15) as response:
                 content_len = response.headers.get("Content-Length")
                 if content_len:
@@ -241,7 +265,8 @@ class UpdateDownloaderThread(QThread):
                         pass
 
                 cancelled = False
-                with open(dest_path, "wb") as f:
+                digest = hashlib.sha256()
+                with open(temp_path, "wb") as f:
                     while True:
                         if self._is_cancelled:
                             cancelled = True
@@ -252,6 +277,7 @@ class UpdateDownloaderThread(QThread):
                             break
 
                         f.write(chunk)
+                        digest.update(chunk)
                         chunk_len = len(chunk)
                         downloaded += chunk_len
                         recent_bytes += chunk_len
@@ -272,21 +298,25 @@ class UpdateDownloaderThread(QThread):
                             self.progress.emit(downloaded, total, speed_bps, eta)
 
                 if cancelled:
-                    if dest_path.exists():
-                        try:
-                            dest_path.unlink()
-                        except Exception:
-                            pass
+                    temp_path.unlink(missing_ok=True)
                     self.error.emit("Download was cancelled.")
                     return
+
+            if total and downloaded != total:
+                raise RuntimeError(f"Update download is incomplete ({downloaded} of {total} bytes).")
+            if digest.hexdigest().lower() != expected_hash:
+                raise RuntimeError("Update integrity check failed (SHA-256 mismatch).")
+            temp_path.replace(dest_path)
 
             # Final 100% progress emit
             self.progress.emit(downloaded, total or downloaded, speed_bps, 0.0)
             self.finished.emit(dest_path, self.update_info.is_zip)
 
         except urllib.error.URLError as e:
+            temp_path.unlink(missing_ok=True)
             self.error.emit(f"Download connection failed: {e.reason}")
         except Exception as e:
+            temp_path.unlink(missing_ok=True)
             self.error.emit(f"Failed to download update: {str(e)}")
 
 

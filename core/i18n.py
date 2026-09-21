@@ -142,7 +142,7 @@ STRINGS_EN: Dict[str, str] = {
     "ed_retranscribe": "Re-Transcribe",
     "ed_retranscribe_tip": "Re-transcribe this clip audio using Whisper AI",
     "ed_transcribing": "Transcribing...",
-    "ed_transcribing_placeholder": "⏳ Listening and transcribing with Whisper AI...",
+    "ed_transcribing_placeholder": "Listening and transcribing with Whisper AI...",
     "msg_transcribe_done_title": "Transcription Complete",
     "msg_transcribe_done_desc": "Re-transcribed clip #{index}: '{text}'",
     "msg_transcribe_empty_title": "No Speech Detected",
@@ -659,6 +659,15 @@ STRINGS_EN: Dict[str, str] = {
     "msg_multi_file_title": "Multiple Files Dropped",
     "msg_multi_file_desc": "Opening first file '{name}'. Voicer Studio operates on one project at a time.",
     "untitled_project": "Untitled Project",
+    "dlg_repair_title": "Missing Pack Assets Detected",
+    "dlg_repair_header": "Auto-Repair & Generate Missing Assets",
+    "dlg_repair_desc": "Some dialogue clips or pack components are missing (e.g. from newly split clips or edited timestamps). Voicer Studio can automatically extract frames and render audio from your source media so the exported pack is 100% complete and valid.",
+    "dlg_repair_item_images": "• Missing preview frame images: {count} clips",
+    "dlg_repair_item_audio": "• Missing audio slices: {count} clips",
+    "dlg_repair_item_backing": "• Missing backing track: Will auto-generate from accompaniment",
+    "dlg_repair_dont_ask": "Do not ask again (Always auto-repair missing assets without prompting)",
+    "dlg_repair_btn_confirm": "Auto-Repair & Export",
+    "dlg_repair_btn_cancel": "Cancel Export",
 }
 
 STRINGS_TH: Dict[str, str] = {
@@ -776,7 +785,7 @@ STRINGS_TH: Dict[str, str] = {
     "ed_retranscribe": "ถอดเสียงใหม่",
     "ed_retranscribe_tip": "ถอดเสียงเฉพาะคลิปนี้ใหม่ด้วย Whisper AI",
     "ed_transcribing": "กำลังถอดเสียง...",
-    "ed_transcribing_placeholder": "⏳ กำลังฟังและถอดเสียงด้วย Whisper AI...",
+    "ed_transcribing_placeholder": "กำลังฟังและถอดเสียงด้วย Whisper AI...",
     "msg_transcribe_done_title": "ถอดเสียงเรียบร้อย",
     "msg_transcribe_done_desc": "ถอดเสียงคลิป #{index} เรียบร้อยแล้ว: '{text}'",
     "msg_transcribe_empty_title": "ไม่พบเสียงพูด",
@@ -1293,6 +1302,15 @@ STRINGS_TH: Dict[str, str] = {
     "msg_multi_file_title": "ลากไฟล์เข้ามาหลายรายการ",
     "msg_multi_file_desc": "กำลังเปิดไฟล์แรก '{name}' เนื่องจากโปรแกรมทำงานทีละ 1 โปรเจกต์",
     "untitled_project": "โปรเจกต์ที่ยังไม่ได้ตั้งชื่อ",
+    "dlg_repair_title": "ตรวจพบไฟล์ที่ยังไม่ได้สร้าง พร้อมซ่อมแซมอัตโนมัติ",
+    "dlg_repair_header": "ซ่อมแซมและสร้างไฟล์ที่จำเป็นก่อน Export",
+    "dlg_repair_desc": "ตรวจพบบางคลิปที่ยังไม่มีภาพพรีวิวหรือไฟล์เสียง (เช่น คลิปที่เพิ่งแยก ตัดต่อ หรือแก้ไขไทม์ไลน์) ระบบสามารถทำการดึงภาพและตัดต่อเสียงจากวิดีโอต้นฉบับให้อัตโนมัติ เพื่อให้แพ็กสมบูรณ์ 100% ตามมาตรฐาน",
+    "dlg_repair_item_images": "• ภาพพรีวิวคลิปที่ยังไม่ได้สร้าง: {count} คลิป",
+    "dlg_repair_item_audio": "• ไฟล์เสียงคลิปที่ยังไม่ได้สร้าง: {count} คลิป",
+    "dlg_repair_item_backing": "• ไฟล์ดนตรีประกอบ (_backing_track): จะสร้างจากเสียงดนตรีพื้นหลังให้อัตโนมัติ",
+    "dlg_repair_dont_ask": "ไม่ต้องถามอีกในครั้งถัดไป (Auto-Repair ซ่อมแซมอัตโนมัติเสมอ)",
+    "dlg_repair_btn_confirm": "ซ่อมแซมและ Export ต่อ",
+    "dlg_repair_btn_cancel": "ยกเลิกการ Export",
 }
 
 

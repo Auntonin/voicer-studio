@@ -55,15 +55,25 @@ try {
 # ── Create Virtual Environment ────────────────────────────
 Write-Host ""
 Write-Host "[3/7] Creating virtual environment (.venv)..." -ForegroundColor Yellow
-if (Test-Path ".venv") {
-    Write-Host "       [SKIP] .venv already exists" -ForegroundColor DarkGray
-} else {
+$venvPython = Join-Path $PWD ".venv\Scripts\python.exe"
+$venvHealthy = $false
+if (Test-Path $venvPython) {
+    & $venvPython -c "import sys; assert sys.prefix != sys.base_prefix" 2>$null
+    $venvHealthy = ($LASTEXITCODE -eq 0)
+}
+if (-not $venvHealthy) {
+    if (Test-Path ".venv") {
+        Write-Host "       [INFO] Existing .venv is invalid; recreating it..." -ForegroundColor Yellow
+        Remove-Item -LiteralPath ".venv" -Recurse -Force
+    }
     python -m venv .venv
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to create virtual environment" -ForegroundColor Red
         exit 1
     }
     Write-Host "       [OK] .venv created" -ForegroundColor Green
+} else {
+    Write-Host "       [OK] Existing .venv is healthy" -ForegroundColor Green
 }
 
 # ── Activate venv ─────────────────────────────────────────

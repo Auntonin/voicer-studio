@@ -1,38 +1,146 @@
-"""
-gui/export_dialog.py
-====================
-Adobe Media Encoder / DaVinci Resolve inspired Export Progress Dialog for Voicer Studio.
-Features:
-- Completely offloaded background execution (zero UI freezing, NO "Not Responding")
-- Pre-export confirmation & settings page
-- Live real-time progress bar (0% - 100%)
-- Live Elapsed Time & Estimated Time Remaining (ETA)
-- Dynamic task activity description & animated pulse
-- Post-export success screen with instant "Open Output Folder" button
-"""
-
 from __future__ import annotations
 
-import time
-import subprocess
+import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QFont, QPixmap, QImage, QPainter, QColor, QPen, QIcon
 from PySide6.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QProgressBar, QPushButton, QStackedWidget, QFrame,
-    QFileDialog, QCheckBox, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QProgressBar, QPushButton, QStackedWidget,
+    QFrame, QFileDialog, QMessageBox, QCheckBox,
+    QWidget
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QThread, QUrl
-from PySide6.QtGui import QIcon, QFont, QColor, QDesktopServices, QPixmap
 
-from config import COLORS, ASSETS_DIR, SUBPROCESS_FLAGS
+from config import COLORS, ASSETS_DIR, save_settings
 from core.models import PipelineState
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker
 from core.i18n import tr
 from gui.ui_utils import apply_dark_title_bar
+
+
+class ExportRepairConfirmDialog(QDialog):
+    """
+    Adobe-style confirmation modal presented when missing assets are detected during export.
+    Allows user to proceed with automatic repair and optionally suppress future prompts.
+    """
+    def showEvent(self, event):
+        super().showEvent(event)
+        apply_dark_title_bar(self)
+
+    def __init__(self, missing_info: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("dlg_repair_title"))
+        self.setFixedSize(520, 360)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLORS['bg_primary']};
+                color: {COLORS['text_primary']};
+            }}
+            QFrame#Card {{
+                background-color: {COLORS['bg_panel']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+            QLabel {{
+                color: {COLORS['text_primary']};
+            }}
+            QCheckBox {{
+                color: {COLORS['text_primary']};
+                font-size: 9pt;
+            }}
+            QPushButton {{
+                background-color: {COLORS['bg_input']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 7px 18px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: #383838;
+                border-color: #555555;
+            }}
+            QPushButton#PrimaryBtn {{
+                background-color: #1473E6;
+                color: #FFFFFF;
+                border: 1px solid #2563EB;
+                font-weight: bold;
+            }}
+            QPushButton#PrimaryBtn:hover {{
+                background-color: #2563EB;
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        lbl_header = QLabel(tr("dlg_repair_header"))
+        lbl_header.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        lbl_header.setStyleSheet("color: #38BDF8;")
+        layout.addWidget(lbl_header)
+
+        lbl_desc = QLabel(tr("dlg_repair_desc"))
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet("color: #CCCCCC; font-size: 9pt;")
+        layout.addWidget(lbl_desc)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(8)
+
+        missing_images = missing_info.get("images", 0)
+        missing_audio = missing_info.get("audio", 0)
+        missing_backing = missing_info.get("backing", False)
+
+        if missing_images > 0:
+            lbl_item1 = QLabel(f"• {tr('dlg_repair_item_images', count=missing_images)}")
+            lbl_item1.setStyleSheet("color: #E0E0E0; font-size: 9pt;")
+            card_layout.addWidget(lbl_item1)
+
+        if missing_audio > 0:
+            lbl_item2 = QLabel(f"• {tr('dlg_repair_item_audio', count=missing_audio)}")
+            lbl_item2.setStyleSheet("color: #E0E0E0; font-size: 9pt;")
+            card_layout.addWidget(lbl_item2)
+
+        if missing_backing:
+            lbl_item3 = QLabel(f"• {tr('dlg_repair_item_backing')}")
+            lbl_item3.setStyleSheet("color: #E0E0E0; font-size: 9pt;")
+            card_layout.addWidget(lbl_item3)
+
+        layout.addWidget(card)
+
+        self.chk_dont_ask = QCheckBox(tr("dlg_repair_dont_ask"))
+        layout.addWidget(self.chk_dont_ask)
+
+        layout.addStretch()
+
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+        btn_box.addStretch()
+
+        btn_cancel = QPushButton(tr("dlg_repair_btn_cancel"))
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton(tr("dlg_repair_btn_confirm"))
+        btn_confirm.setObjectName("PrimaryBtn")
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_box.addWidget(btn_cancel)
+        btn_box.addWidget(btn_confirm)
+        layout.addLayout(btn_box)
+
+    def dont_ask_again(self) -> bool:
+        return self.chk_dont_ask.isChecked()
 
 
 class ETATracker:
@@ -143,7 +251,10 @@ class FullExportWorker(QThread):
 
             self.progress.emit(val_pct, tr("exp_step_validating"))
             checker = QualityChecker()
-            checker.check_all(self.state, pack_dir)
+            validation_results = checker.check_all(self.state, pack_dir)
+            validation_errors = [result.message for result in validation_results if result.level == "error"]
+            if validation_errors:
+                raise RuntimeError("Pack validation failed: " + "; ".join(validation_errors[:5]))
 
             if self._is_cancelled:
                 raise RuntimeError("Export cancelled by user")
@@ -617,7 +728,40 @@ class ExportDialog(QDialog):
 
     # ── Execution Handlers ────────────────────────────────────────────────────
 
+    def _detect_missing_assets(self) -> dict:
+        missing_images = 0
+        missing_audio = 0
+        for d in self.state.active_dialogues():
+            if not d.image_path or not Path(d.image_path).exists():
+                missing_images += 1
+            if not d.audio_path or not Path(d.audio_path).exists():
+                missing_audio += 1
+
+        missing_backing = False
+        if self.state.backing_track_path and not Path(self.state.backing_track_path).exists():
+            missing_backing = True
+
+        has_missing = (missing_images > 0) or (missing_audio > 0) or missing_backing
+        return {
+            "images": missing_images,
+            "audio": missing_audio,
+            "backing": missing_backing,
+            "has_missing": has_missing,
+        }
+
     def _start_export(self):
+        # Pre-export check: Detect missing assets and request user confirmation if needed
+        missing_info = self._detect_missing_assets()
+        if missing_info["has_missing"]:
+            auto_repair = self.settings.get("auto_repair_missing_export_assets", False)
+            if not auto_repair:
+                dlg = ExportRepairConfirmDialog(missing_info, parent=self)
+                if dlg.exec() != QDialog.DialogCode.Accepted:
+                    return
+                if dlg.dont_ask_again():
+                    self.settings["auto_repair_missing_export_assets"] = True
+                    save_settings(self.settings)
+
         self.state.pack_info.include_dub_video = self.chk_dub_video.isChecked()
 
         # Update thumbnail & title on progress page

@@ -109,6 +109,14 @@ class TimelineWidget(QWidget):
     def set_current_time(self, t: float):
         self.seek(t)
 
+    def set_playhead_time(self, t: float):
+        """Update playhead position smoothly from master player without issuing seeks."""
+        max_dur = self.duration if self.duration > 0 else 99999.0
+        t = max(0.0, min(max_dur, t))
+        self.current_time = t
+        self.playhead_tick.emit(t)
+        self.update()
+
     def seek(self, t: float):
         """Authoritative time seek across timeline and audio master clock with anti-rubberbanding guard."""
         import time
@@ -462,14 +470,14 @@ class TimelineWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # 1. Fill deep matte obsidian background (#111114)
-        painter.fillRect(self.rect(), QColor("#111114"))
+        # 1. Fill clean studio charcoal background (#1e1e1e)
+        painter.fillRect(self.rect(), QColor("#1e1e1e"))
 
         speakers_list = self._get_speaker_list()
 
         # Empty state prompt
         if not self.state or not self.state.dialogues:
-            painter.setPen(QColor("#52525b"))
+            painter.setPen(QColor("#777777"))
             font_empty = QFont("Segoe UI", 8.5)
             painter.setFont(font_empty)
             empty_rect = QRectF(self.HEADER_WIDTH, self.RULER_HEIGHT, self.width() - self.HEADER_WIDTH, self.height() - self.RULER_HEIGHT)
@@ -485,23 +493,23 @@ class TimelineWidget(QWidget):
         # Check if dragging a track header to dim the lifted track
         dragged_track_spk_id = self._dragging[1] if (self._dragging and self._dragging[0] == "track_header") else None
 
-        # 2. Track Lanes (Alternating sleek dark obsidian/graphite shades + hairline borders)
+        # 2. Track Lanes (Alternating clean charcoal shades + hairline borders)
         for spk_idx, spk_id in enumerate(speakers_list):
             y_top = self.RULER_HEIGHT + spk_idx * (self.TRACK_HEIGHT + self.TRACK_GAP)
             track_rect = QRectF(self.HEADER_WIDTH, y_top, self.width() - self.HEADER_WIDTH, self.TRACK_HEIGHT)
 
             is_lifted_track = (spk_id == dragged_track_spk_id)
-            bg_color = QColor("#0d0d10") if is_lifted_track else (QColor("#151518") if spk_idx % 2 == 0 else QColor("#121215"))
+            bg_color = QColor("#161616") if is_lifted_track else (QColor("#242424") if spk_idx % 2 == 0 else QColor("#202020"))
             painter.fillRect(track_rect, bg_color)
 
             # Subtle highlight track lane if clip is currently being dragged over it
             if spk_idx == active_drag_spk_idx:
-                painter.fillRect(track_rect, QColor(56, 189, 248, 14))
-                painter.setPen(QPen(QColor(56, 189, 248, 60), 1.0))
+                painter.fillRect(track_rect, QColor(20, 115, 230, 25))
+                painter.setPen(QPen(QColor(20, 115, 230, 100), 1.0))
                 painter.drawRect(track_rect)
 
             # Bottom hairline separator line
-            painter.setPen(QPen(QColor("#1e1e24"), 1))
+            painter.setPen(QPen(QColor("#2d2d2d"), 1))
             painter.drawLine(self.HEADER_WIDTH, int(y_top + self.TRACK_HEIGHT), self.width(), int(y_top + self.TRACK_HEIGHT))
 
         # 3. Dynamic Ruler Ticks & Track Guidelines (with Viewport Frustum Culling)
@@ -671,8 +679,8 @@ class TimelineWidget(QWidget):
 
         # 5. Ruler Header Background & Border
         ruler_rect = QRectF(0, 0, self.width(), self.RULER_HEIGHT)
-        painter.fillRect(ruler_rect, QColor("#151518"))
-        painter.setPen(QPen(QColor("#222227"), 1))
+        painter.fillRect(ruler_rect, QColor("#252525"))
+        painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(0, self.RULER_HEIGHT, self.width(), self.RULER_HEIGHT)
 
         # Re-draw ticks inside ruler area on top (only visible range)
@@ -684,16 +692,16 @@ class TimelineWidget(QWidget):
 
             is_major = (round(t / major_step) * major_step == round(t, 4))
             if is_major:
-                painter.setPen(QPen(QColor("#404048"), 1))
+                painter.setPen(QPen(QColor("#4a4a4a"), 1))
                 painter.drawLine(int(x), self.RULER_HEIGHT - 10, int(x), self.RULER_HEIGHT)
                 m = int(t // 60)
                 s = int(t % 60)
                 ms = int(round((t - int(t)) * 10))
                 tc_text = f"{m:02d}:{s:02d}.{ms:01d}" if major_step < 1.0 else f"{m:02d}:{s:02d}"
-                painter.setPen(QColor("#82828e"))
+                painter.setPen(QColor("#999999"))
                 painter.drawText(int(x) + 4, 16, tc_text)
             else:
-                painter.setPen(QPen(QColor("#24242a"), 1))
+                painter.setPen(QPen(QColor("#333333"), 1))
                 painter.drawLine(int(x), self.RULER_HEIGHT - 5, int(x), self.RULER_HEIGHT)
             t = round(t + minor_step, 4)
 
@@ -712,11 +720,11 @@ class TimelineWidget(QWidget):
 
             # Background subtle glow line
             if is_active:
-                painter.setPen(QPen(QColor(56, 189, 248, 50), 3))
+                painter.setPen(QPen(QColor(20, 115, 230, 40), 3))
                 painter.drawLine(int(px), 0, int(px), self.height())
 
             # Vertical tracking line
-            line_color = QColor("#38BDF8") if is_active else QColor("#0EA5E9")
+            line_color = QColor("#38BDF8") if is_active else QColor("#1473E6")
             painter.setPen(QPen(line_color, 1.5))
             painter.drawLine(int(px), 0, int(px), self.height())
 
@@ -734,10 +742,10 @@ class TimelineWidget(QWidget):
             grad = QLinearGradient(px, 0, px, head_tip)
             if is_active:
                 grad.setColorAt(0.0, QColor("#38BDF8"))
-                grad.setColorAt(1.0, QColor("#0284C7"))
+                grad.setColorAt(1.0, QColor("#1473E6"))
             else:
-                grad.setColorAt(0.0, QColor("#0EA5E9"))
-                grad.setColorAt(1.0, QColor("#0369A1"))
+                grad.setColorAt(0.0, QColor("#1473E6"))
+                grad.setColorAt(1.0, QColor("#0D52A5"))
 
             painter.setBrush(QBrush(grad))
             painter.setPen(QPen(QColor("#FFFFFF" if is_active else "#BAE6FD"), 1.0))
@@ -752,24 +760,24 @@ class TimelineWidget(QWidget):
 
         # 7. Left Track Header (Fixed Labels: A1, A2... or Sticky to Viewport Left Edge - ALWAYS ON TOP of Playhead)
         header_rect = QRectF(header_x, 0, self.HEADER_WIDTH, self.height())
-        painter.fillRect(header_rect, QColor("#161619"))
-        painter.setPen(QPen(QColor("#222227"), 1))
+        painter.fillRect(header_rect, QColor("#252525"))
+        painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(int(header_x + self.HEADER_WIDTH), 0, int(header_x + self.HEADER_WIDTH), self.height())
 
         # Subtle drop-shadow on right edge when sticky headers are scrolled
         if self.sticky_headers and header_x > 0:
             shadow_grad = QLinearGradient(header_x + self.HEADER_WIDTH, 0, header_x + self.HEADER_WIDTH + 8, 0)
-            shadow_grad.setColorAt(0.0, QColor(0, 0, 0, 130))
+            shadow_grad.setColorAt(0.0, QColor(0, 0, 0, 100))
             shadow_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
             painter.fillRect(QRectF(header_x + self.HEADER_WIDTH, 0, 8, self.height()), QBrush(shadow_grad))
 
         # Top-left corner cell
         corner_rect = QRectF(header_x, 0, self.HEADER_WIDTH, self.RULER_HEIGHT)
-        painter.fillRect(corner_rect, QColor("#151518"))
-        painter.setPen(QPen(QColor("#222227"), 1))
+        painter.fillRect(corner_rect, QColor("#252525"))
+        painter.setPen(QPen(QColor("#383838"), 1))
         painter.drawLine(int(header_x), self.RULER_HEIGHT, int(header_x + self.HEADER_WIDTH), self.RULER_HEIGHT)
         
-        painter.setPen(QColor("#71717a"))
+        painter.setPen(QColor("#999999"))
         font_corner = QFont("Segoe UI", 7.5, QFont.Weight.Bold)
         painter.setFont(font_corner)
         title_rect = QRectF(header_x + 8, 0, self.HEADER_WIDTH - 36, self.RULER_HEIGHT)
@@ -812,12 +820,12 @@ class TimelineWidget(QWidget):
             # Row background
             is_lifted = (spk_id == dragged_track_spk_id)
             if is_lifted:
-                painter.fillRect(row_rect, QColor("#121215"))
-                painter.setPen(QPen(QColor("#2c2c34"), 1.0, Qt.PenStyle.DashLine))
+                painter.fillRect(row_rect, QColor("#1c1c1c"))
+                painter.setPen(QPen(QColor("#383838"), 1.0, Qt.PenStyle.DashLine))
                 painter.drawRect(row_rect.adjusted(1, 1, -1, -1))
             else:
-                painter.fillRect(row_rect, QColor("#161619"))
-                painter.setPen(QPen(QColor("#202025"), 1))
+                painter.fillRect(row_rect, QColor("#282828"))
+                painter.setPen(QPen(QColor("#333333"), 1))
                 painter.drawLine(int(header_x), int(y_top + self.TRACK_HEIGHT), int(header_x + self.HEADER_WIDTH), int(y_top + self.TRACK_HEIGHT))
 
             color_hex = self.colors[spk_idx % len(self.colors)]
@@ -828,11 +836,11 @@ class TimelineWidget(QWidget):
 
             # Track badge (e.g. "A1", "A2")
             badge_rect = QRectF(header_x + 8, y_top + (self.TRACK_HEIGHT - 20) / 2, 26, 20)
-            painter.setBrush(QBrush(QColor("#101013")))
+            painter.setBrush(QBrush(QColor("#1e1e1e")))
             painter.setPen(QPen(track_color.darker(110) if not is_lifted else track_color.darker(150), 1.0))
             painter.drawRoundedRect(badge_rect, 3, 3)
 
-            painter.setPen(QColor("#e4e4e7" if not is_lifted else "#52525b"))
+            painter.setPen(QColor("#e0e0e0" if not is_lifted else "#666666"))
             font_badge = QFont("Segoe UI", 7.5, QFont.Weight.Bold)
             painter.setFont(font_badge)
             painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"A{spk_idx+1}")
@@ -840,7 +848,7 @@ class TimelineWidget(QWidget):
             # Speaker Name
             spk_name = self.state.get_speaker(spk_id).display_name if self.state else spk_id
             name_rect = QRectF(header_x + 40, y_top + 5, self.HEADER_WIDTH - 44, 18)
-            painter.setPen(QColor("#f4f4f5" if not is_lifted else "#52525b"))
+            painter.setPen(QColor("#ffffff" if not is_lifted else "#666666"))
             font_name = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
             painter.setFont(font_name)
             fm_name = QFontMetrics(font_name)
@@ -850,10 +858,11 @@ class TimelineWidget(QWidget):
             # Clip count subtitle
             count = sum(1 for d in (self.state.active_dialogues() if self.state else []) if d.speaker_id == spk_id)
             sub_rect = QRectF(header_x + 40, y_top + 23, self.HEADER_WIDTH - 44, 14)
-            painter.setPen(QColor("#71717a" if not is_lifted else "#404048"))
+            painter.setPen(QColor("#888888"))
             font_sub = QFont("Segoe UI", 7)
             painter.setFont(font_sub)
-            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, tr("tl_clips_count", count=count))
+            c_text = tr("tl_clips_count", count=count)
+            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, c_text)
 
         # 8. Track Reordering Visual Feedback (Drag Ghost + Drop Target Insertion Line)
         if self._dragging and self._dragging[0] == "track_header" and len(self._dragging) > 4:

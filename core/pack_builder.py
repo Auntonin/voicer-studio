@@ -19,6 +19,33 @@ class PackBuilder:
         return name if name else "Untitled_Pack"
 
     @staticmethod
+    def _create_fallback_audio(dest_path: Path, duration_sec: float = 1.0):
+        """Generate a valid silent MP3 file as fallback for missing audio clips."""
+        try:
+            from config import SUBPROCESS_FLAGS
+            dur = max(0.1, duration_sec)
+            cmd = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", f"{dur:.3f}", "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100",
+                str(dest_path)
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=15, creationflags=SUBPROCESS_FLAGS)
+        except Exception as e:
+            logger.warning(f"Could not generate fallback audio: {e}")
+
+    @staticmethod
+    def _create_fallback_image(dest_path: Path, speaker_name: str = "", clip_index: int = 1):
+        """Generate a dark matte PNG image with 16:9 ratio as fallback."""
+        try:
+            from PIL import Image, ImageDraw
+            img = Image.new("RGB", (1280, 720), color=(24, 24, 28))
+            draw = ImageDraw.Draw(img)
+            draw.rectangle([2, 2, 1277, 717], outline=(60, 60, 72), width=3)
+            img.save(dest_path, "PNG")
+        except Exception as e:
+            logger.warning(f"Could not generate fallback image: {e}")
+
+    @staticmethod
     def _copy_file_chunked(
         src: Path,
         dst: Path,
@@ -81,7 +108,10 @@ class PackBuilder:
             chars = [state.speakers[item.speaker_id].display_name
                      if item.speaker_id in state.speakers
                      else state.get_speaker_safe_name(item.speaker_id)]
-        chars_str = ", ".join(f'"{str(c).replace(chr(34), chr(92) + chr(34))}"' for c in chars if c)
+        def _escape_character(character: object) -> str:
+            return str(character).replace("\\", "\\\\").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
+
+        chars_str = ", ".join(f'"{_escape_character(c)}"' for c in chars if c)
         lines.append(f"dub_characters=[{chars_str}]")
 
         return "\n".join(lines) + "\n"
@@ -150,42 +180,104 @@ class PackBuilder:
         active_items = state.active_dialogues()
         total_items = max(1, len(active_items))
 
-        for idx, item in enumerate(active_items):
-            speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
-            base_name = item.filename_base(speaker_safe_name)
+        # Cache a frame extractor instance if video is available
+        frame_extractor = None
+        if state.video_path and state.video_path.exists():
+            try:
+                from core.frame_extractor import FrameExtractor
+                frame_extractor = FrameExtractor(state.video_path)
+            except Exception as e:
+                logger.warning(f"Could not initialize FrameExtractor for export repair: {e}")
 
-            # Copy/rename audio (.mp3)
-            if item.audio_path and item.audio_path.exists():
+        clip_generator = None
+        audio_src = state.separated_vocals_path or state.work_audio_path or (state.video_path if (state.video_path and state.video_path.exists()) else None)
+        if audio_src and audio_src.exists():
+            try:
+                from core.clip_generator import ClipGenerator
+                clip_generator = ClipGenerator()
+            except Exception as e:
+                logger.warning(f"Could not initialize ClipGenerator for export repair: {e}")
+
+        try:
+            for idx, item in enumerate(active_items):
+                speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
+                base_name = item.filename_base(speaker_safe_name)
+
+                # 1. Copy/repair audio (.mp3)
                 dest_audio = pack_dir / f"{base_name}.mp3"
-                if item.audio_path.resolve() != dest_audio.resolve():
-                    shutil.copy2(item.audio_path, dest_audio)
+                if item.audio_path and Path(item.audio_path).exists():
+                    if Path(item.audio_path).resolve() != dest_audio.resolve():
+                        shutil.copy2(item.audio_path, dest_audio)
+                else:
+                    # Auto-repair missing audio
+                    if clip_generator and audio_src and audio_src.exists():
+                        try:
+                            clip_generator.generate_clip(item, audio_src, pack_dir, speaker_safe_name)
+                        except Exception as e:
+                            logger.warning(f"Failed to auto-generate clip audio #{item.index}: {e}")
+                            self._create_fallback_audio(dest_audio, max(0.1, item.end - item.start))
+                    else:
+                        self._create_fallback_audio(dest_audio, max(0.1, item.end - item.start))
+                item.audio_path = dest_audio
 
-            # Copy/rename image (.png)
-            if item.image_path and item.image_path.exists():
+                # 2. Copy/repair image (.png)
                 dest_image = pack_dir / f"{base_name}.png"
-                if item.image_path.resolve() != dest_image.resolve():
-                    shutil.copy2(item.image_path, dest_image)
+                if item.image_path and Path(item.image_path).exists():
+                    if Path(item.image_path).resolve() != dest_image.resolve():
+                        shutil.copy2(item.image_path, dest_image)
+                else:
+                    # Auto-repair missing image
+                    extracted_ok = False
+                    if frame_extractor and frame_extractor.available:
+                        try:
+                            frame = frame_extractor.find_best_frame(item.start, item.end, num_candidates=5)
+                            if frame is not None:
+                                frame_extractor.save_frame(frame, dest_image)
+                                extracted_ok = True
+                        except Exception as e:
+                            logger.warning(f"Failed to auto-extract frame for clip #{item.index}: {e}")
+                    if not extracted_ok:
+                        self._create_fallback_image(dest_image, speaker_safe_name, item.index)
+                item.image_path = dest_image
 
-            # Write txt
-            txt_path = pack_dir / f"{base_name}.txt"
-            txt_content = self.build_txt(item, state, timestamp_mode, speaker_display_names=options.get('speaker_display_names'))
-            txt_path.write_text(txt_content, encoding='utf-8')
-            item.txt_path = txt_path
+                # 3. Write txt
+                txt_path = pack_dir / f"{base_name}.txt"
+                txt_content = self.build_txt(item, state, timestamp_mode, speaker_display_names=options.get('speaker_display_names'))
+                txt_path.write_text(txt_content, encoding='utf-8')
+                item.txt_path = txt_path
 
-            if progress_cb and (idx % 2 == 0 or idx == total_items - 1):
-                item_pct = cues_base + (cues_span * (idx + 1) / total_items)
-                progress_cb(item_pct, tr("exp_step_cues", current=idx + 1, total=total_items))
+                if progress_cb and (idx % 2 == 0 or idx == total_items - 1):
+                    item_pct = cues_base + (cues_span * (idx + 1) / total_items)
+                    progress_cb(item_pct, tr("exp_step_cues", current=idx + 1, total=total_items))
+        finally:
+            if frame_extractor and hasattr(frame_extractor, 'release'):
+                frame_extractor.release()
 
         # Write pack info
         pack_info_path = pack_dir / "_pack_info.ini"
         pack_info_path.write_text(self.build_pack_info(state.pack_info), encoding='utf-8')
 
-        # Copy backing track if generated (_backing_track.mp3)
-        if hasattr(state, 'pack_backing_track_path') and state.pack_backing_track_path:
-            if state.pack_backing_track_path.exists():
-                dest_bg = pack_dir / "_backing_track.mp3"
-                if state.pack_backing_track_path.resolve() != dest_bg.resolve():
-                    shutil.copy2(state.pack_backing_track_path, dest_bg)
+        # Copy/repair backing track (_backing_track.mp3)
+        dest_bg = pack_dir / "_backing_track.mp3"
+        if hasattr(state, 'pack_backing_track_path') and state.pack_backing_track_path and Path(state.pack_backing_track_path).exists():
+            if Path(state.pack_backing_track_path).resolve() != dest_bg.resolve():
+                shutil.copy2(state.pack_backing_track_path, dest_bg)
+        elif not dest_bg.exists():
+            bg_src = getattr(state, 'separated_accompaniment_path', None) or state.work_audio_path or (state.video_path if (state.video_path and state.video_path.exists()) else None)
+            if bg_src and Path(bg_src).exists():
+                try:
+                    from config import SUBPROCESS_FLAGS
+                    cmd = [
+                        "ffmpeg", "-y", "-i", str(bg_src),
+                        "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100",
+                        str(dest_bg)
+                    ]
+                    subprocess.run(cmd, capture_output=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
+                except Exception as e:
+                    logger.warning(f"Could not auto-generate backing track: {e}")
+                    self._create_fallback_audio(dest_bg, max(1.0, state.video_duration))
+            else:
+                self._create_fallback_audio(dest_bg, max(1.0, state.video_duration))
 
         # Video Processing
         if has_video:
@@ -301,29 +393,36 @@ class PackBuilder:
         bytes_compressed = 0
         chunk_size = 4 * 1024 * 1024  # 4MB streaming buffer
 
-        with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in files:
-                arcname = f"{pack_dir.name}/{file_path.name}"
-                f_size = file_path.stat().st_size
-                if f_size <= chunk_size:
-                    zipf.write(file_path, arcname)
-                    bytes_compressed += f_size
-                    if progress_cb:
-                        frac = min(1.0, bytes_compressed / total_bytes)
-                        cur_pct = base_pct + span_pct * frac
-                        comp_mb = bytes_compressed / (1024.0 * 1024.0)
-                        progress_cb(cur_pct, tr("exp_step_compressing_zip", name=file_path.name, cur=f"{comp_mb:.1f}", total=f"{total_mb:.1f}"))
-                else:
-                    with zipf.open(arcname, 'w', force_zip64=True) as dest_f:
-                        with open(file_path, 'rb') as src_f:
-                            while chunk := src_f.read(chunk_size):
-                                dest_f.write(chunk)
-                                bytes_compressed += len(chunk)
-                                if progress_cb:
-                                    frac = min(1.0, bytes_compressed / total_bytes)
-                                    cur_pct = base_pct + span_pct * frac
-                                    comp_mb = bytes_compressed / (1024.0 * 1024.0)
-                                    progress_cb(cur_pct, tr("exp_step_compressing_zip", name=file_path.name, cur=f"{comp_mb:.1f}", total=f"{total_mb:.1f}"))
+        temp_zip_path = zip_path.with_name(f".{zip_path.name}.part")
+        temp_zip_path.unlink(missing_ok=True)
+        try:
+            with zipfile.ZipFile(temp_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                for file_path in files:
+                    arcname = f"{pack_dir.name}/{file_path.name}"
+                    f_size = file_path.stat().st_size
+                    if f_size <= chunk_size:
+                        zipf.write(file_path, arcname)
+                        bytes_compressed += f_size
+                        if progress_cb:
+                            frac = min(1.0, bytes_compressed / total_bytes)
+                            cur_pct = base_pct + span_pct * frac
+                            comp_mb = bytes_compressed / (1024.0 * 1024.0)
+                            progress_cb(cur_pct, tr("exp_step_compressing_zip", name=file_path.name, cur=f"{comp_mb:.1f}", total=f"{total_mb:.1f}"))
+                    else:
+                        with zipf.open(arcname, 'w', force_zip64=True) as dest_f:
+                            with open(file_path, 'rb') as src_f:
+                                while chunk := src_f.read(chunk_size):
+                                    dest_f.write(chunk)
+                                    bytes_compressed += len(chunk)
+                                    if progress_cb:
+                                        frac = min(1.0, bytes_compressed / total_bytes)
+                                        cur_pct = base_pct + span_pct * frac
+                                        comp_mb = bytes_compressed / (1024.0 * 1024.0)
+                                        progress_cb(cur_pct, tr("exp_step_compressing_zip", name=file_path.name, cur=f"{comp_mb:.1f}", total=f"{total_mb:.1f}"))
+            temp_zip_path.replace(zip_path)
+        except Exception:
+            temp_zip_path.unlink(missing_ok=True)
+            raise
 
         if progress_cb:
             progress_cb(base_pct + span_pct, tr("exp_step_success"))

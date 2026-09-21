@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from config import WHISPER_INITIAL_PROMPT_THAI, VAD_PADDING_MS, DIARIZATION_MAX_SPEAKERS
+from config import WHISPER_INITIAL_PROMPT_THAI, VAD_PADDING_MS, VAD_THRESHOLD, VOICE_SEP_MODE_DEFAULT, DIARIZATION_MAX_SPEAKERS
 from core.i18n import i18n, tr
 from gui.ui_utils import apply_dark_title_bar
 
@@ -570,7 +570,7 @@ class SettingsDialog(QDialog):
         if lang_idx >= 0:
             self.combo_lang.setCurrentIndex(lang_idx)
             
-        sep_mode = settings.get("voice_sep_mode", "hq")
+        sep_mode = settings.get("voice_sep_mode", VOICE_SEP_MODE_DEFAULT)
         if sep_mode == "original":
             self.rb_sep_orig.setChecked(True)
         elif sep_mode == "isolate":
@@ -593,7 +593,7 @@ class SettingsDialog(QDialog):
         else:
             self.rb_ts_start.setChecked(True)
             
-        vad = int(settings.get("vad_threshold", 0.5) * 100)
+        vad = int(settings.get("vad_threshold", VAD_THRESHOLD) * 100)
         self.slider_vad.setValue(max(10, min(90, vad)))
         self.lbl_vad.setText(f"{vad/100:.2f}")
         self.spin_pad.setValue(settings.get("vad_padding_ms", VAD_PADDING_MS))

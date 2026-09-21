@@ -1,4 +1,5 @@
 import logging
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,8 +34,19 @@ class QualityChecker:
             if "[data]" not in txt:
                 results.append(CheckResult('error', "_pack_info.ini missing [data] section"))
                 
-        if not (pack_dir / "_backing_track.mp3").exists():
-            results.append(CheckResult('warn', "Missing _backing_track.mp3"))
+        backing_track = pack_dir / "_backing_track.mp3"
+        if not backing_track.exists():
+            results.append(CheckResult('error', "Missing _backing_track.mp3"))
+        elif not self._check_audio_readable(backing_track):
+            results.append(CheckResult('error', "Unreadable audio file: _backing_track.mp3"))
+
+        if state.pack_info.include_dub_video:
+            for video_name in ("dub_video.mp4", "dub_video.ogv"):
+                video_file = pack_dir / video_name
+                if not video_file.exists():
+                    results.append(CheckResult('error', f"Missing {video_name}"))
+                elif not self._check_media_readable(video_file):
+                    results.append(CheckResult('error', f"Unreadable video file: {video_name}"))
             
         seen_indices = set()
         
@@ -95,10 +107,38 @@ class QualityChecker:
         return results
 
     def _check_audio_readable(self, path: Path) -> bool:
-        return path.exists() and path.stat().st_size > 0
+        return self._check_media_readable(path)
 
     def _check_png_readable(self, path: Path) -> bool:
-        return path.exists() and path.stat().st_size > 0
+        if not path.exists() or path.stat().st_size <= 0:
+            return False
+        try:
+            from PIL import Image
+            with Image.open(path) as image:
+                image.verify()
+            return True
+        except (ImportError, OSError, ValueError) as exc:
+            logger.warning("Could not validate PNG %s: %s", path.name, exc)
+            return False
+
+    def _check_media_readable(self, path: Path) -> bool:
+        """Use ffprobe when present; retain an offline-friendly size check otherwise."""
+        if not path.exists() or path.stat().st_size <= 0:
+            return False
+        if not shutil.which("ffprobe"):
+            logger.warning("ffprobe is unavailable; video validation is limited to a non-empty file check.")
+            return True
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            return result.returncode == 0 and "duration=" in result.stdout
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("Could not validate media %s: %s", path.name, exc)
+            return False
 
     def has_errors(self, results: List[CheckResult]) -> bool:
         return any(r.level == 'error' for r in results)

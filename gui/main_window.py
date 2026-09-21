@@ -231,6 +231,9 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._apply_dark_title_bar()
+        if hasattr(self, '_main_v_splitter') and not getattr(self, '_splitter_initialized', False):
+            self._splitter_initialized = True
+            self._main_v_splitter.setSizes([380, 240, 190, 0])
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -636,6 +639,7 @@ class MainWindow(QMainWindow):
         self._video_panel.video_dropped.connect(self.load_video)
         self._video_panel.browse_requested.connect(self.on_import_video)
         self._video_panel.seek_requested.connect(self._on_video_seek)
+        self._video_panel.position_changed.connect(self._on_video_position_changed)
         self._video_panel.playback_toggled.connect(self._on_video_playback_toggled)
         self._video_panel.toggle_proxy_requested.connect(self._on_toggle_proxy_requested)
 
@@ -661,6 +665,7 @@ class MainWindow(QMainWindow):
         # Middle Section: Multi-Track Timeline Container Panel
         self._timeline_container = QFrame()
         self._timeline_container.setObjectName("editor_card")
+        self._timeline_container.setMinimumHeight(160)
         self._timeline_container.setVisible(True)
         self.act_v_timeline.setChecked(True)
         tl_layout = QVBoxLayout(self._timeline_container)
@@ -672,7 +677,7 @@ class MainWindow(QMainWindow):
             sep.setFrameShape(QFrame.Shape.VLine)
             sep.setFixedWidth(1)
             sep.setFixedHeight(16)
-            sep.setStyleSheet("background-color: #272730; border: none; margin: 3px 4px;")
+            sep.setStyleSheet("background-color: #383838; border: none; margin: 3px 4px;")
             return sep
 
         # Studio / NLE minimal toolbar buttons with clear hotkey tooltips
@@ -682,59 +687,58 @@ class MainWindow(QMainWindow):
             path = ASSETS_DIR / "icons" / icon_file
             if path.exists():
                 b.setIcon(QIcon(str(path)))
-                b.setIconSize(QSize(15, 15) if compact else QSize(13, 13))
+                b.setIconSize(QSize(14, 14) if compact else QSize(12, 12))
             if tip:
                 b.setToolTip(tip)
             if compact:
-                b.setFixedSize(28, 26)
+                b.setFixedSize(26, 24)
                 b.setStyleSheet("""
                     QPushButton {
-                        background-color: #17171b;
-                        border: 1px solid #282832;
-                        border-radius: 4px;
+                        background-color: transparent;
+                        border: 1px solid transparent;
+                        border-radius: 3px;
                         padding: 2px;
-                        color: #a1a1aa;
+                        color: #cccccc;
                     }
                     QPushButton:hover {
-                        background-color: #262630;
-                        border-color: #38bdf8;
+                        background-color: #383838;
+                        border-color: #555555;
                         color: #ffffff;
                     }
                     QPushButton:pressed {
-                        background-color: #0c1c2b;
-                        border-color: #0284c7;
+                        background-color: #222222;
                     }
                     QPushButton:disabled {
-                        background-color: #121215;
-                        border-color: #1c1c22;
-                        opacity: 0.35;
+                        background-color: transparent;
+                        border-color: transparent;
+                        color: #555555;
                     }
                 """)
             else:
-                b.setFixedHeight(26)
+                b.setFixedHeight(24)
                 b.setStyleSheet("""
                     QPushButton {
-                        background-color: #17171b;
-                        border: 1px solid #282832;
-                        border-radius: 4px;
-                        padding: 2px 9px;
-                        color: #cbd5e1;
+                        background-color: #2b2b2b;
+                        border: 1px solid #4a4a4a;
+                        border-radius: 3px;
+                        padding: 2px 10px;
+                        color: #e0e0e0;
                         font-size: 8pt;
                         font-weight: 500;
                     }
                     QPushButton:hover {
-                        background-color: #262630;
-                        border-color: #38bdf8;
+                        background-color: #383838;
+                        border-color: #666666;
                         color: #ffffff;
                     }
                     QPushButton:pressed {
-                        background-color: #0c1c2b;
-                        border-color: #0284c7;
+                        background-color: #202020;
+                        border-color: #404040;
                     }
                     QPushButton:disabled {
-                        background-color: #121215;
-                        border-color: #1c1c22;
-                        color: #52525b;
+                        background-color: #222222;
+                        border-color: #333333;
+                        color: #666666;
                     }
                 """)
             return b
@@ -743,14 +747,13 @@ class MainWindow(QMainWindow):
         tl_header = QHBoxLayout()
         self._lbl_tl_title = QLabel(tr("tl_title"), objectName="section_title")
         self._lbl_tl_title.setStyleSheet("""
-            font-size: 7.5pt;
-            font-weight: 700;
-            letter-spacing: 0.8px;
-            color: #71717a;
-            text-transform: uppercase;
+            font-size: 8.5pt;
+            font-weight: bold;
+            color: #ffffff;
             background: transparent;
-            padding: 2px 4px;
-            margin-right: 2px;
+            border-left: 3px solid #1473E6;
+            padding-left: 6px;
+            margin-right: 4px;
         """)
         tl_header.addWidget(self._lbl_tl_title)
 
@@ -812,23 +815,23 @@ class MainWindow(QMainWindow):
         self._timeline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._timeline_scroll.setStyleSheet("""
             QScrollArea {
-                border: 1px solid #222228;
+                border: 1px solid #383838;
                 border-radius: 4px;
-                background-color: #111114;
+                background-color: #1e1e1e;
             }
             QScrollBar:horizontal {
                 border: none;
-                background: #111114;
+                background: #1e1e1e;
                 height: 8px;
                 margin: 0px;
             }
             QScrollBar::handle:horizontal {
-                background: #272730;
+                background: #383838;
                 min-width: 30px;
                 border-radius: 4px;
             }
             QScrollBar::handle:horizontal:hover {
-                background: #3f3f4e;
+                background: #505050;
             }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 width: 0px;
@@ -836,17 +839,17 @@ class MainWindow(QMainWindow):
             }
             QScrollBar:vertical {
                 border: none;
-                background: #111114;
+                background: #1e1e1e;
                 width: 8px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background: #272730;
+                background: #383838;
                 min-height: 30px;
                 border-radius: 4px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #3f3f4e;
+                background: #505050;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
@@ -888,7 +891,11 @@ class MainWindow(QMainWindow):
         self._main_v_splitter.addWidget(self._progress_panel)
 
         # Set initial splitter stretch ratios
-        self._main_v_splitter.setSizes([450, 220, 190, 0])
+        self._main_v_splitter.setStretchFactor(0, 4)
+        self._main_v_splitter.setStretchFactor(1, 3)
+        self._main_v_splitter.setStretchFactor(2, 0)
+        self._main_v_splitter.setStretchFactor(3, 0)
+        self._main_v_splitter.setSizes([380, 240, 190, 0])
         root_layout.addWidget(self._main_v_splitter)
 
         # Debounce timer for fast playhead scrubbing so clip editor doesn't freeze the GUI
@@ -918,7 +925,6 @@ class MainWindow(QMainWindow):
         self._timeline.segment_selected.connect(self._select_dialogue_by_idx)
         self._timeline.segment_moved.connect(self._on_timeline_segment_moved)
         self._timeline.seek_requested.connect(self._on_timeline_seek)
-        self._timeline.playhead_tick.connect(self._video_panel.sync_master_time)
         self._timeline.split_at_playhead_requested.connect(self._on_split_at_playhead)
         self._timeline.trim_left_requested.connect(self._on_trim_left)
         self._timeline.trim_right_requested.connect(self._on_trim_right)
@@ -965,7 +971,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_global_playback(self):
         """Toggle playback on both timeline and video player."""
-        if self._video_panel.is_playing() or self._timeline._is_playing:
+        if self._video_panel.is_playing():
             self._stop_global_playback()
         else:
             self._start_global_playback()
@@ -976,44 +982,41 @@ class MainWindow(QMainWindow):
             self._clip_editor.player.stop()
         cur_t = self._timeline.current_time
         self._video_panel.set_position(cur_t)
-        self._timeline.start_playback()
         self._video_panel.start_playback()
+        self._timeline._is_playing = True
 
     def _stop_global_playback(self):
         if hasattr(self, '_clip_editor'):
             self._clip_editor.player.stop()
-        self._timeline.stop_playback()
         self._video_panel.pause_playback()
+        self._timeline.stop_playback()
+        self._timeline._is_playing = False
 
     def _on_video_playback_toggled(self, is_playing: bool):
-        if is_playing and not self._timeline._is_playing:
-            self._timeline.start_playback()
-        elif not is_playing and self._timeline._is_playing:
-            self._timeline.stop_playback()
+        self._timeline._is_playing = is_playing
+
+    def _on_video_position_changed(self, pos_sec: float):
+        self._timeline.set_playhead_time(pos_sec)
 
     def seek_to_time(self, t: float, keep_playing: Optional[bool] = None):
         """
         Unified time seek across timeline and video panel.
         If keep_playing is None, preserves current playback state (seamlessly continues playing if playing).
         """
-        was_playing = self._timeline._is_playing or self._video_panel.is_playing()
+        was_playing = self._video_panel.is_playing() or self._timeline._is_playing
         should_play = was_playing if keep_playing is None else keep_playing
 
-        # Seek timeline (master clock)
+        # Seek timeline and video panel
         self._timeline.seek(t)
-        # Seek video panel
         self._video_panel.set_position(t)
 
         if should_play:
-            if not self._timeline._is_playing:
-                self._timeline.start_playback()
             if not self._video_panel.is_playing():
                 self._video_panel.start_playback()
         else:
-            if self._timeline._is_playing:
-                self._timeline.stop_playback()
             if self._video_panel.is_playing():
                 self._video_panel.pause_playback()
+            self._timeline.stop_playback()
 
     def _on_video_seek(self, t: float):
         self._timeline.set_current_time(t)
@@ -1408,6 +1411,9 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self._log_message(f"Could not auto-regenerate audio clip: {e}", "warn")
 
+        # Clip boundaries affect audio, frame selection, and every downstream
+        # artefact.  Keep expensive upstream analysis cached, but rebuild these.
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._dialogue_table.populate(self._state)
         self._timeline.populate(self._state)
@@ -1611,7 +1617,10 @@ class MainWindow(QMainWindow):
 
     # ── Project & Dirty State Tracking ────────────────────────────────────────
 
-    def _mark_dirty(self, dirty: bool = True):
+    def _mark_dirty(self, dirty: bool = True, invalidate_pack: bool = True):
+        """Record unsaved edits and invalidate generated pack metadata when needed."""
+        if dirty and invalidate_pack:
+            self._state.invalidate_from(PipelineStep.PACK_BUILD)
         self._is_dirty = dirty
         self._update_window_title()
         self._update_save_status()
@@ -2343,7 +2352,7 @@ class MainWindow(QMainWindow):
         # One-Click Auto Export: create the final ZIP pack immediately
         from core.pack_builder import PackBuilder
         if self._output_dir and self._output_dir.exists():
-            zip_path = self._output_dir.parent / f"{self._output_dir.name}.zip"
+            zip_path = PackBuilder.get_unique_zip_path(self._output_dir.parent, self._output_dir.name)
             try:
                 self._log_message(f"Auto-exporting completed ZIP pack: {zip_path.name}...", "info")
                 PackBuilder.export_zip(self._output_dir, zip_path)
@@ -2367,7 +2376,9 @@ class MainWindow(QMainWindow):
                 level="ok"
             )
 
-        self._mark_dirty(True)
+        # The pipeline has just produced and validated this pack.  Marking the
+        # project as unsaved must not invalidate those freshly built artefacts.
+        self._mark_dirty(True, invalidate_pack=False)
         # Immediately auto-save project so newly extracted dialogues and pack data are persisted
         as_path = ProjectManager.auto_save(
             self._state,
@@ -2600,18 +2611,39 @@ class MainWindow(QMainWindow):
         self._save_settings(self._settings)
 
     def _load_settings(self) -> dict:
+        settings = {}
         if SETTINGS_FILE.exists():
             try:
-                return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+                settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
-        return {}
+        # Migrate the legacy plaintext value once keyring is available. Keep it
+        # only in memory when secure storage cannot be reached.
+        from core.credentials import get_huggingface_token, set_huggingface_token
+        legacy_token = str(settings.get("hf_token", "")).strip()
+        stored_token = get_huggingface_token()
+        if legacy_token and not stored_token and set_huggingface_token(legacy_token):
+            settings.pop("hf_token", None)
+            try:
+                SETTINGS_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                settings["hf_token"] = legacy_token
+            stored_token = legacy_token
+        settings["hf_token"] = stored_token or legacy_token
+        return settings
 
     def _save_settings(self, settings: dict):
         try:
+            from core.credentials import set_huggingface_token
+            token = str(settings.get("hf_token", ""))
+            if not set_huggingface_token(token):
+                self._log_message("Could not securely save the Hugging Face token; settings were not changed.", "warn")
+                return
+            persisted_settings = dict(settings)
+            persisted_settings.pop("hf_token", None)
             tmp = SETTINGS_FILE.with_suffix(".tmp")
             tmp.write_text(
-                json.dumps(settings, indent=2, ensure_ascii=False),
+                json.dumps(persisted_settings, indent=2, ensure_ascii=False),
                 encoding="utf-8"
             )
             tmp.replace(SETTINGS_FILE)
@@ -2644,8 +2676,30 @@ class MainWindow(QMainWindow):
             if hasattr(self, '_proxy_thread') and self._proxy_thread and self._proxy_thread.isRunning():
                 self._proxy_thread.wait(1000)
 
-        # Prompt for unsaved project changes
-        if self._is_dirty and (self._state.video_path or self._state.dialogues):
+        # Stop timers immediately to prevent background execution during exit
+        if hasattr(self, '_autosave_timer'):
+            self._autosave_timer.stop()
+        if hasattr(self, '_seek_editor_timer'):
+            self._seek_editor_timer.stop()
+
+        # Stop media audio players cleanly
+        if hasattr(self, '_video_panel') and hasattr(self._video_panel, 'player'):
+            self._video_panel.player.stop()
+        if hasattr(self, '_clip_editor') and hasattr(self._clip_editor, 'player'):
+            self._clip_editor.player.stop()
+        if hasattr(self, '_timeline') and hasattr(self._timeline, 'player'):
+            self._timeline.player.stop()
+
+        # Prompt for unsaved project changes if project data is loaded
+        has_project_data = bool(
+            (self._state.video_path and self._state.video_path.exists()) or
+            len(self._state.dialogues) > 0 or
+            len(self._state.speakers) > 1 or
+            (self._state.pack_info and self._state.pack_info.title not in ("", "Untitled Pack", "Untitled Project"))
+        )
+        needs_save_prompt = (self._is_dirty and has_project_data) or (self._current_project_path is None and has_project_data)
+
+        if needs_save_prompt:
             name = self._current_project_path.name if self._current_project_path else (self._state.pack_info.title or "Untitled Project")
             reply = QMessageBox.question(
                 self,
@@ -2670,13 +2724,21 @@ class MainWindow(QMainWindow):
                 return
 
         # Auto-save recovery backup before exit only if still dirty (e.g. abrupt close)
-        if self._is_dirty and (self._state.video_path or self._state.dialogues):
+        if self._is_dirty and has_project_data:
             try:
                 ProjectManager.auto_save(self._state, self._current_project_path)
             except Exception:
                 pass
 
-        # Release GPU resources and memory on exit
+        # Terminate any non-blocking background update check or clip transcribe threads
+        if hasattr(self, '_update_worker') and self._update_worker and self._update_worker.isRunning():
+            self._update_worker.terminate()
+            self._update_worker.wait(100)
+        if hasattr(self, '_clip_transcribe_worker') and self._clip_transcribe_worker and self._clip_transcribe_worker.isRunning():
+            self._clip_transcribe_worker.terminate()
+            self._clip_transcribe_worker.wait(100)
+
+        # Release GPU resources and memory on exit without blocking
         try:
             from core.device_manager import device_manager
             device_manager.release_gpu_memory()

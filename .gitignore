@@ -30,11 +30,13 @@ tmp/
 *.log
 crash.log
 
-# --- Scratch & Test Media Files ---
+# --- Scratch, Debug Screenshots & Test Media Files ---
 scratch/
 test_output/
 output/
 *.zip
+scratch_*.png
+scratch_*.jpg
 
 # --- Deep Learning Neural Network Weights (>100MB cannot be pushed to GitHub) ---
 models/*.ckpt
@@ -46,9 +48,14 @@ models/*.onnx
 !models/.gitkeep
 
 # --- User Configuration & Sensitive Tokens ---
+# settings.json contains personal paths, HF tokens, and recent project paths
 settings.json
 .env
 .env.local
+
+# --- User Project Files ---
+# .voicer files are project workspaces, not source code
+*.voicer
 
 # --- Build & Intermediate Compilation Objects ---
 *.res
@@ -62,7 +69,6 @@ dist/
 *.exe
 !VoicerStudio.exe
 
-
 # --- Operating System & Editor Files ---
 .DS_Store
 Thumbs.db
@@ -71,3 +77,8 @@ desktop.ini
 .idea/
 *.swp
 *~
+
+# --- AI Agent Rules & Local Cache (Machine-specific AI configuration & workspace cache) ---
+AGENTS.md
+GEMINI.md
+.agents/

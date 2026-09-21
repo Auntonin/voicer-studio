@@ -25,14 +25,15 @@ class Transcriber:
             
             dev_info = device_manager.get_optimal_device(self.device)
             whisper_kwargs = device_manager.get_whisper_kwargs(dev_info)
+            concurrency = device_manager.get_optimal_concurrency_config()
             
             logger.info(f"Loading faster-whisper model '{self.model_size}' on {dev_info.name} ({whisper_kwargs})")
             try:
                 self.model = WhisperModel(self.model_size, **whisper_kwargs)
             except Exception as e:
-                logger.warning(f"Failed loading on {dev_info.name} ({e}), releasing memory and falling back to CPU int8...")
+                logger.warning(f"Failed loading Whisper on {dev_info.name} ({e}), releasing memory and falling back to CPU INT8 ({concurrency.whisper_threads} threads)...")
                 device_manager.release_gpu_memory()
-                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=max(1, min(os.cpu_count() or 4, 8)))
+                self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8", cpu_threads=concurrency.whisper_threads)
                 
             self.available = True
         except ImportError:
@@ -235,6 +236,3 @@ class Transcriber:
         except Exception as e:
             logger.error(f"Whisper segmentation failed: {e}")
             return False
-
-
-

@@ -22,20 +22,20 @@ class ProgressPanel(QWidget):
 
         self.setStyleSheet(f"""
             QWidget#panel {{
-                background-color: #141417;
-                border: 1px solid #26262c;
-                border-radius: 6px;
+                background-color: {COLORS['bg_panel']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
             }}
             QProgressBar {{
-                background-color: #101013;
-                border: 1px solid #222227;
+                background-color: {COLORS['bg_input']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 3px;
                 height: 6px;
                 text-align: center;
                 color: transparent;
             }}
             QProgressBar::chunk {{
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8);
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1473E6, stop:1 #38BDF8);
                 border-radius: 2px;
             }}
             QProgressBar#subBar {{
@@ -43,16 +43,16 @@ class ProgressPanel(QWidget):
                 border-radius: 2px;
             }}
             QProgressBar#subBar::chunk {{
-                background-color: #34d399;
+                background-color: {COLORS['accent_green']};
                 border-radius: 2px;
             }}
             QTextEdit {{
-                background-color: #0c0c0e;
-                color: #cbd5e1;
-                border: 1px solid #222227;
-                border-radius: 4px;
+                background-color: {COLORS['bg_input']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 3px;
                 font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 8pt;
+                font-size: 8.5pt;
                 padding: 4px 6px;
             }}
         """)
@@ -67,71 +67,75 @@ class ProgressPanel(QWidget):
         header.setSpacing(8)
 
         self.lbl_title = QLabel(tr("pp_title"))
-        self.lbl_title.setStyleSheet("font-size: 7.5pt; font-weight: 700; letter-spacing: 0.8px; color: #71717a; text-transform: uppercase;")
+        self.lbl_title.setStyleSheet("font-size: 8.5pt; font-weight: bold; color: #ffffff; background: transparent; border-left: 3px solid #1473E6; padding-left: 6px;")
         header.addWidget(self.lbl_title)
 
         self.lbl_current_step = QLabel(tr("pp_ready"))
         self.lbl_current_step.setStyleSheet(
-            "font-size: 7.5pt; font-weight: 700; color: #38bdf8; background: #08283d; "
-            "border: 1px solid #075985; border-radius: 4px; padding: 2px 7px;"
+            f"font-size: 8pt; font-weight: bold; color: {COLORS['accent']}; background: #1b2636; "
+            f"border: 1px solid #234066; border-radius: 3px; padding: 2px 7px;"
         )
         header.addWidget(self.lbl_current_step)
 
         self.lbl_sub_detail = QLabel("")
-        self.lbl_sub_detail.setStyleSheet("color: #94a3b8; font-size: 8pt; font-weight: 500;")
+        self.lbl_sub_detail.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8pt; font-weight: 500;")
         header.addWidget(self.lbl_sub_detail, stretch=1)
 
         self.lbl_elapsed = QLabel(tr("pp_elapsed", time="00:00"))
         self.lbl_elapsed.setStyleSheet(
-            "background: #18181c; border: 1px solid #27272a; color: #a1a1aa; "
-            "font-family: 'Consolas', monospace; font-size: 8pt; font-weight: 600; "
-            "border-radius: 4px; padding: 2px 8px;"
+            f"background: {COLORS['bg_input']}; border: 1px solid {COLORS['border']}; color: {COLORS['text_secondary']}; "
+            f"font-family: 'Consolas', monospace; font-size: 8pt; font-weight: 500; "
+            f"border-radius: 3px; padding: 2px 8px;"
         )
         header.addWidget(self.lbl_elapsed)
 
-        self.btn_toggle_log = QPushButton("📜 " + tr("pp_btn_log", default="ดู Log"))
+        self.btn_toggle_log = QPushButton(tr("pp_btn_log", default="Log"))
+        log_icon = ASSETS_DIR / "icons" / "log.svg"
+        if log_icon.exists():
+            self.btn_toggle_log.setIcon(QIcon(str(log_icon)))
+            self.btn_toggle_log.setIconSize(QSize(13, 13))
         self.btn_toggle_log.setToolTip("สลับแสดง/ซ่อนบันทึกการทำงานอย่างละเอียด (Detailed Log)")
-        self.btn_toggle_log.setStyleSheet("""
-            QPushButton {
-                background-color: #18181c;
-                border: 1px solid #282830;
-                color: #a1a1aa;
+        self.btn_toggle_log.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_input']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text_primary']};
                 font-size: 8pt;
-                font-weight: 600;
-                border-radius: 4px;
+                font-weight: 500;
+                border-radius: 3px;
                 padding: 2px 8px;
-            }
-            QPushButton:hover {
-                background-color: #26262e;
-                border-color: #3f3f4a;
+            }}
+            QPushButton:hover {{
+                background-color: #383838;
+                border-color: #555555;
                 color: #ffffff;
-            }
+            }}
         """)
         self.btn_toggle_log.clicked.connect(self._toggle_log_drawer)
         header.addWidget(self.btn_toggle_log)
 
         self.btn_cancel = QPushButton(tr("pp_btn_cancel"))
         self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: #1a1a1e;
-                border: 1px solid #282830;
-                color: #d4d4d8;
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_input']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text_primary']};
                 font-size: 8pt;
-                font-weight: 600;
-                border-radius: 4px;
+                font-weight: 500;
+                border-radius: 3px;
                 padding: 2px 10px;
-            }
-            QPushButton:hover {
-                background-color: #27161b;
-                border-color: #4a2028;
+            }}
+            QPushButton:hover {{
+                background-color: #381a1c;
+                border-color: #5a2528;
                 color: #fca5a5;
-            }
-            QPushButton:disabled {
-                background-color: #121215;
-                color: #404048;
-                border-color: #1a1a1e;
-            }
+            }}
+            QPushButton:disabled {{
+                background-color: #1e1e1e;
+                color: #555555;
+                border-color: #2e2e2e;
+            }}
         """)
         header.addWidget(self.btn_cancel)
         layout.addLayout(header)
@@ -232,9 +236,9 @@ class ProgressPanel(QWidget):
         self.log_text.setVisible(self._log_expanded)
         self.lbl_latest_log.setVisible(not self._log_expanded)
         if self._log_expanded:
-            self.btn_toggle_log.setText("📜 " + tr("pp_btn_log_hide", default="ซ่อน Log"))
+            self.btn_toggle_log.setText(tr("pp_btn_log_hide", default="Hide Log"))
         else:
-            self.btn_toggle_log.setText("📜 " + tr("pp_btn_log", default="ดู Log"))
+            self.btn_toggle_log.setText(tr("pp_btn_log", default="View Log"))
 
     def _update_elapsed(self):
         if self.start_time:
@@ -259,26 +263,26 @@ class ProgressPanel(QWidget):
             pill, _ = self.step_widgets[s]
             if i < current_idx:
                 # Prior completed steps
-                pill.setStyleSheet("""
-                    background-color: #072115;
-                    border: 1px solid #134e32;
-                    color: #34d399;
+                pill.setStyleSheet(f"""
+                    background-color: #1a2920;
+                    border: 1px solid #234b35;
+                    color: {COLORS['accent_green']};
                     border-radius: 3px;
                     font-size: 7.5pt;
                     font-weight: 600;
-                    padding: 1px 4px;
+                    padding: 2px 5px;
                 """)
                 pill.setText(f"✓ {tr(key)}")
             elif i == current_idx:
                 # Current active step
-                pill.setStyleSheet("""
-                    background-color: #0c2b42;
-                    border: 1.5px solid #0284c7;
+                pill.setStyleSheet(f"""
+                    background-color: #182838;
+                    border: 1px solid {COLORS['accent']};
                     color: #38bdf8;
                     border-radius: 3px;
                     font-size: 7.5pt;
-                    font-weight: 700;
-                    padding: 1px 4px;
+                    font-weight: bold;
+                    padding: 2px 5px;
                 """)
                 pill.setText(f"▶ {tr(key)}")
                 self.lbl_current_step.setText(tr(key))
@@ -290,14 +294,14 @@ class ProgressPanel(QWidget):
                     self.timer.start(1000)
             else:
                 # Upcoming pending steps
-                pill.setStyleSheet("""
-                    background-color: #121215;
-                    border: 1px solid #222227;
-                    color: #52525b;
+                pill.setStyleSheet(f"""
+                    background-color: {COLORS['bg_input']};
+                    border: 1px solid {COLORS['border']};
+                    color: {COLORS['text_muted']};
                     border-radius: 3px;
                     font-size: 7.5pt;
                     font-weight: 500;
-                    padding: 1px 4px;
+                    padding: 2px 5px;
                 """)
                 pill.setText(f"{i+1}. {tr(key)}")
 
@@ -321,14 +325,14 @@ class ProgressPanel(QWidget):
     def on_step_complete(self, step: PipelineStep):
         if step in self.step_widgets:
             pill, _ = self.step_widgets[step]
-            pill.setStyleSheet("""
-                background-color: #072115;
-                border: 1px solid #134e32;
-                color: #34d399;
+            pill.setStyleSheet(f"""
+                background-color: #1a2920;
+                border: 1px solid #234b35;
+                color: {COLORS['accent_green']};
                 border-radius: 3px;
                 font-size: 7.5pt;
                 font-weight: 600;
-                padding: 1px 4px;
+                padding: 2px 5px;
             """)
             for s, key in self.steps:
                 if s == step:
@@ -340,14 +344,14 @@ class ProgressPanel(QWidget):
     def on_step_error(self, step: PipelineStep):
         if step in self.step_widgets:
             pill, _ = self.step_widgets[step]
-            pill.setStyleSheet("""
-                background-color: #27161b;
-                border: 1.5px solid #4a2028;
-                color: #fca5a5;
+            pill.setStyleSheet(f"""
+                background-color: #331c1e;
+                border: 1px solid #662529;
+                color: #f87171;
                 border-radius: 3px;
                 font-size: 7.5pt;
-                font-weight: 700;
-                padding: 1px 4px;
+                font-weight: bold;
+                padding: 2px 5px;
             """)
             for s, key in self.steps:
                 if s == step:

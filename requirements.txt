@@ -40,3 +40,4 @@ scipy>=1.11.0
 # --- Network & Utilities ---
 requests>=2.31.0
 tqdm>=4.66.0
+keyring>=25.0.0

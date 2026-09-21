@@ -15,6 +15,7 @@ import os
 import shutil
 import zipfile
 import subprocess
+import hashlib
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -121,6 +122,7 @@ def step_create_zip():
 
     size_mb = ZIP_OUTPUT.stat().st_size / (1024 * 1024)
     log(f"Release ZIP created successfully: {ZIP_OUTPUT.name} ({size_mb:.2f} MB)", "OK")
+    _write_sha256(ZIP_OUTPUT)
 
     # Also copy standalone VoicerStudio.exe directly into dist/ for users who just want the exe update
     exe_src = ROOT_DIR / "VoicerStudio.exe"
@@ -128,6 +130,19 @@ def step_create_zip():
         dist_exe = DIST_DIR / "VoicerStudio.exe"
         shutil.copy2(exe_src, dist_exe)
         log(f"Copied standalone executable: {dist_exe.name}", "OK")
+        _write_sha256(dist_exe)
+
+
+def _write_sha256(path: Path) -> Path:
+    """Create the checksum sidecar required by the in-app updater."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    checksum_path = path.with_name(f"{path.name}.sha256")
+    checksum_path.write_text(f"{digest.hexdigest()}  {path.name}\n", encoding="ascii")
+    log(f"Created integrity checksum: {checksum_path.name}", "OK")
+    return checksum_path
 
 def print_instructions():
     print("\n" + "=" * 76)
@@ -141,8 +156,8 @@ def print_instructions():
     print(f"1. Open GitHub: https://github.com/Auntonin/voicer-studio/releases/new")
     print(f"2. Set Tag version: v{APP_VERSION}")
     print(f"3. Set Release title: Voicer Studio v{APP_VERSION}")
-    print(f"4. Drag & drop '{ZIP_OUTPUT.name}' into the release assets area.")
-    print("5. Click 'Publish release'.")
+    print(f"4. Drag & drop '{ZIP_OUTPUT.name}' and '{ZIP_OUTPUT.name}.sha256' into the release assets area.")
+    print("5. Click 'Publish release'. The checksum is required for in-app updates.")
     print("\nDone! Any friend opening VoicerStudio.exe will now see:")
     print("  'มีเวอร์ชันใหม่ของ Voicer Studio พร้อมให้อัปเดต!'")
     print("  and can update in 1 click automatically!\n" + "=" * 76)

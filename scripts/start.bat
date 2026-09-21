@@ -18,9 +18,14 @@ if not exist "settings.json" (
     )
 )
 
-:: ── 2. Ensure virtual environment exists ─────────────────────
-if not exist ".venv\Scripts\python.exe" (
-    echo [INFO] Python virtual environment (.venv) not found.
+:: ── 2. Ensure virtual environment exists and remains usable ───
+set VENV_HEALTHY=0
+if exist ".venv\Scripts\python.exe" (
+    .venv\Scripts\python.exe -c "import sys; assert sys.prefix != sys.base_prefix" >nul 2>&1
+    if not errorlevel 1 set VENV_HEALTHY=1
+)
+if "%VENV_HEALTHY%"=="0" (
+    echo [INFO] Python virtual environment (.venv) is missing or invalid.
     echo [INFO] Starting automatic setup... (this only runs once)
     echo.
     call "%~dp0setup.bat"

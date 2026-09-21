@@ -3,7 +3,7 @@ core/proxy_generator.py
 ========================
 High-speed proxy video generator for buttery-smooth timeline scrubbing & preview.
 Generates lightweight 540p H.264 proxy with short keyframe interval (GOP=15).
-Uses NVENC hardware acceleration when available, with automatic libx264 ultrafast fallback.
+Uses multi-vendor hardware acceleration (NVENC, AMF, QSV, VideoToolbox, VA-API) with automatic libx264 ultrafast fallback.
 """
 
 import subprocess
@@ -18,30 +18,6 @@ logger = logging.getLogger(__name__)
 
 PROXIES_DIR = TEMP_DIR / "proxies"
 PROXIES_DIR.mkdir(parents=True, exist_ok=True)
-
-_NVENC_AVAILABLE: Optional[bool] = None
-
-
-def check_nvenc_available() -> bool:
-    global _NVENC_AVAILABLE
-    if _NVENC_AVAILABLE is not None:
-        return _NVENC_AVAILABLE
-    try:
-        cmd = [
-            "ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=0.1:size=320x240:rate=30",
-            "-c:v", "h264_nvenc", "-f", "null", "-"
-        ]
-        res = subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-            creationflags=SUBPROCESS_FLAGS
-        )
-        _NVENC_AVAILABLE = (res.returncode == 0)
-    except Exception:
-        _NVENC_AVAILABLE = False
-    return _NVENC_AVAILABLE
 
 
 class ProxyGenerator:
@@ -98,22 +74,25 @@ class ProxyGenerator:
 
         if encoder != "libx264":
             if encoder == "h264_nvenc":
-                enc_args = ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-cq", "28"]
+                enc_args = ["-vf", vf_filter, "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-cq", "28"]
             elif encoder == "h264_amf":
-                enc_args = ["-c:v", "h264_amf", "-quality", "speed", "-usage", "transcoding"]
+                enc_args = ["-vf", vf_filter, "-c:v", "h264_amf", "-quality", "speed", "-usage", "transcoding"]
             elif encoder == "h264_qsv":
-                enc_args = ["-c:v", "h264_qsv", "-preset", "veryfast"]
+                enc_args = ["-vf", vf_filter, "-c:v", "h264_qsv", "-preset", "veryfast"]
+            elif encoder == "h264_videotoolbox":
+                enc_args = ["-vf", vf_filter, "-c:v", "h264_videotoolbox", "-b:v", "3000k"]
             else:
-                enc_args = ["-c:v", encoder]
+                enc_args = ["-vf", vf_filter, "-c:v", encoder]
 
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(video_path),
-                "-vf", vf_filter,
                 *enc_args,
                 "-g", gop_str,
                 "-c:a", "aac",
-                "-b:a", "128k",
+                "-ac", "2",
+                "-ar", "44100",
+                "-b:a", "192k",
                 "-movflags", "+faststart",
                 str(temp_proxy)
             ]
@@ -128,7 +107,7 @@ class ProxyGenerator:
             except Exception as e:
                 logger.warning(f"{encoder} proxy error ({e}), falling back to CPU...")
 
-        # Fallback to libx264 ultrafast
+        # Fallback to libx264 ultrafast with all CPU threads
         cmd_cpu = [
             "ffmpeg", "-y",
             "-i", str(video_path),
@@ -136,9 +115,12 @@ class ProxyGenerator:
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "26",
+            "-threads", "0",
             "-g", gop_str,
             "-c:a", "aac",
-            "-b:a", "128k",
+            "-ac", "2",
+            "-ar", "44100",
+            "-b:a", "192k",
             "-movflags", "+faststart",
             str(temp_proxy)
         ]

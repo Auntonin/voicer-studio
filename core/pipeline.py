@@ -158,12 +158,13 @@ class PipelineWorker(QThread):
         self._begin_step(step)
         try:
             from core.vad import VADDetector
+            from config import VAD_THRESHOLD, VAD_PADDING_MS, VAD_MIN_SPEECH_DURATION_MS, VAD_MIN_SILENCE_DURATION_MS, VAD_MERGE_GAP_MS
             vad_config = {
-                "threshold":     self.options.get("vad_threshold", 0.5),
-                "padding_ms":    self.options.get("vad_padding_ms", 80),
-                "min_speech_ms": self.options.get("vad_min_speech_ms", 200),
-                "min_silence_ms":self.options.get("vad_min_silence_ms", 200),
-                "merge_gap_ms":  self.options.get("vad_merge_gap_ms", 120),
+                "threshold":     self.options.get("vad_threshold", VAD_THRESHOLD),
+                "padding_ms":    self.options.get("vad_padding_ms", VAD_PADDING_MS),
+                "min_speech_ms": self.options.get("vad_min_speech_ms", VAD_MIN_SPEECH_DURATION_MS),
+                "min_silence_ms":self.options.get("vad_min_silence_ms", VAD_MIN_SILENCE_DURATION_MS),
+                "merge_gap_ms":  self.options.get("vad_merge_gap_ms", VAD_MERGE_GAP_MS),
             }
             detector = VADDetector()
             detector.detect(self.state.work_audio_path, self.state, vad_config)
@@ -499,7 +500,10 @@ class PipelineWorker(QThread):
                             str(dub_video_path)
                         ]
                         from config import SUBPROCESS_FLAGS
-                        subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
+                        if result.returncode != 0 or not dub_video_path.exists() or dub_video_path.stat().st_size == 0:
+                            dub_video_path.unlink(missing_ok=True)
+                            raise RuntimeError(f"FFmpeg could not encode dub_video.ogv: {result.stderr[-500:]}")
 
             self.signals.sub_progress.emit(total, total, tr("pipe_pack_done", count=total))
             self._complete_step(step)
@@ -533,6 +537,7 @@ class PipelineWorker(QThread):
 
             if errors:
                 self._log(f"{len(errors)} error(s) found — review before export", "warn")
+                raise RuntimeError("Pack validation failed: " + "; ".join(result.message for result in errors[:3]))
             else:
                 self._log(f"Validation passed ({len(warns)} warning(s))", "ok")
 
@@ -568,11 +573,14 @@ class PipelineWorker(QThread):
         self._start_time = time.time()
         self._log(f"Pipeline started for: {self.state.video_path.name}", "info")
         try:
-            # 1. Initialize and configure optimal compute hardware (CUDA / DirectML / CPU)
+            # 1. Initialize and configure optimal compute hardware (CUDA / DirectML / ROCm / MPS / CPU)
             from core.device_manager import device_manager
             active_dev = device_manager.get_optimal_device(self.options.get("compute_device", "auto"))
-            device_manager.configure_runtime_environment(active_dev)
-            self._log(f"Compute Engine: {active_dev.display_title}", "info")
+            perf_profile = self.options.get("performance_profile", "auto")
+            custom_w = self.options.get("custom_workers")
+            device_manager.configure_runtime_environment(active_dev, profile=perf_profile)
+            cfg = device_manager.get_optimal_concurrency_config(profile=perf_profile, custom_workers=custom_w)
+            self._log(f"Compute Engine: {active_dev.display_title} [{cfg.tier.value.upper()} Tier | Parallel Workers: {cfg.clip_workers} | Whisper Threads: {cfg.whisper_threads} | Host RAM: {cfg.ram_gb:.1f} GB]", "info")
 
             # 2. Check disk space safety before processing
             from core.edge_guards import check_disk_space
@@ -655,6 +663,8 @@ def build_options_from_settings(settings: dict) -> dict:
         WHISPER_INITIAL_PROMPT_THAI,
         VAD_PADDING_MS,
         VAD_MERGE_GAP_MS,
+        VAD_THRESHOLD,
+        VOICE_SEP_MODE_DEFAULT,
         DIARIZATION_MAX_SPEAKERS,
         DIARIZATION_MIN_SPEAKERS,
     )
@@ -664,9 +674,9 @@ def build_options_from_settings(settings: dict) -> dict:
         "whisper_language":          settings.get("whisper_language", "th"),
         "whisper_initial_prompt":    settings.get("whisper_initial_prompt", WHISPER_INITIAL_PROMPT_THAI),
         "use_whisper_segmentation":  settings.get("use_whisper_segmentation", True),
-        "voice_sep_mode":            settings.get("voice_sep_mode", VoiceSepMode.ORIGINAL),
+        "voice_sep_mode":            settings.get("voice_sep_mode", VOICE_SEP_MODE_DEFAULT),
         "timestamp_mode":            settings.get("timestamp_mode", TIMESTAMP_MODE_DEFAULT),
-        "vad_threshold":             settings.get("vad_threshold", 0.5),
+        "vad_threshold":             settings.get("vad_threshold", VAD_THRESHOLD),
         "vad_padding_ms":            settings.get("vad_padding_ms", VAD_PADDING_MS),
         "vad_merge_gap_ms":          settings.get("vad_merge_gap_ms", VAD_MERGE_GAP_MS),
         "max_speakers":              settings.get("max_speakers", DIARIZATION_MAX_SPEAKERS),
@@ -679,4 +689,3 @@ def build_options_from_settings(settings: dict) -> dict:
         "compute_device":            settings.get("compute_device", "auto"),
         "device":                    settings.get("compute_device", "auto"),
     }
-

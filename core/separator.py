@@ -64,15 +64,30 @@ class VoiceSeparator:
         out_sep_dir = output_dir / "roformer"
         out_sep_dir.mkdir(parents=True, exist_ok=True)
 
-        separator = Separator(
-            output_dir=str(out_sep_dir),
-            output_format="WAV",
-            use_cuda=use_cuda,
-            log_level=10
-        )
-
-        separator.load_model(model_filename=ROFORMER_MODEL_DEFAULT)
-        output_files = separator.separate(str(audio_path))
+        try:
+            separator = Separator(
+                output_dir=str(out_sep_dir),
+                output_format="WAV",
+                use_cuda=use_cuda,
+                log_level=10
+            )
+            separator.load_model(model_filename=ROFORMER_MODEL_DEFAULT)
+            output_files = separator.separate(str(audio_path))
+        except Exception as e:
+            if use_cuda:
+                logger.warning(f"CUDA RoFormer failed ({e}), falling back to CPU multi-threaded...")
+                device_manager.release_gpu_memory()
+                device_manager.configure_runtime_environment(dev_info)
+                separator = Separator(
+                    output_dir=str(out_sep_dir),
+                    output_format="WAV",
+                    use_cuda=False,
+                    log_level=10
+                )
+                separator.load_model(model_filename=ROFORMER_MODEL_DEFAULT)
+                output_files = separator.separate(str(audio_path))
+            else:
+                raise
 
         vocals_path = None
         bg_path = None
@@ -116,7 +131,24 @@ class VoiceSeparator:
         cmd.append(str(audio_path))
 
         from config import SUBPROCESS_FLAGS
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, creationflags=SUBPROCESS_FLAGS)
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, creationflags=SUBPROCESS_FLAGS)
+        except Exception as e:
+            if dev_info.is_gpu:
+                logger.warning(f"Demucs on {dev_info.name} failed ({e}), retrying on multi-threaded CPU...")
+                device_manager.release_gpu_memory()
+                cmd_cpu = [
+                    sys.executable, "-m", "demucs.separate", "-n", model,
+                    "--two-stems", "vocals",
+                    "--shifts", "2",
+                    "--overlap", "0.5",
+                    "--out", str(output_dir),
+                    "-d", "cpu", "-j", str(device_manager.get_optimal_concurrency_config().demucs_threads),
+                    str(audio_path)
+                ]
+                subprocess.run(cmd_cpu, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, creationflags=SUBPROCESS_FLAGS)
+            else:
+                raise
 
         track_name = audio_path.stem
         model_dir = output_dir / model / track_name

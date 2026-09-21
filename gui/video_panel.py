@@ -9,13 +9,13 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QSlider, QStackedLayout, QWidget
 )
-from PySide6.QtCore import Qt, Signal, QUrl, QTime
-from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent, QPixmap
+from PySide6.QtCore import Qt, Signal, QUrl, QTime, QSize
+from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent, QPixmap, QIcon
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from core.models import PipelineState
-from config import COLORS
+from config import COLORS, ASSETS_DIR
 from core.i18n import tr
 
 
@@ -46,10 +46,14 @@ class VideoPanel(QFrame):
         self._last_slider_seek_time = 0.0
         self._last_direct_seek_time = 0.0
         self._current_badge_status = "ORIGINAL"
+        self._volume: float = 1.0
+        self._is_muted: bool = False
 
         # ── QMediaPlayer Setup ─────────────────────────────────────────
         self.player = QMediaPlayer()
         self.audio_output = QAudioOutput()
+        self.audio_output.setVolume(1.0)
+        self.audio_output.setMuted(False)
         self.player.setAudioOutput(self.audio_output)
 
         self.video_widget = QVideoWidget()
@@ -205,6 +209,61 @@ class VideoPanel(QFrame):
         self.seek_slider.sliderMoved.connect(self._on_slider_moved)
         self.seek_slider.sliderReleased.connect(self._on_slider_released)
         controls.addWidget(self.seek_slider, stretch=1)
+
+        # Volume Controls
+        self.btn_volume = QPushButton()
+        self.btn_volume.setFixedSize(28, 26)
+        self.btn_volume.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_volume.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_volume.setToolTip("Mute / Unmute")
+        self.btn_volume.setIconSize(QSize(15, 15))
+        self.btn_volume.setStyleSheet("""
+            QPushButton {
+                background-color: #222228;
+                border: 1px solid #33333e;
+                border-radius: 4px;
+                padding: 2px;
+                color: #e4e4e7;
+            }
+            QPushButton:hover {
+                background-color: #2c2c36;
+                border-color: #38bdf8;
+            }
+        """)
+        self._update_volume_icon()
+        self.btn_volume.clicked.connect(self.toggle_mute)
+        controls.addWidget(self.btn_volume)
+
+        self.slider_volume = QSlider(Qt.Orientation.Horizontal)
+        self.slider_volume.setRange(0, 100)
+        self.slider_volume.setValue(100)
+        self.slider_volume.setFixedWidth(70)
+        self.slider_volume.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.slider_volume.setToolTip("Volume: 100%")
+        self.slider_volume.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                border: none;
+                height: 4px;
+                background: #272730;
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {COLORS['accent']};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #ffffff;
+                width: 10px;
+                height: 10px;
+                margin: -3px 0;
+                border-radius: 5px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {COLORS['accent_hover']};
+            }}
+        """)
+        self.slider_volume.valueChanged.connect(self._on_volume_slider_changed)
+        controls.addWidget(self.slider_volume)
 
         main_layout.addLayout(controls)
 
@@ -366,37 +425,71 @@ class VideoPanel(QFrame):
             f"{tr('vp_info_resolution')}: {state.video_width}x{state.video_height} @ {state.video_fps:.2f} fps"
         )
 
+    def _update_volume_icon(self):
+        if not hasattr(self, 'btn_volume'):
+            return
+        if self._is_muted or self._volume == 0.0:
+            icon_path = ASSETS_DIR / "icons" / "volume-x.svg"
+            if icon_path.exists():
+                self.btn_volume.setIcon(QIcon(str(icon_path)))
+            self.btn_volume.setToolTip("Unmute")
+        elif self._volume < 0.45:
+            icon_path = ASSETS_DIR / "icons" / "volume-1.svg"
+            if icon_path.exists():
+                self.btn_volume.setIcon(QIcon(str(icon_path)))
+            self.btn_volume.setToolTip(f"Mute (Volume: {int(self._volume * 100)}%)")
+        else:
+            icon_path = ASSETS_DIR / "icons" / "volume-2.svg"
+            if icon_path.exists():
+                self.btn_volume.setIcon(QIcon(str(icon_path)))
+            self.btn_volume.setToolTip(f"Mute (Volume: {int(self._volume * 100)}%)")
+
+    def toggle_mute(self):
+        self._is_muted = not self._is_muted
+        self.audio_output.setMuted(self._is_muted)
+        self._update_volume_icon()
+
+    def _on_volume_slider_changed(self, val: int):
+        self._volume = val / 100.0
+        if self._is_muted and val > 0:
+            self._is_muted = False
+            self.audio_output.setMuted(False)
+        self.audio_output.setVolume(self._volume)
+        self._update_volume_icon()
+        self.slider_volume.setToolTip(f"Volume: {val}%")
+
     def sync_master_time(self, audio_sec: float):
         """
-        Authoritative clock sync driven by Timeline Audio.
-        Checks drift between audio master clock and video player.
-        If drift exceeds 80ms (~2.5 frames), re-aligns video immediately.
+        Clock sync driven by timeline.
+        When playing, only re-align if drift is massive (> 1.2 seconds) to avoid video decoder thrashing.
+        When paused, updates video position smoothly.
         """
-        import time
-        now = time.monotonic()
         target_ms = int(audio_sec * 1000)
         if self.is_playing():
-            # If an explicit direct seek occurred within the last 250ms, give video decoder a grace window to settle
-            if now - getattr(self, '_last_direct_seek_time', 0.0) < 0.25:
-                self._update_time_code(target_ms, self.player.duration())
-                return
-
             cur_ms = self.player.position()
             drift_ms = abs(target_ms - cur_ms)
-            if drift_ms > 80:
+            if drift_ms > 1200:
                 self.player.setPosition(target_ms)
         else:
             if not self._is_user_seeking:
-                self.player.setPosition(target_ms)
+                self.set_position(audio_sec)
         self._update_time_code(target_ms, self.player.duration())
 
     def set_position(self, sec: float):
-        """Seek player position directly without triggering recursive signals."""
+        """Seek player position directly without triggering redundant decodes."""
         import time
         self._last_direct_seek_time = time.monotonic()
         target_ms = int(sec * 1000)
-        self.player.setPosition(target_ms)
+        if self.player.source().isValid():
+            cur_ms = self.player.position()
+            if abs(cur_ms - target_ms) > 15:
+                self.player.setPosition(target_ms)
         self._update_time_code(target_ms, self.player.duration())
+        dur_ms = self.player.duration()
+        if dur_ms > 0 and not self._is_user_seeking:
+            self.seek_slider.blockSignals(True)
+            self.seek_slider.setValue(int((target_ms / dur_ms) * 1000))
+            self.seek_slider.blockSignals(False)
 
     def toggle_playback(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -407,8 +500,11 @@ class VideoPanel(QFrame):
     def start_playback(self):
         active_src = self._proxy_path or self._video_path
         if active_src and active_src.exists():
-            # Mute video player audio stream so master timeline audio is the single source
-            self.audio_output.setMuted(True)
+            target_url = QUrl.fromLocalFile(str(active_src))
+            if self.player.source() != target_url:
+                self.player.setSource(target_url)
+            self.audio_output.setMuted(self._is_muted)
+            self.audio_output.setVolume(self._volume)
             self.player.play()
             self.btn_play.setText(tr("vp_btn_pause"))
             self.playback_toggled.emit(True)
@@ -436,8 +532,7 @@ class VideoPanel(QFrame):
             val = int((pos_ms / dur_ms) * 1000)
             self.seek_slider.setValue(val)
             self.seek_slider.blockSignals(False)
-            # NOTE: During playback, we do NOT emit position_changed to alter timeline!
-            # Timeline Audio is the authoritative master clock.
+        self.position_changed.emit(pos_ms / 1000.0)
 
     def _on_player_duration_changed(self, dur_ms: int):
         self._update_time_code(self.player.position(), dur_ms)
