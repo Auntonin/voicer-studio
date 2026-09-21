@@ -115,10 +115,12 @@ class DeviceManager:
         win_gpus: List[str] = []
         if sys.platform == "win32":
             try:
+                from config import SUBPROCESS_FLAGS
                 res = subprocess.run(
                     ["powershell", "-NoProfile", "-Command", 
                      "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
-                    capture_output=True, text=True, timeout=3
+                    capture_output=True, text=True, timeout=3,
+                    creationflags=SUBPROCESS_FLAGS
                 )
                 if res.returncode == 0:
                     win_gpus = [line.strip() for line in res.stdout.splitlines() if line.strip() and "virtual" not in line.lower() and "remote" not in line.lower()]

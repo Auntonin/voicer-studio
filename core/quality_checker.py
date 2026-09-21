@@ -129,11 +129,13 @@ class QualityChecker:
             logger.warning("ffprobe is unavailable; video validation is limited to a non-empty file check.")
             return True
         try:
+            from config import SUBPROCESS_FLAGS
             result = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1", str(path)],
                 capture_output=True,
                 text=True,
                 timeout=20,
+                creationflags=SUBPROCESS_FLAGS
             )
             return result.returncode == 0 and "duration=" in result.stdout
         except (OSError, subprocess.TimeoutExpired) as exc:
