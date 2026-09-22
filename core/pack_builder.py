@@ -102,12 +102,25 @@ class PackBuilder:
         lines.append(f"dub_timestamps={ts}")
 
         # dub_characters — use provided names or fall back to state lookup
-        if speaker_display_names:
-            chars = speaker_display_names
+        chars = []
+        if isinstance(speaker_display_names, (list, tuple)):
+            chars = [str(c) for c in speaker_display_names if str(c).strip()]
         else:
-            chars = [state.speakers[item.speaker_id].display_name
-                     if item.speaker_id in state.speakers
-                     else state.get_speaker_safe_name(item.speaker_id)]
+            for sid in item.all_speakers:
+                name = None
+                if isinstance(speaker_display_names, dict):
+                    name = speaker_display_names.get(sid)
+                if not name or not str(name).strip():
+                    if sid in state.speakers and state.speakers[sid].display_name.strip():
+                        name = state.speakers[sid].display_name.strip()
+                    else:
+                        name = state.get_speaker_safe_name(sid)
+                if name and str(name).strip():
+                    chars.append(str(name).strip())
+
+        if not chars:
+            chars = [state.get_speaker_safe_name(item.speaker_id)]
+
         def _escape_character(character: object) -> str:
             return str(character).replace("\\", "\\\\").replace('"', '\\"').replace("\r", " ").replace("\n", " ")
 

@@ -133,7 +133,16 @@ def step_compile():
         str(launcher_c),
         str(res_file),
         "-o",
-        str(target_exe)
+        str(target_exe),
+        "-lwininet",
+        "-lshlwapi",
+        "-lshell32",
+        "-luser32",
+        "-lgdi32",
+        "-lcomctl32",
+        "-ldwmapi",
+        "-lole32",
+        "-luuid"
     ]
     res_gcc = subprocess.run(cmd_gcc, cwd=str(ROOT_DIR), capture_output=True, text=True)
     if res_gcc.returncode != 0:

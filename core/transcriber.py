@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 class Transcriber:
     def __init__(self, model_size='medium', language='th', device='auto', initial_prompt: str = None):
         self.model_size = model_size
-        self.language = language
+        self.language = None if (language in (None, "auto", "None", "")) else language
         self.device = device
-        self.initial_prompt = initial_prompt if initial_prompt is not None else (WHISPER_INITIAL_PROMPT_THAI if language == 'th' else None)
+        self.initial_prompt = initial_prompt if initial_prompt is not None else (WHISPER_INITIAL_PROMPT_THAI if self.language == 'th' else None)
         self.available = False
         self.model = None
 
@@ -63,6 +63,8 @@ class Transcriber:
             ),
             "condition_on_previous_text": False,
         }
+        if self.language is None:
+            transcribe_kwargs["multilingual"] = True
         if self.initial_prompt:
             transcribe_kwargs["initial_prompt"] = self.initial_prompt
 
@@ -102,11 +104,11 @@ class Transcriber:
                 if temp_wav.exists():
                     temp_wav.unlink(missing_ok=True)
 
-        # Apply ThaiTextCleaner post-processing if language is explicitly Thai
-        if self.language == 'th':
+        # Apply ThaiTextCleaner post-processing if language is Thai or contains Thai characters
+        if self.language == 'th' or (self.language is None and any('\u0e00' <= c <= '\u0e7f' for c in raw_text)):
             cleaned_text = ThaiTextCleaner.process_transcript(
                 raw_text,
-                language=self.language,
+                language=self.language or "th",
                 clean_hallucinations=True,
                 format_keywords=True
             )
@@ -159,7 +161,7 @@ class Transcriber:
         if not self.available or not self.model:
             return False
 
-        logger.info("Whisper-based segmentation: transcribing full audio for segment timestamps...")
+        logger.info(f"Whisper-based segmentation: transcribing full audio for segment timestamps (Language={self.language or 'auto-dynamic'})...")
 
         kwargs = {
             "language": self.language,
@@ -174,6 +176,8 @@ class Transcriber:
             "condition_on_previous_text": False,
             "word_timestamps": False,
         }
+        if self.language is None:
+            kwargs["multilingual"] = True
         if self.initial_prompt:
             kwargs["initial_prompt"] = self.initial_prompt
 
@@ -199,8 +203,8 @@ class Transcriber:
                 if not raw_text:
                     continue
 
-                # Clean Thai text
-                if self.language == "th" or (self.language is None and info.language == "th"):
+                # Clean Thai text if language is Thai or contains Thai characters
+                if self.language == "th" or any('\u0e00' <= c <= '\u0e7f' for c in raw_text):
                     raw_text = ThaiTextCleaner.process_transcript(
                         raw_text, language="th",
                         clean_hallucinations=True,

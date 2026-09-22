@@ -95,6 +95,40 @@ class TestExportRecovery(unittest.TestCase):
         self.assertEqual(missing_info["audio"], 1)
         self.assertFalse(missing_info["backing"])
 
+    def test_packbuilder_speaker_roles_separation(self):
+        """
+        Verify that exported .txt files for each dialogue item contain only that dialogue's
+        speaker/role in dub_characters, instead of dumping all project speakers together.
+        """
+        state = PipelineState()
+        state.pack_info = PackInfo(title="MultiSpeakerTest", include_dub_video=False)
+        state.speakers["SPEAKER_00"] = SpeakerInfo(speaker_id="SPEAKER_00", display_name="Hero")
+        state.speakers["SPEAKER_01"] = SpeakerInfo(speaker_id="SPEAKER_01", display_name="Villain")
+        state.speakers["SPEAKER_02"] = SpeakerInfo(speaker_id="SPEAKER_02", display_name="Narrator")
+
+        item1 = DialogueItem(index=1, speaker_id="SPEAKER_00", start=0.0, end=2.0, caption="I am the hero")
+        item2 = DialogueItem(index=2, speaker_id="SPEAKER_01", start=2.5, end=4.5, caption="I am the villain")
+        state.dialogues.extend([item1, item2])
+
+        builder = PackBuilder()
+        speaker_map = {sid: spk.display_name for sid, spk in state.speakers.items()}
+        pack_dir = builder.build_pack(
+            state,
+            output_dir=self.temp_path,
+            options={"speaker_display_names": speaker_map}
+        )
+
+        txt1 = (pack_dir / f"{item1.filename_base(state.get_speaker_safe_name('SPEAKER_00'))}.txt").read_text(encoding="utf-8")
+        txt2 = (pack_dir / f"{item2.filename_base(state.get_speaker_safe_name('SPEAKER_01'))}.txt").read_text(encoding="utf-8")
+
+        self.assertIn('dub_characters=["Hero"]', txt1)
+        self.assertNotIn("Villain", txt1)
+        self.assertNotIn("Narrator", txt1)
+
+        self.assertIn('dub_characters=["Villain"]', txt2)
+        self.assertNotIn("Hero", txt2)
+        self.assertNotIn("Narrator", txt2)
+
 
 if __name__ == "__main__":
     unittest.main()

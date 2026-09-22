@@ -452,9 +452,9 @@ class PipelineWorker(QThread):
                 txt_path = self._output_dir / txt_name
 
                 all_speakers = [
-                    self.state.get_speaker(sid).display_name
+                    self.state.get_speaker(sid).display_name.strip()
                     for sid in item.all_speakers
-                    if sid in self.state.speakers
+                    if sid in self.state.speakers and self.state.get_speaker(sid).display_name.strip()
                 ] or [speaker_name]
 
                 content = builder.build_txt(
