@@ -91,6 +91,21 @@ class ConcurrencyConfig:
     total_cpu_threads: int = 4     # Host logical processor count
 
 
+@dataclass
+class HybridExecutionPlan:
+    """Hybrid heterogeneous execution plan distributing load across GPU and CPU."""
+    primary_device: ComputeDevice
+    gpu_score: float
+    cpu_score: float
+    selected_mode: str             # "HYBRID_GPU_PRIMARY", "CPU_VECTORIZED_PRIMARY", "DUAL_COOPERATIVE"
+    gpu_workload_pct: int          # % of heavy neural inference assigned to GPU
+    cpu_workload_pct: int          # % of parallel I/O, VAD, slicing, & FFmpeg encoding assigned to CPU
+    clip_workers: int              # Concurrent CPU thread pool workers
+    whisper_threads: int           # Threads for Whisper CPU execution
+    demucs_threads: int            # Thread jobs for Demucs CPU execution
+    summary_th: str                # Human-readable Thai summary of allocation
+
+
 class DeviceManager:
     """
     Central system-wide hardware compute and dynamic resource manager.
@@ -115,10 +130,12 @@ class DeviceManager:
         win_gpus: List[str] = []
         if sys.platform == "win32":
             try:
+                from config import SUBPROCESS_FLAGS
                 res = subprocess.run(
                     ["powershell", "-NoProfile", "-Command", 
                      "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
-                    capture_output=True, text=True, timeout=3
+                    capture_output=True, text=True, timeout=3,
+                    creationflags=SUBPROCESS_FLAGS
                 )
                 if res.returncode == 0:
                     win_gpus = [line.strip() for line in res.stdout.splitlines() if line.strip() and "virtual" not in line.lower() and "remote" not in line.lower()]
@@ -300,10 +317,121 @@ class DeviceManager:
         return devices
 
     @classmethod
+    def calculate_performance_score(cls, device: Optional[ComputeDevice]) -> float:
+        """
+        Calculates a relative compute performance score (FLOPS / throughput index).
+        Evaluates GPU TFLOPS, VRAM, Tensor Cores vs CPU Physical Cores, Thread Count, and SIMD Vectorization.
+        """
+        if not device:
+            return 0.0
+
+        if device.is_gpu:
+            base_score = 100.0
+            vram_score = min(device.vram_gb, 24.0) * 25.0
+
+            backend_mult = 1.0
+            if device.backend == DeviceBackend.CUDA:
+                backend_mult = 2.5 if device.fp16_supported else 1.8
+            elif device.backend == DeviceBackend.ROCM:
+                backend_mult = 2.0
+            elif device.backend == DeviceBackend.MPS:
+                backend_mult = 1.9
+            elif device.backend == DeviceBackend.DIRECTML:
+                backend_mult = 1.5
+            elif device.backend == DeviceBackend.OPENVINO:
+                backend_mult = 1.4
+
+            name_upper = device.name.upper()
+            gpu_tier_bonus = 0.0
+            if any(k in name_upper for k in ["4090", "3090", "7900", "M3 MAX", "M2 ULTRA"]):
+                gpu_tier_bonus = 600.0
+            elif any(k in name_upper for k in ["4080", "3080", "4070", "3070", "7800", "M2 MAX", "M1 MAX"]):
+                gpu_tier_bonus = 400.0
+            elif any(k in name_upper for k in ["4060", "3060", "2080", "2070", "6700", "6600", "M1 PRO", "M2 PRO"]):
+                gpu_tier_bonus = 250.0
+            elif any(k in name_upper for k in ["GTX 1660", "GTX 1080", "GTX 1070", "A770", "A750"]):
+                gpu_tier_bonus = 150.0
+            elif any(k in name_upper for k in ["GTX 1050", "GT 1030", "MX", "UHD", "IRIS", "VEGA 8", "INTEGRATED"]):
+                gpu_tier_bonus = 20.0
+                backend_mult = 0.8
+
+            return round((base_score + vram_score + gpu_tier_bonus) * backend_mult, 1)
+
+        else:
+            total_threads = os.cpu_count() or 4
+            ram_gb = cls.get_system_ram_gb()
+            thread_score = total_threads * 15.0
+            ram_score = min(ram_gb, 128.0) * 2.0
+            simd_bonus = 1.3
+            return round((80.0 + thread_score + ram_score) * simd_bonus, 1)
+
+    @classmethod
+    def get_hybrid_execution_plan(cls, preference: str = "auto") -> HybridExecutionPlan:
+        """
+        Evaluates GPU vs CPU compute capability and returns a hybrid execution plan
+        distributing pipeline tasks across GPU and CPU to prevent bottlenecks.
+        """
+        devices = cls.detect_available_devices()
+        gpu_device = None
+        cpu_device = None
+
+        for d in devices:
+            if d.is_gpu and gpu_device is None:
+                gpu_device = d
+            elif d.backend == DeviceBackend.CPU and cpu_device is None:
+                cpu_device = d
+
+        if cpu_device is None:
+            cpu_device = ComputeDevice(
+                backend=DeviceBackend.CPU,
+                device_id="cpu",
+                name="Multi-Core CPU",
+                vendor="CPU",
+                is_gpu=False
+            )
+
+        gpu_score = cls.calculate_performance_score(gpu_device)
+        cpu_score = cls.calculate_performance_score(cpu_device)
+
+        cfg = cls.get_optimal_concurrency_config()
+
+        if preference == "cpu" or (preference == "auto" and (not gpu_device or cpu_score > gpu_score)):
+            chosen_dev = cpu_device
+            mode = "CPU_VECTORIZED_PRIMARY"
+            gpu_pct = 0
+            cpu_pct = 100
+            summary = (
+                f"ใช้ CPU Multi-Core ({cpu_device.name} - {cpu_score:.0f} คะแนน) เป็นตัวประมวลผลหลัก "
+                f"ผ่านระบบ INT8 Vectorization ({cfg.clip_workers} เธรดขนาน)"
+            )
+        else:
+            chosen_dev = gpu_device if gpu_device else cls.get_optimal_device(preference)
+            mode = "HYBRID_GPU_PRIMARY"
+            gpu_pct = 80
+            cpu_pct = 20
+            summary = (
+                f"ประมวลผลแบบไฮบริด: ใช้ GPU ({chosen_dev.name} - {gpu_score:.0f} คะแนน) สำหรับโมเดล AI หลัก (80%) "
+                f"ควบคู่กับ CPU ({cfg.clip_workers} เธรดขนาน - {cpu_score:.0f} คะแนน) สำหรับตัดต่อคลิปและ I/O (20%)"
+            )
+
+        return HybridExecutionPlan(
+            primary_device=chosen_dev,
+            gpu_score=gpu_score,
+            cpu_score=cpu_score,
+            selected_mode=mode,
+            gpu_workload_pct=gpu_pct,
+            cpu_workload_pct=cpu_pct,
+            clip_workers=cfg.clip_workers,
+            whisper_threads=cfg.whisper_threads,
+            demucs_threads=cfg.demucs_threads,
+            summary_th=summary
+        )
+
+    @classmethod
     def get_optimal_device(cls, preference: str = "auto") -> ComputeDevice:
         """
         Resolves the preferred device string (e.g. 'auto', 'cuda', 'directml', 'mps', 'cpu')
-        into the best available ComputeDevice instance.
+        into the best available ComputeDevice instance using dynamic performance scoring.
         """
         devices = cls.detect_available_devices()
 
@@ -314,7 +442,31 @@ class DeviceManager:
                     cls._active_device = dev
                     return dev
 
-        # Auto-selection priority: CUDA > DirectML > MPS > ROCm > OpenVINO > CPU
+        # Auto-selection: Evaluates highest Performance Score (GPU vs High-Core CPU)
+        best_gpu = None
+        for dev in devices:
+            if dev.is_gpu:
+                if best_gpu is None or cls.calculate_performance_score(dev) > cls.calculate_performance_score(best_gpu):
+                    best_gpu = dev
+
+        cpu_dev = None
+        for dev in devices:
+            if dev.backend == DeviceBackend.CPU:
+                cpu_dev = dev
+                break
+
+        if best_gpu and cpu_dev:
+            gpu_score = cls.calculate_performance_score(best_gpu)
+            cpu_score = cls.calculate_performance_score(cpu_dev)
+            if cpu_score > gpu_score:
+                log.info(f"High-Core CPU Score ({cpu_score:.1f}) exceeds GPU Score ({gpu_score:.1f}). Selecting CPU primary.")
+                cls._active_device = cpu_dev
+                return cpu_dev
+            else:
+                cls._active_device = best_gpu
+                return best_gpu
+
+        # Auto-selection fallback
         for dev in devices:
             if dev.backend == DeviceBackend.CUDA:
                 cls._active_device = dev

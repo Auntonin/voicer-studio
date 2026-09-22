@@ -193,18 +193,14 @@ class StudioSplashScreen(QSplashScreen):
         painter.end()
 
 
-def check_ffmpeg() -> bool:
-    """Check if ffmpeg is available in PATH."""
-    import subprocess
+def check_ffmpeg(progress_cb=None) -> bool:
+    """Check and guarantee FFmpeg availability (auto-installs if missing on first run)."""
     try:
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        result = subprocess.run(
-            ["ffmpeg", "-version"],
-            capture_output=True, timeout=5,
-            creationflags=flags
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        from core.ffmpeg_installer import ensure_ffmpeg
+        return ensure_ffmpeg(progress_cb=progress_cb)
+    except Exception as e:
+        import logging
+        logging.error(f"FFmpeg auto-installer error: {e}")
         return False
 
 
@@ -266,17 +262,21 @@ def main():
     app.processEvents()
     time.sleep(0.1)
 
-    # ── Dependency check ───────────────────────────────────────────────────────
+    # ── Dependency check & automated first-time FFmpeg setup ───────────────────
     splash.set_stage(45, "Verifying FFmpeg & Hardware Codecs...")
     app.processEvents()
 
-    if not check_ffmpeg():
+    def splash_progress(pct: int, msg: str):
+        splash.set_stage(pct, msg)
+        app.processEvents()
+
+    if not check_ffmpeg(progress_cb=splash_progress):
         splash.hide()
         QMessageBox.critical(
             None,
-            "FFmpeg Required",
-            "FFmpeg is required for audio/video extraction but was not found in PATH.\n\n"
-            "Please install FFmpeg via winget:\n"
+            "FFmpeg Setup Required",
+            "FFmpeg is required for audio/video extraction but could not be auto-installed.\n\n"
+            "Please install FFmpeg manually via Winget or command prompt:\n"
             "  winget install Gyan.FFmpeg\n\n"
             "Then restart Voicer Studio.",
         )

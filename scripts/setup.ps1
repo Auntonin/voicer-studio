@@ -38,18 +38,24 @@ Write-Host "       [OK] Python $verStr" -ForegroundColor Green
 # ── Check FFmpeg ──────────────────────────────────────────
 Write-Host ""
 Write-Host "[2/7] Checking FFmpeg..." -ForegroundColor Yellow
+$ffmpegInstalled = $false
 try {
     $null = ffmpeg -version 2>&1
+    $ffmpegInstalled = $true
     Write-Host "       [OK] FFmpeg found" -ForegroundColor Green
 } catch {
-    Write-Host "[ERROR] FFmpeg not found in PATH." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "  Install via winget:" -ForegroundColor White
-    Write-Host "    winget install Gyan.FFmpeg" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  Or download from: https://www.gyan.dev/ffmpeg/builds/" -ForegroundColor White
-    Read-Host "Press Enter to exit"
-    exit 1
+    $ffmpegInstalled = $false
+}
+
+if (-not $ffmpegInstalled) {
+    Write-Host "       [INFO] FFmpeg not found — attempting automatic installation via Winget..." -ForegroundColor Yellow
+    try {
+        winget install Gyan.FFmpeg --accept-package-agreements --accept-source-agreements --silent
+        Write-Host "       [OK] FFmpeg installed via Winget" -ForegroundColor Green
+    } catch {
+        Write-Host "       [WARNING] Could not auto-install FFmpeg via Winget." -ForegroundColor Yellow
+        Write-Host "       Note: Voicer Studio will auto-download standalone FFmpeg on first launch if missing." -ForegroundColor Cyan
+    }
 }
 
 # ── Create Virtual Environment ────────────────────────────

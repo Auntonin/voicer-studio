@@ -738,7 +738,8 @@ class ExportDialog(QDialog):
                 missing_audio += 1
 
         missing_backing = False
-        if self.state.backing_track_path and not Path(self.state.backing_track_path).exists():
+        backing_p = getattr(self.state, "pack_backing_track_path", None) or getattr(self.state, "backing_track_path", None)
+        if backing_p and not Path(backing_p).exists():
             missing_backing = True
 
         has_missing = (missing_images > 0) or (missing_audio > 0) or missing_backing

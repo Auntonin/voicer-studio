@@ -1334,40 +1334,93 @@ class MainWindow(QMainWindow):
         self._refresh_all_views()
 
     def _on_merge_next(self, idx: int):
-        self._push_undo()
-        dialogues = self._state.active_dialogues()
-        for i, d in enumerate(dialogues):
-            if d.index == idx and i < len(dialogues) - 1:
-                next_d = dialogues[i + 1]
-                d.end = next_d.end
-                if next_d.caption:
-                    d.caption = f"{d.caption} {next_d.caption}".strip()
-                next_d.is_deleted = True
-                break
-        self._state.renumber()
-        self._mark_dirty(True)
-        self._refresh_all_views()
-
-    def _on_split(self, idx: int):
-        self._push_undo()
+        target = None
         for d in self._state.active_dialogues():
             if d.index == idx:
-                mid = d.start + (d.end - d.start) / 2.0
-                old_end = d.end
-                d.end = mid
-                
-                new_d = DialogueItem(
-                    index=len(self._state.dialogues) + 1,
-                    speaker_id=d.speaker_id,
-                    start=mid,
-                    end=old_end,
-                    caption=""
-                )
-                self._state.dialogues.append(new_d)
+                target = d
                 break
+        if not target:
+            return
+
+        # Search for the next active clip belonging to the SAME speaker/character
+        same_spk_clips = [
+            d for d in self._state.active_dialogues()
+            if d.speaker_id == target.speaker_id and d.start >= target.start and d.index != target.index
+        ]
+
+        if not same_spk_clips:
+            spk_name = self._state.get_speaker_display_name(target.speaker_id)
+            self._log_message(f"Merge Next: No subsequent clip on character track '{spk_name}' to merge.", "warn")
+            return
+
+        next_d = min(same_spk_clips, key=lambda d: d.start)
+
+        self._push_undo()
+        target.end = max(target.end, next_d.end)
+        if next_d.caption:
+            if target.caption:
+                target.caption = f"{target.caption} {next_d.caption}".strip()
+            else:
+                target.caption = next_d.caption.strip()
+        next_d.is_deleted = True
+
         self._state.renumber()
         self._mark_dirty(True)
         self._refresh_all_views()
+        spk_name = self._state.get_speaker_display_name(target.speaker_id)
+        self._log_message(f"Merged clip #{target.index} with next clip for character '{spk_name}'", "ok")
+
+    def _on_split(self, idx: int):
+        target = None
+        for d in self._state.active_dialogues():
+            if d.index == idx:
+                target = d
+                break
+        if not target:
+            return
+
+        cur_t = self._timeline.current_time
+        # Priority 1: If playhead is positioned inside target clip, split at exact playhead time
+        if target.start + 0.05 < cur_t < target.end - 0.05:
+            split_time = round(cur_t, 3)
+            split_msg = f"Split clip #{target.index} at playhead position {split_time:.3f}s"
+        else:
+            # Priority 2: Fall back to 50% midpoint
+            split_time = round(target.start + (target.end - target.start) / 2.0, 3)
+            split_msg = f"Split clip #{target.index} at midpoint {split_time:.3f}s"
+
+        self._push_undo()
+        old_end = target.end
+        target.end = split_time
+
+        # Smart Caption Splitting (divide text proportionally by split ratio)
+        cap1, cap2 = "", ""
+        if target.caption:
+            words = target.caption.strip().split()
+            if len(words) > 1:
+                ratio = (split_time - target.start) / max(0.01, old_end - target.start)
+                split_w_idx = max(1, min(len(words) - 1, int(round(len(words) * ratio))))
+                cap1 = " ".join(words[:split_w_idx])
+                cap2 = " ".join(words[split_w_idx:])
+            else:
+                cap1 = target.caption
+                cap2 = ""
+
+        target.caption = cap1
+
+        new_d = DialogueItem(
+            index=len(self._state.dialogues) + 1,
+            speaker_id=target.speaker_id,
+            start=split_time,
+            end=old_end,
+            caption=cap2
+        )
+        self._state.dialogues.append(new_d)
+
+        self._state.renumber()
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(split_msg, "ok")
 
     def _on_caption_changed(self, idx: int, text: str):
         for d in self._state.active_dialogues():

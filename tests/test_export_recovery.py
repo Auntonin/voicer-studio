@@ -16,6 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.models import PipelineState, DialogueItem, SpeakerInfo, PackInfo
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker
+from PySide6.QtWidgets import QApplication
+
+app = QApplication.instance() or QApplication([])
 
 
 class TestExportRecovery(unittest.TestCase):
@@ -72,6 +75,25 @@ class TestExportRecovery(unittest.TestCase):
         results = checker.check_all(state, pack_dir)
         errors = [r for r in results if r.level == "error"]
         self.assertEqual(len(errors), 0, f"Expected 0 errors after auto-repair, got: {errors}")
+
+    def test_export_dialog_missing_asset_detection(self):
+        """
+        Verify ExportDialog._detect_missing_assets safely detects missing assets without raising AttributeError.
+        """
+        from gui.export_dialog import ExportDialog
+        state = PipelineState()
+        state.pack_backing_track_path = None
+        item = DialogueItem(index=1, speaker_id="1", start=0.0, end=1.0, caption="test")
+        state.dialogues.append(item)
+
+        settings = {"output_dir": str(self.temp_path), "auto_repair_missing_export_assets": True}
+        dlg = ExportDialog(None, state, settings)
+        missing_info = dlg._detect_missing_assets()
+        
+        self.assertTrue(missing_info["has_missing"])
+        self.assertEqual(missing_info["images"], 1)
+        self.assertEqual(missing_info["audio"], 1)
+        self.assertFalse(missing_info["backing"])
 
 
 if __name__ == "__main__":
