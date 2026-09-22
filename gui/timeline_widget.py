@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QWidget, QToolTip, QApplication, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QCursor, QFontMetrics, QLinearGradient
 
 from core.models import PipelineState, DialogueItem
@@ -82,14 +81,6 @@ class TimelineWidget(QWidget):
         self.TRACK_HEIGHT = 48
         self.TRACK_GAP = 5
 
-        # Master Audio Player
-        self.player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.player.setAudioOutput(self.audio_output)
-        
-        self.play_timer = QTimer(self)
-        self.play_timer.setInterval(33)  # ~30fps playhead update
-        self.play_timer.timeout.connect(self._on_play_timer_tick)
         self._is_playing = False
 
     # ── State & Layout Management ──────────────────────────────────────────────
@@ -98,12 +89,6 @@ class TimelineWidget(QWidget):
         self.state = state
         self.set_duration(state.video_duration)
         self._recalculate_size()
-        # Pre-set audio source if available so seek positions register immediately
-        audio_src = self.state.separated_vocals_path or self.state.work_audio_path or (self.state.video_path if (self.state.video_path and self.state.video_path.exists()) else None)
-        if audio_src and audio_src.exists():
-            target_url = QUrl.fromLocalFile(str(audio_src))
-            if self.player.source() != target_url:
-                self.player.setSource(target_url)
         self.update()
 
     def set_current_time(self, t: float):
@@ -114,11 +99,12 @@ class TimelineWidget(QWidget):
         max_dur = self.duration if self.duration > 0 else 99999.0
         t = max(0.0, min(max_dur, t))
         self.current_time = t
+        self._seek_in_progress = False
         self.playhead_tick.emit(t)
         self.update()
 
     def seek(self, t: float):
-        """Authoritative time seek across timeline and audio master clock with anti-rubberbanding guard."""
+        """Authoritative time seek across timeline with anti-rubberbanding guard."""
         import time
         max_dur = self.duration if self.duration > 0 else 99999.0
         t = max(0.0, min(max_dur, t))
@@ -132,17 +118,6 @@ class TimelineWidget(QWidget):
         self._pending_seek_target = t
         self._seek_in_progress = True
         self._seek_timestamp = now
-
-        # Ensure player source is set if state has media available
-        if self.state and not self.player.source().isValid():
-            audio_src = self.state.separated_vocals_path or self.state.work_audio_path or (self.state.video_path if (self.state.video_path and self.state.video_path.exists()) else None)
-            if audio_src and audio_src.exists():
-                self.player.setSource(QUrl.fromLocalFile(str(audio_src)))
-
-        if self.player.source().isValid():
-            self.player.setPosition(int(t * 1000))
-            if self._is_playing and self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                self.player.play()
 
         self.playhead_tick.emit(t)
         self.update()
@@ -403,64 +378,14 @@ class TimelineWidget(QWidget):
     # ── Master Timeline Audio Playback ─────────────────────────────────────────
 
     def toggle_playback(self):
-        if self._is_playing:
-            self.stop_playback()
-        else:
-            self.start_playback()
+        self.playback_toggle_requested.emit()
 
     def start_playback(self):
-        if not self.state:
-            return
-        audio_src = self.state.separated_vocals_path or self.state.work_audio_path or (self.state.video_path if (self.state.video_path and self.state.video_path.exists()) else None)
-        if audio_src and audio_src.exists():
-            target_url = QUrl.fromLocalFile(str(audio_src))
-            if self.player.source() != target_url:
-                self.player.setSource(target_url)
-            self.player.setPosition(int(self.current_time * 1000))
-            self.player.play()
-        self.play_timer.start()
         self._is_playing = True
 
     def stop_playback(self):
-        self.player.stop()
-        self.play_timer.stop()
         self._is_playing = False
         self._seek_in_progress = False
-
-    def _on_play_timer_tick(self):
-        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            import time
-            pos_sec = self.player.position() / 1000.0
-
-            if self._seek_in_progress:
-                elapsed_since_seek = time.monotonic() - self._seek_timestamp
-                # Guard window: wait for player position to arrive near target, or timeout after 350ms
-                if abs(pos_sec - self._pending_seek_target) <= 0.35 or elapsed_since_seek >= 0.35:
-                    self._seek_in_progress = False
-                    self.current_time = pos_sec
-                else:
-                    # In-flight seek: advance smoothly from target based on wall-clock elapsed time
-                    # Prevents rubberbanding back to stale pre-seek time!
-                    self.current_time = self._pending_seek_target + elapsed_since_seek
-                    self.playhead_tick.emit(self.current_time)
-                    self.update()
-                    return
-            else:
-                self.current_time = pos_sec
-
-            self.playhead_tick.emit(self.current_time)
-            self.update()
-        elif not self.player.source().isValid() and self._is_playing:
-            # Synthetic timeline clock fallback if media has no audio track
-            self.current_time += 0.033
-            if self.duration > 0 and self.current_time >= self.duration:
-                self.stop_playback()
-                return
-            self.playhead_tick.emit(self.current_time)
-            self.update()
-        else:
-            if not self._seek_in_progress:
-                self.stop_playback()
 
 
     # ── Painting ───────────────────────────────────────────────────────────────

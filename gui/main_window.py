@@ -983,14 +983,13 @@ class MainWindow(QMainWindow):
         cur_t = self._timeline.current_time
         self._video_panel.set_position(cur_t)
         self._video_panel.start_playback()
-        self._timeline._is_playing = True
+        self._timeline.start_playback()
 
     def _stop_global_playback(self):
         if hasattr(self, '_clip_editor'):
             self._clip_editor.player.stop()
         self._video_panel.pause_playback()
         self._timeline.stop_playback()
-        self._timeline._is_playing = False
 
     def _on_video_playback_toggled(self, is_playing: bool):
         self._timeline._is_playing = is_playing
@@ -2740,7 +2739,7 @@ class MainWindow(QMainWindow):
             self._video_panel.player.stop()
         if hasattr(self, '_clip_editor') and hasattr(self._clip_editor, 'player'):
             self._clip_editor.player.stop()
-        if hasattr(self, '_timeline') and hasattr(self._timeline, 'player'):
+        if hasattr(self, '_timeline') and hasattr(self._timeline, 'player') and self._timeline.player:
             self._timeline.player.stop()
 
         # Prompt for unsaved project changes if project data is loaded

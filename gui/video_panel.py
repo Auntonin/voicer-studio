@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QSlider, QStackedLayout, QWidget
 )
-from PySide6.QtCore import Qt, Signal, QUrl, QTime, QSize
+from PySide6.QtCore import Qt, Signal, QUrl, QTime, QSize, QTimer
 from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent, QPixmap, QIcon
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -62,7 +62,12 @@ class VideoPanel(QFrame):
 
         self.player.positionChanged.connect(self._on_player_position_changed)
         self.player.durationChanged.connect(self._on_player_duration_changed)
+        self.player.playbackStateChanged.connect(self._on_player_state_changed)
         self.player.errorOccurred.connect(self._on_player_error)
+
+        self.play_timer = QTimer(self)
+        self.play_timer.setInterval(25)  # ~40fps smooth playhead & timecode updates
+        self.play_timer.timeout.connect(self._on_play_timer_tick)
 
         # ── Main Layout ─────────────────────────────────────────────────
         main_layout = QVBoxLayout(self)
@@ -506,21 +511,44 @@ class VideoPanel(QFrame):
             self.audio_output.setMuted(self._is_muted)
             self.audio_output.setVolume(self._volume)
             self.player.play()
+            self.play_timer.start()
             self.btn_play.setText(tr("vp_btn_pause"))
             self.playback_toggled.emit(True)
 
     def pause_playback(self):
         self.player.pause()
+        self.play_timer.stop()
         self.btn_play.setText(tr("vp_btn_play"))
         self.playback_toggled.emit(False)
 
     def stop_playback(self):
         self.player.stop()
+        self.play_timer.stop()
         self.btn_play.setText(tr("vp_btn_play"))
         self.playback_toggled.emit(False)
 
     def is_playing(self) -> bool:
         return self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+    def _on_player_state_changed(self, state: QMediaPlayer.PlaybackState):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            if not self.play_timer.isActive():
+                self.play_timer.start()
+        else:
+            if self.play_timer.isActive():
+                self.play_timer.stop()
+
+    def _on_play_timer_tick(self):
+        if self.is_playing():
+            pos_ms = self.player.position()
+            dur_ms = self.player.duration()
+            self._update_time_code(pos_ms, dur_ms)
+            if dur_ms > 0 and not self._is_user_seeking:
+                self.seek_slider.blockSignals(True)
+                val = int((pos_ms / dur_ms) * 1000)
+                self.seek_slider.setValue(val)
+                self.seek_slider.blockSignals(False)
+            self.position_changed.emit(pos_ms / 1000.0)
 
     # ── Internal Player Handlers ──────────────────────────────────────
 
