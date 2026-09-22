@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 # Canonical local tools directory
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RUNTIME_TOOLS_DIR = PROJECT_ROOT / "runtime" / "bin"
 LOCAL_TOOLS_DIR = PROJECT_ROOT / "tools" / "ffmpeg" / "bin"
 APPDATA_TOOLS_DIR = Path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))) / "VoicerStudio" / "tools" / "ffmpeg" / "bin"
 
@@ -38,19 +39,25 @@ def get_ffmpeg_executable() -> Optional[Path]:
     Checks if ffmpeg is available in system PATH or local application directories.
     Returns Path to ffmpeg.exe if found, else None.
     """
-    # 1. Check local project tools dir
+    # 1. Check local project runtime/bin dir
+    runtime_exe = RUNTIME_TOOLS_DIR / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    if runtime_exe.exists():
+        _ensure_in_path(RUNTIME_TOOLS_DIR)
+        return runtime_exe
+
+    # 2. Check local project tools dir
     local_exe = LOCAL_TOOLS_DIR / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
     if local_exe.exists():
         _ensure_in_path(LOCAL_TOOLS_DIR)
         return local_exe
 
-    # 2. Check AppData tools dir
+    # 3. Check AppData tools dir
     appdata_exe = APPDATA_TOOLS_DIR / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
     if appdata_exe.exists():
         _ensure_in_path(APPDATA_TOOLS_DIR)
         return appdata_exe
 
-    # 3. Check system PATH via shutil.which
+    # 4. Check system PATH via shutil.which
     sys_path_exe = shutil.which("ffmpeg")
     if sys_path_exe:
         return Path(sys_path_exe)

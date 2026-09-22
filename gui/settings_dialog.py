@@ -18,7 +18,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from config import WHISPER_INITIAL_PROMPT_THAI, VAD_PADDING_MS, VAD_THRESHOLD, VOICE_SEP_MODE_DEFAULT, DIARIZATION_MAX_SPEAKERS
+from config import (
+    WHISPER_INITIAL_PROMPT_THAI, VAD_PADDING_MS, VAD_THRESHOLD,
+    VOICE_SEP_MODE_DEFAULT, DIARIZATION_MAX_SPEAKERS,
+    WHISPER_SUPPORTED_LANGUAGES, WHISPER_LANGUAGE_DEFAULT
+)
 from core.i18n import i18n, tr
 from gui.ui_utils import apply_dark_title_bar
 
@@ -153,7 +157,7 @@ class SettingsDialog(QDialog):
         form_ai.addRow(self.lbl_row_whisper_model, self.combo_whisper)
         
         self.combo_lang = QComboBox()
-        self.combo_lang.addItems(["Auto", "Thai", "Japanese", "English", "Chinese"])
+        self._populate_whisper_lang_combo()
         self.lbl_row_whisper_lang = QLabel(tr("cfg_whisper_lang"))
         form_ai.addRow(self.lbl_row_whisper_lang, self.combo_lang)
         
@@ -309,6 +313,19 @@ class SettingsDialog(QDialog):
         for code, name in i18n.get_available_languages().items():
             self.combo_app_lang.addItem(name, userData=code)
 
+    def _populate_whisper_lang_combo(self):
+        """Populate Whisper transcription spoken language selector."""
+        curr_data = self.combo_lang.currentData() if hasattr(self, 'combo_lang') and self.combo_lang.count() > 0 else "th"
+        self.combo_lang.blockSignals(True)
+        self.combo_lang.clear()
+        for code, label in WHISPER_SUPPORTED_LANGUAGES.items():
+            self.combo_lang.addItem(label, userData=code)
+        if curr_data is not None:
+            idx = self.combo_lang.findData(curr_data)
+            if idx >= 0:
+                self.combo_lang.setCurrentIndex(idx)
+        self.combo_lang.blockSignals(False)
+
     def _populate_device_combo(self):
         """Discovers and populates hardware compute processors (NVIDIA, DirectML, CPU)."""
         from core.device_manager import device_manager
@@ -443,6 +460,8 @@ class SettingsDialog(QDialog):
             self.lbl_row_whisper_model.setText(tr("cfg_whisper_model"))
         if hasattr(self, 'lbl_row_whisper_lang'):
             self.lbl_row_whisper_lang.setText(tr("cfg_whisper_lang"))
+        if hasattr(self, 'combo_lang'):
+            self._populate_whisper_lang_combo()
         if hasattr(self, 'lbl_row_voice_sep'):
             self.lbl_row_voice_sep.setText(tr("cfg_voice_sep"))
         if hasattr(self, 'lbl_row_ts_mode'):
@@ -564,11 +583,15 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self.combo_whisper.setCurrentIndex(idx)
             
-        lang_map = {None: "Auto", "th": "Thai", "ja": "Japanese", "en": "English", "zh": "Chinese"}
-        lang_text = lang_map.get(settings.get("whisper_language", "th"), "Thai")
-        lang_idx = self.combo_lang.findText(lang_text)
+        raw_lang = settings.get("whisper_language", WHISPER_LANGUAGE_DEFAULT)
+        target_code = "auto" if (raw_lang is None or raw_lang == "auto") else raw_lang
+        lang_idx = self.combo_lang.findData(target_code)
         if lang_idx >= 0:
             self.combo_lang.setCurrentIndex(lang_idx)
+        else:
+            th_idx = self.combo_lang.findData("th")
+            if th_idx >= 0:
+                self.combo_lang.setCurrentIndex(th_idx)
             
         sep_mode = settings.get("voice_sep_mode", VOICE_SEP_MODE_DEFAULT)
         if sep_mode == "original":
@@ -627,8 +650,8 @@ class SettingsDialog(QDialog):
         self.edit_authors.setText(", ".join(authors) if isinstance(authors, list) else str(authors))
         
     def get_settings(self) -> dict:
-        lang_map = {"Auto": None, "Thai": "th", "Japanese": "ja", "English": "en", "Chinese": "zh"}
-        lang_text = self.combo_lang.currentText()
+        lang_code = self.combo_lang.currentData()
+        whisper_lang = None if (lang_code == "auto" or lang_code is None) else lang_code
         
         sep_mode = "original"
         if self.rb_sep_iso.isChecked():
@@ -659,7 +682,7 @@ class SettingsDialog(QDialog):
             "custom_workers":         self.spin_custom_workers.value(),
             "hf_token":               self.edit_hf.text().strip(),
             "whisper_model":          self.combo_whisper.currentText(),
-            "whisper_language":       lang_map.get(lang_text, "th"),
+            "whisper_language":       whisper_lang,
             "voice_sep_mode":         sep_mode,
             "timestamp_mode":         ts_mode,
             "vad_threshold":          self.slider_vad.value() / 100.0,

@@ -101,11 +101,15 @@ WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
 WHISPER_LANGUAGE_DEFAULT = "th"    # Default to Thai for dubbing
 WHISPER_INITIAL_PROMPT_THAI = "บทสนทนาพากย์ไทย เสียงพากย์อนิเมะและเกม Thai and English dubbing dialogue"
 WHISPER_SUPPORTED_LANGUAGES = {
-    "Thai (ภาษาไทย)": "th",
-    "Auto-detect": None,
-    "English": "en",
-    "Japanese": "ja",
-    "Chinese": "zh",
+    "th": "Thai (ภาษาไทย)",
+    "auto": "Auto-detect / Dynamic (ตรวจจับอัตโนมัติแยกช่วง)",
+    "ja": "Japanese (ภาษาญี่ปุ่น)",
+    "en": "English (ภาษาอังกฤษ)",
+    "zh": "Chinese (ภาษาจีน)",
+    "ko": "Korean (ภาษาเกาหลี)",
+    "es": "Spanish (ภาษาสเปน)",
+    "fr": "French (ภาษาฝรั่งเศส)",
+    "de": "German (ภาษาเยอรมัน)",
 }
 
 CLEAN_THAI_HALLUCINATIONS_DEFAULT = True
