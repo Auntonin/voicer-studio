@@ -322,6 +322,14 @@ class PipelineState:
     separated_bg_path: Optional[Path] = None      # Demucs background
     pack_backing_track_path: Optional[Path] = None
 
+    @property
+    def backing_track_path(self) -> Optional[Path]:
+        return self.pack_backing_track_path
+
+    @backing_track_path.setter
+    def backing_track_path(self, val: Optional[Path]):
+        self.pack_backing_track_path = val
+
     speakers: Dict[str, SpeakerInfo] = field(default_factory=dict)  # {speaker_id: SpeakerInfo}
     speaker_order: List[str] = field(default_factory=list)          # Ordered list of speaker IDs for UI layer ordering
     dialogues: List[DialogueItem] = field(default_factory=list)

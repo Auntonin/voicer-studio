@@ -40,6 +40,29 @@ TEMP_DIR.mkdir(exist_ok=True)
 # ── Settings File ──────────────────────────────────────────────────────────────
 SETTINGS_FILE = APP_DIR / "settings.json"
 
+
+def save_settings(settings: dict):
+    """Saves application settings dictionary to settings.json atomically."""
+    import json
+    try:
+        tmp_file = SETTINGS_FILE.with_suffix(".tmp")
+        tmp_file.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp_file.replace(SETTINGS_FILE)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to save settings: {e}")
+
+
+def load_settings() -> dict:
+    """Loads application settings from settings.json, with fallback to empty dict."""
+    import json
+    if SETTINGS_FILE.exists():
+        try:
+            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
 # ── Audio Defaults ─────────────────────────────────────────────────────────────
 AUDIO_SAMPLE_RATE = 48000          # Hz — processing sample rate
 AUDIO_CHANNELS = 2                 # Stereo
