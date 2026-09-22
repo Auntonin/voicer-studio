@@ -87,6 +87,32 @@ class TestMediaPlayback(unittest.TestCase):
         panel._update_time_code(15000, 120000)
         self.assertEqual(panel.lbl_time_code.text(), "00:15.000 / 02:00.000")
 
+    def test_timeline_unified_playback(self):
+        timeline = TimelineWidget()
+        timeline.set_duration(60.0)
+
+        # Ensure timeline does not create duplicate audio players
+        self.assertFalse(hasattr(timeline, "audio_output"))
+
+        # Test toggle_playback signal emission
+        toggle_called = []
+        timeline.playback_toggle_requested.connect(lambda: toggle_called.append(True))
+        timeline.toggle_playback()
+        self.assertTrue(len(toggle_called) > 0)
+
+        # Test start and stop playback state
+        timeline.start_playback()
+        self.assertTrue(timeline._is_playing)
+        timeline.stop_playback()
+        self.assertFalse(timeline._is_playing)
+
+    def test_video_panel_play_timer(self):
+        panel = VideoPanel()
+        self.assertTrue(hasattr(panel, "play_timer"))
+        self.assertEqual(panel.play_timer.interval(), 25)
+        self.assertFalse(panel.play_timer.isActive())
+
 
 if __name__ == "__main__":
     unittest.main()
+
