@@ -29,9 +29,22 @@ class PackBuilder:
                 "-t", f"{dur:.3f}", "-c:a", "libmp3lame", "-b:a", "128k", "-ar", "44100",
                 str(dest_path)
             ]
-            subprocess.run(cmd, capture_output=True, timeout=15, creationflags=SUBPROCESS_FLAGS)
+            res = subprocess.run(cmd, capture_output=True, timeout=15, creationflags=SUBPROCESS_FLAGS)
+            if res.returncode == 0 and dest_path.exists() and dest_path.stat().st_size > 0:
+                return
         except Exception as e:
-            logger.warning(f"Could not generate fallback audio: {e}")
+            logger.warning(f"Could not generate fallback audio via ffmpeg: {e}")
+
+        # Pure Python fallback: generate minimal valid silent MP3 frames
+        try:
+            # Standard MPEG 1.0 Layer III, 128 kbps, 44.1 kHz, Joint Stereo frame (417 bytes)
+            frame_header = b"\xff\xfb\x90\x64"
+            frame_payload = b"\x00" * 413
+            mp3_frame = frame_header + frame_payload
+            num_frames = max(1, int(duration_sec * 38.28))
+            dest_path.write_bytes(mp3_frame * num_frames)
+        except Exception as ex:
+            logger.warning(f"Could not write silent mp3 fallback: {ex}")
 
     @staticmethod
     def _create_fallback_image(dest_path: Path, speaker_name: str = "", clip_index: int = 1):
