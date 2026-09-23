@@ -16,11 +16,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.models import PipelineState, DialogueItem, SpeakerInfo, PackInfo
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker
-from PySide6.QtWidgets import QApplication
+try:
+    from PySide6.QtWidgets import QApplication
+    _gui_available = True
+except ImportError:
+    _gui_available = False
 
-app = QApplication.instance() or QApplication([])
+app = QApplication.instance() or QApplication([]) if _gui_available else None
 
 
+@unittest.skipIf(not _gui_available, "GUI not available")
 class TestExportRecovery(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()

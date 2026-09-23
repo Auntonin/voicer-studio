@@ -11,14 +11,20 @@ from pathlib import Path
 # Add project root to sys.path for direct test execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QUrl
+try:
+    from PySide6.QtWidgets import QApplication
+    _gui_available = True
+except ImportError:
+    _gui_available = False
+
+app = QApplication.instance() or QApplication([]) if _gui_available else None
 
 from core.models import PipelineState, DialogueItem
 from gui.video_panel import VideoPanel
 from gui.timeline_widget import TimelineWidget
 
 
+@unittest.skipIf(not _gui_available, "GUI required")
 class TestMediaPlayback(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -26,7 +26,8 @@ from PySide6.QtGui import QIcon, QFont, QColor
 
 from config import APP_NAME, APP_VERSION, COLORS, ASSETS_DIR
 from core.updater import (
-    UpdateInfo, UpdateDownloaderThread, apply_update_and_restart, get_current_app_path
+    UpdateInfo, UpdateDownloaderThread,
+    apply_update_and_restart, get_current_app_path
 )
 from core.i18n import tr
 from gui.ui_utils import apply_dark_title_bar
@@ -250,7 +251,7 @@ class UpdateDialog(QDialog):
         self.progress_container.hide()
         main_layout.addWidget(self.progress_container)
 
-        # ── Development Mode Notification (if running from source) ──
+        # ── Mode Hint ──
         _, is_frozen = get_current_app_path()
         if not is_frozen:
             lbl_dev_hint = QLabel(tr("update_dev_mode_hint"))
@@ -289,7 +290,7 @@ class UpdateDialog(QDialog):
         card_layout.setSpacing(14)
         card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Checkmark / Shield badge
+        # Checkmark badge
         lbl_icon = QLabel("✓")
         lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_icon.setStyleSheet(f"""
@@ -305,7 +306,8 @@ class UpdateDialog(QDialog):
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(lbl_title)
 
-        lbl_desc = QLabel(tr("update_uptodate_desc", version=APP_VERSION))
+        desc_text = tr("update_uptodate_desc", version=APP_VERSION)
+        lbl_desc = QLabel(desc_text)
         lbl_desc.setStyleSheet(f"font-size: 9.5pt; color: {COLORS['text_secondary']};")
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(lbl_desc)
@@ -315,9 +317,10 @@ class UpdateDialog(QDialog):
         # Close button
         btn_box = QHBoxLayout()
         btn_box.addStretch()
-        btn_close = QPushButton(tr("btn_close"))
-        btn_close.clicked.connect(self.accept)
-        btn_box.addWidget(btn_close)
+
+        self.btn_close = QPushButton(tr("btn_close"))
+        self.btn_close.clicked.connect(self.accept)
+        btn_box.addWidget(self.btn_close)
         layout.addLayout(btn_box)
 
     def _format_markdown_notes(self, markdown_text: str) -> str:
@@ -364,7 +367,7 @@ class UpdateDialog(QDialog):
             self._trigger_restart()
             return
 
-        # Start downloading
+        # Start downloading binary asset
         self.btn_action.setEnabled(False)
         self.btn_later.setEnabled(False)
         self.progress_container.show()
@@ -416,8 +419,12 @@ class UpdateDialog(QDialog):
 
     def _on_download_error(self, err_msg: str):
         self.progress_container.hide()
-        self.btn_action.setEnabled(True)
-        self.btn_later.setEnabled(True)
+        if hasattr(self, 'btn_action'):
+            self.btn_action.setEnabled(True)
+        if hasattr(self, 'btn_later'):
+            self.btn_later.setEnabled(True)
+        if hasattr(self, 'btn_close'):
+            self.btn_close.setEnabled(True)
         QMessageBox.warning(
             self,
             tr("update_failed_title"),

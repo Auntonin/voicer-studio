@@ -82,6 +82,10 @@ class TimelineWidget(QWidget):
         self.TRACK_GAP = 5
 
         self._is_playing = False
+        self._hover_track_id: Optional[str] = None
+        self._hover_time: Optional[float] = None
+        self._is_mouse_inside: bool = False
+        self.setMouseTracking(True)
 
     # ── State & Layout Management ──────────────────────────────────────────────
 
@@ -880,9 +884,14 @@ class TimelineWidget(QWidget):
             painter.setFont(font_sub)
             painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, tr("tl_reordering"))
 
-    # ── Mouse Interaction & Cursors ─────────────────────────────────────────────
+    def enterEvent(self, event):
+        self._is_mouse_inside = True
+        super().enterEvent(event)
 
     def leaveEvent(self, event):
+        self._is_mouse_inside = False
+        self._hover_track_id = None
+        self._hover_time = None
         if self._is_hovering_playhead:
             self._is_hovering_playhead = False
             self.update()
@@ -890,6 +899,30 @@ class TimelineWidget(QWidget):
             self._is_hovering_pin = False
             self.update()
         super().leaveEvent(event)
+
+    def get_cursor_target(self) -> Tuple[str, float]:
+        """
+        Determine target speaker track and timestamp for adding a clip:
+        - If mouse is currently hovering inside timeline canvas, return the hovered track and time (or playhead).
+        - Otherwise, default to the top layer / first track (A1) at current playhead time.
+        """
+        speakers_list = self._get_speaker_list()
+        top_speaker = speakers_list[0] if speakers_list else "SPEAKER_00"
+
+        # Check real-time cursor position over widget
+        cursor_pos = self.mapFromGlobal(QCursor.pos())
+        if self.rect().contains(cursor_pos):
+            x = cursor_pos.x()
+            y = cursor_pos.y()
+            track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
+            spk_id = speakers_list[track_idx] if (0 <= track_idx < len(speakers_list) and y >= self.RULER_HEIGHT) else top_speaker
+            t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second))) if x >= self.HEADER_WIDTH else self.current_time
+            return spk_id, t
+
+        # If hover was tracked:
+        target_spk = self._hover_track_id if (self._hover_track_id and self._hover_track_id in speakers_list) else top_speaker
+        target_t = self._hover_time if self._hover_time is not None else self.current_time
+        return target_spk, target_t
 
     def _hit_test(self, x: float, y: float) -> Tuple[Optional[str], Optional[DialogueItem]]:
         """Returns (mode, dialogue_item) where mode in ['playhead', 'ruler', 'start', 'end', 'body', 'track', 'header', 'pin_button']"""
@@ -1049,6 +1082,19 @@ class TimelineWidget(QWidget):
                     menu.exec(event.globalPosition().toPoint())
                     event.accept()
                     return
+                else:
+                    # Right-click on empty track lane -> offer Add Clip Here
+                    speakers_list = self._get_speaker_list()
+                    track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
+                    if 0 <= track_idx < len(speakers_list) and y >= self.RULER_HEIGHT and x >= self.HEADER_WIDTH:
+                        spk_id = speakers_list[track_idx]
+                        click_t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
+                        menu = QMenu(self)
+                        act_add = menu.addAction(tr("tl_btn_add_clip"))
+                        act_add.triggered.connect(lambda s=spk_id, t=click_t: self.add_clip_requested.emit(s, t))
+                        menu.exec(event.globalPosition().toPoint())
+                        event.accept()
+                        return
 
         # ── Middle Mouse Button (MMB) 2D Pan ─────────────────────────
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -1204,8 +1250,18 @@ class TimelineWidget(QWidget):
                 if 0 <= target_spk_idx < len(speakers_list):
                     if item.speaker_id != speakers_list[target_spk_idx]:
                         item.speaker_id = speakers_list[target_spk_idx]
-            self.update()
-        else:
+            speakers_list = self._get_speaker_list()
+            track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
+            if 0 <= track_idx < len(speakers_list) and y >= self.RULER_HEIGHT:
+                self._hover_track_id = speakers_list[track_idx]
+            else:
+                self._hover_track_id = None
+
+            if x >= self.HEADER_WIDTH:
+                self._hover_time = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
+            else:
+                self._hover_time = None
+
             header_x = self._get_header_x()
             px = self.HEADER_WIDTH + self.current_time * self.pixels_per_second
             is_near_playhead = (px >= header_x + self.HEADER_WIDTH) and (

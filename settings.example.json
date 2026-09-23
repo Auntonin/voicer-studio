@@ -16,6 +16,7 @@
   "whisper_initial_prompt": "บทสนทนาพากย์ไทย เสียงพากย์อนิเมะและเกม Thai and English dubbing dialogue",
   "output_dir": "",
   "include_dub_video": true,
+  "check_updates_startup": true,
   "pack_authors": [],
   "recent_videos": []
 }

@@ -517,7 +517,7 @@
   "update_failed_msg": "An error occurred while downloading the update:\n\n{error}",
   "update_error_title": "Update Error",
   "update_apply_failed": "Failed to start updater helper script:\n\n{error}",
-  "update_dev_mode_hint": "Note: Running in development mode. Files will update VoicerStudio.exe or you can use git pull.",
+  "update_dev_mode_hint": "Note: Running in development mode (from source code).",
   "update_toast_title": "Update Available",
   "update_toast_msg": "Voicer Studio v{version} is now available! Click to update.",
   "cfg_check_updates_startup": "Automatically check for updates on startup",

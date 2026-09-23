@@ -502,16 +502,8 @@ class MainWindow(QMainWindow):
                 return
 
             if has_update and update_info:
-                if manual:
-                    dlg = UpdateDialog(self, update_info=update_info, is_up_to_date=False)
-                    dlg.exec()
-                else:
-                    self._show_toast(
-                        title=tr("update_toast_title"),
-                        msg=tr("update_toast_msg", version=update_info.version),
-                        level="info",
-                        on_click=lambda: UpdateDialog(self, update_info=update_info, is_up_to_date=False).exec()
-                    )
+                dlg = UpdateDialog(self, update_info=update_info, is_up_to_date=False)
+                dlg.exec()
             else:
                 if manual:
                     dlg = UpdateDialog(self, update_info=update_info, is_up_to_date=True)
@@ -936,6 +928,7 @@ class MainWindow(QMainWindow):
         self._timeline.merge_requested.connect(self._on_merge_next)
         self._timeline.delete_requested.connect(self._on_dialogue_deleted)
         self._timeline.tracks_reordered.connect(self._on_timeline_tracks_reordered)
+        self._timeline.add_clip_requested.connect(self._on_add_clip_at)
         self._timeline.playback_toggle_requested.connect(self._toggle_global_playback)
         self._timeline.playback_start_requested.connect(self._start_global_playback)
         self._timeline.playback_stop_requested.connect(self._stop_global_playback)
@@ -1166,24 +1159,45 @@ class MainWindow(QMainWindow):
             self._refresh_all_views()
             self._log_message(f"Deleted speaker track '{spk_info.display_name}'", "info")
 
-    def _on_add_clip(self):
+    def _on_add_clip_at(self, spk_id: Optional[str] = None, t: Optional[float] = None):
         if not self._state.speakers:
             self._on_add_track()
+
+        speakers_list = self._timeline._get_speaker_list()
+        top_speaker = speakers_list[0] if speakers_list else (next(iter(self._state.speakers.keys())) if self._state.speakers else "SPEAKER_00")
+
+        if spk_id is None or t is None:
+            calc_spk, calc_t = self._timeline.get_cursor_target()
+            if spk_id is None:
+                spk_id = calc_spk
+            if t is None:
+                t = calc_t
+
+        if spk_id not in self._state.speakers:
+            spk_id = top_speaker
+
         self._push_undo()
-        cur_t = self._timeline.current_time
-        spk_id = self._active_speaker_id if self._active_speaker_id in self._state.speakers else next(iter(self._state.speakers.keys()))
+        clip_dur = 1.5
+        max_dur = self._timeline.duration if self._timeline.duration > 0 else 99999.0
         new_d = DialogueItem(
             index=len(self._state.dialogues) + 1,
             speaker_id=spk_id,
-            start=cur_t,
-            end=cur_t + 1.5,
+            start=t,
+            end=min(max_dur, t + clip_dur),
             caption=""
         )
         self._state.dialogues.append(new_d)
         self._state.renumber()
+        self._active_speaker_id = spk_id
+        self._timeline.selected_index = new_d.index
         self._mark_dirty(True)
         self._refresh_all_views()
+        self._clip_editor.load_item(new_d, self._state)
+        self.seek_to_time(t)
         self._log_message(f"Added new dialogue clip #{new_d.index} for speaker {spk_id}", "ok")
+
+    def _on_add_clip(self):
+        self._on_add_clip_at()
 
     def _on_delete_selected_clip(self):
         idx = self._timeline.selected_index

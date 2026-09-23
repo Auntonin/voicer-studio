@@ -7,12 +7,17 @@ smart Split Clip (playhead position priority & smart caption splitting).
 
 import unittest
 from core.models import PipelineState, DialogueItem, SpeakerInfo
-from gui.main_window import MainWindow
-from PySide6.QtWidgets import QApplication
+try:
+    from gui.main_window import MainWindow
+    from PySide6.QtWidgets import QApplication
+    _gui_available = True
+except ImportError:
+    _gui_available = False
 
-app = QApplication.instance() or QApplication([])
+app = QApplication.instance() or QApplication([]) if _gui_available else None
 
 
+@unittest.skipIf(not _gui_available, "GUI not available")
 class TestClipEditorOperations(unittest.TestCase):
 
     def setUp(self):
@@ -27,8 +32,10 @@ class TestClipEditorOperations(unittest.TestCase):
         self.item2 = DialogueItem(index=2, speaker_id="SPEAKER_00", start=4.0, end=6.0, caption="Second line p1")
 
         self.state.dialogues = [self.item1, self.item3, self.item2]
+        self.state.video_duration = 60.0
         self.window = MainWindow()
         self.window._state = self.state
+        self.window._timeline.duration = 60.0
 
     def test_merge_next_same_speaker_only(self):
         """Merge Next on clip #1 (p1) must skip clip #3 (All Might) and merge with clip #2 (p1)."""
@@ -78,6 +85,32 @@ class TestClipEditorOperations(unittest.TestCase):
         self.assertEqual(first.start, 0.0)
         self.assertEqual(first.end, 1.0)
 
+    def test_add_clip_defaults_to_top_track(self):
+        """Add Clip without hover defaults to top layer track (SPEAKER_00) at playhead time."""
+        self.window._timeline.populate(self.state)
+        self.window._timeline.current_time = 7.5
+        self.window._on_add_clip()
+        
+        active = self.window._state.active_dialogues()
+        self.assertEqual(len(active), 4)
+        new_clip = active[-1]
+        self.assertEqual(new_clip.speaker_id, "SPEAKER_00")
+        self.assertEqual(new_clip.start, 7.5)
+        self.assertEqual(new_clip.end, 9.0)
+
+    def test_add_clip_at_specific_track_and_time(self):
+        """Add Clip with specific track/time places clip exactly at requested speaker track and timestamp."""
+        self.window._timeline.populate(self.state)
+        self.window._on_add_clip_at(spk_id="SPEAKER_01", t=12.0)
+        
+        active = self.window._state.active_dialogues()
+        self.assertEqual(len(active), 4)
+        new_clip = active[-1]
+        self.assertEqual(new_clip.speaker_id, "SPEAKER_01")
+        self.assertEqual(new_clip.start, 12.0)
+        self.assertEqual(new_clip.end, 13.5)
+
 
 if __name__ == "__main__":
     unittest.main()
+

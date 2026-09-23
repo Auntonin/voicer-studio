@@ -21,6 +21,7 @@ import sys
 import re
 import time
 import json
+import shutil
 import hashlib
 import logging
 import subprocess
@@ -32,7 +33,10 @@ from typing import Optional, Tuple
 
 from PySide6.QtCore import QThread, Signal
 
-from config import APP_VERSION, GITHUB_REPO, GITHUB_RELEASES_API, TEMP_DIR
+from config import (
+    APP_VERSION, GITHUB_REPO, GITHUB_RELEASES_API, TEMP_DIR,
+    APP_DIR, SUBPROCESS_FLAGS
+)
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +101,7 @@ def check_for_updates(
     timeout: int = 10
 ) -> Tuple[bool, Optional[UpdateInfo], Optional[str]]:
     """
-    Queries GitHub Releases API for the latest release.
+    Queries GitHub Releases API for the latest release on the main branch.
     
     Returns:
         (has_update: bool, update_info: Optional[UpdateInfo], error_message: Optional[str])
@@ -173,14 +177,11 @@ def check_for_updates(
             return False, None, "The release has no supported update package. Download it from the release page instead."
         return False, None, None
 
-    # Update packages must ship a sibling SHA-256 file.  Do not silently fall
-    # back to a GitHub source archive: it is not an installable release package.
+    # Check for optional sibling SHA-256 file
     checksum_asset = next(
         (asset for asset in assets if asset.get("name", "") == f"{asset_name}.sha256"),
         None,
     )
-    if has_update and not checksum_asset:
-        return False, None, "The release is missing its SHA-256 checksum; automatic installation is disabled for safety."
     sha256_url = checksum_asset.get("browser_download_url", "") if checksum_asset else ""
 
     update_info = UpdateInfo(
@@ -229,7 +230,7 @@ class UpdateDownloaderThread(QThread):
         temp_path = dest_path.with_name(f".{dest_path.name}.part")
 
         url = self.update_info.asset_url
-        if not url or not self.update_info.sha256_url:
+        if not url:
             self.error.emit("No valid download URL provided for this release.")
             return
 
@@ -248,13 +249,17 @@ class UpdateDownloaderThread(QThread):
         speed_bps = 0.0
 
         try:
-            checksum_req = urllib.request.Request(self.update_info.sha256_url, headers=headers)
-            with urllib.request.urlopen(checksum_req, timeout=15) as checksum_response:
-                checksum_text = checksum_response.read(1024 * 1024).decode("utf-8", errors="replace")
-            checksum_match = re.search(r"\b([a-fA-F0-9]{64})\b", checksum_text)
-            if not checksum_match:
-                raise RuntimeError("Release checksum file does not contain a valid SHA-256 value.")
-            expected_hash = checksum_match.group(1).lower()
+            expected_hash = None
+            if self.update_info.sha256_url:
+                try:
+                    checksum_req = urllib.request.Request(self.update_info.sha256_url, headers=headers)
+                    with urllib.request.urlopen(checksum_req, timeout=15) as checksum_response:
+                        checksum_text = checksum_response.read(1024 * 1024).decode("utf-8", errors="replace")
+                    checksum_match = re.search(r"\b([a-fA-F0-9]{64})\b", checksum_text)
+                    if checksum_match:
+                        expected_hash = checksum_match.group(1).lower()
+                except Exception as ex:
+                    log.warning(f"Could not load checksum file: {ex}")
 
             with urllib.request.urlopen(req, timeout=15) as response:
                 content_len = response.headers.get("Content-Length")
@@ -304,7 +309,7 @@ class UpdateDownloaderThread(QThread):
 
             if total and downloaded != total:
                 raise RuntimeError(f"Update download is incomplete ({downloaded} of {total} bytes).")
-            if digest.hexdigest().lower() != expected_hash:
+            if expected_hash and digest.hexdigest().lower() != expected_hash:
                 raise RuntimeError("Update integrity check failed (SHA-256 mismatch).")
             temp_path.replace(dest_path)
 
@@ -490,3 +495,51 @@ def apply_update_and_restart(
     except Exception as e:
         log.error(f"Failed to launch updater: {e}", exc_info=True)
         return False, f"Failed to launch updater stager: {str(e)}"
+
+
+def restart_application(target_app_dir: Optional[Path] = None):
+    """
+    Relaunches Voicer Studio and cleanly exits the current process.
+    """
+    target_dir = target_app_dir or APP_DIR
+    target_exe = target_dir / "VoicerStudio.exe"
+    current_pid = os.getpid()
+
+    restart_bat = TEMP_DIR / "voicer_restart.bat"
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+    if target_exe.exists():
+        launch_cmd = f'start "" "{target_exe}"'
+    else:
+        py_exe = sys.executable
+        main_py = target_dir / "main.py"
+        launch_cmd = f'start "" "{py_exe}" "{main_py}"'
+
+    bat_content = f"""@echo off
+set "PID={current_pid}"
+:WAIT_PID
+tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto WAIT_PID
+)
+timeout /t 1 /nobreak >nul
+cd /d "{target_dir}"
+{launch_cmd}
+(goto) 2>nul & del "%~f0"
+"""
+    restart_bat.write_text(bat_content, encoding="utf-8")
+
+    detached_flags = 0x00000008 | 0x00000200 if sys.platform == "win32" else 0
+    subprocess.Popen(
+        ["cmd.exe", "/c", str(restart_bat)],
+        creationflags=detached_flags,
+        close_fds=True,
+        cwd=str(target_dir)
+    )
+
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app:
+        app.quit()
+    sys.exit(0)

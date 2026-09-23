@@ -1,6 +1,10 @@
 @echo off
 cd /d "%~dp0.."
 title Voicer Studio Launcher
+if exist "VoicerStudio.exe" (
+    start "" "VoicerStudio.exe" %*
+    exit /b 0
+)
 
 echo ============================================================
 echo   Voicer Studio Launcher

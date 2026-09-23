@@ -517,7 +517,7 @@
   "update_failed_msg": "เกิดข้อผิดพลาดระหว่างดาวน์โหลดไฟล์อัปเดต:\n\n{error}",
   "update_error_title": "ข้อผิดพลาดการอัปเดต",
   "update_apply_failed": "ไม่สามารถเริ่มสคริปต์ตัวติดตั้งอัปเดตได้:\n\n{error}",
-  "update_dev_mode_hint": "หมายเหตุ: คุณกำลังรันโปรแกรมในโหมดพัฒนา ตัวติดตั้งจะอัปเดต VoicerStudio.exe หรือคุณสามารถใช้คำสั่ง git pull ได้",
+  "update_dev_mode_hint": "หมายเหตุ: คุณกำลังรันโปรแกรมในโหมดพัฒนา (จากซอร์สโค้ด)",
   "update_toast_title": "มีอัปเดตใหม่",
   "update_toast_msg": "Voicer Studio v{version} พร้อมให้อัปเดตแล้ว! คลิกเพื่อดูรายละเอียด",
   "cfg_check_updates_startup": "ตรวจสอบการอัปเดตอัตโนมัติเมื่อเปิดโปรแกรม",
