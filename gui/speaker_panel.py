@@ -50,6 +50,8 @@ class SpeakerPanel(QWidget):
     speaker_deleted = Signal(str)
     speaker_reordered = Signal()
     speaker_selected = Signal(str)
+    speaker_enroll_requested = Signal(str)
+    speaker_clear_voiceprint_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,6 +98,7 @@ class SpeakerPanel(QWidget):
         # Drag and drop speaker list
         self.list_widget = SpeakerListWidget()
         self.list_widget.items_reordered.connect(self._on_items_reordered)
+        self.list_widget.itemClicked.connect(lambda itm: self.speaker_selected.emit(itm.data(Qt.ItemDataRole.UserRole)) if itm else None)
         self.layout.addWidget(self.list_widget)
         
         # Color palette for speakers (unified with timeline)
@@ -118,6 +121,7 @@ class SpeakerPanel(QWidget):
             color = self.colors[idx % len(self.colors)]
             
             row = QFrame()
+            row.mousePressEvent = lambda event, sid=spk_id: self.speaker_selected.emit(sid)
             row.setStyleSheet(f"""
                 QFrame {{
                     background-color: {COLORS['bg_panel']};
@@ -167,7 +171,75 @@ class SpeakerPanel(QWidget):
             cnt_lbl = QLabel(tr("spk_dialogues_count", count=count))
             cnt_lbl.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 8.5pt; border: none;")
             row_layout.addWidget(cnt_lbl)
-            
+
+            # Voiceprint badge
+            has_vp = spk.has_voiceprint()
+            vp_count = len(spk.voiceprint_samples)
+            if has_vp:
+                lbl_vp = QLabel(tr("spk_voiceprint_enrolled", count=vp_count))
+                lbl_vp.setStyleSheet("""
+                    QLabel {
+                        background-color: #132e1f;
+                        color: #22A05B;
+                        border: 1px solid #1b4d2e;
+                        border-radius: 4px;
+                        padding: 2px 6px;
+                        font-size: 8pt;
+                        font-weight: 500;
+                    }
+                """)
+            else:
+                lbl_vp = QLabel(tr("spk_voiceprint_none"))
+                lbl_vp.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {COLORS['bg_input']};
+                        color: {COLORS['text_muted']};
+                        border: 1px solid {COLORS['border']};
+                        border-radius: 4px;
+                        padding: 2px 6px;
+                        font-size: 8pt;
+                    }}
+                """)
+            row_layout.addWidget(lbl_vp)
+
+            btn_enroll = QPushButton(tr("spk_btn_enroll"))
+            btn_enroll.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['bg_input']};
+                    color: {COLORS['text_secondary']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 4px;
+                    padding: 3px 8px;
+                    font-size: 8pt;
+                    font-weight: 500;
+                }}
+                QPushButton:hover {{
+                    background-color: {COLORS['accent']};
+                    color: white;
+                }}
+            """)
+            btn_enroll.clicked.connect(lambda _, sid=spk_id: self.speaker_enroll_requested.emit(sid))
+            row_layout.addWidget(btn_enroll)
+
+            if has_vp:
+                btn_clr_vp = QPushButton(tr("spk_btn_clear_voiceprint"))
+                btn_clr_vp.setStyleSheet("""
+                    QPushButton {
+                        background-color: #1a1a1e;
+                        color: #a1a1aa;
+                        border: 1px solid #282830;
+                        border-radius: 4px;
+                        padding: 3px 6px;
+                        font-size: 7.5pt;
+                    }
+                    QPushButton:hover {
+                        background-color: #27161b;
+                        color: #fca5a5;
+                    }
+                """)
+                btn_clr_vp.clicked.connect(lambda _, sid=spk_id: self.speaker_clear_voiceprint_requested.emit(sid))
+                row_layout.addWidget(btn_clr_vp)
+
             # Delete speaker button (neutral studio styling with subtle dark rose hover)
             btn_del = QPushButton(tr("spk_btn_delete"))
             del_icon_path = ASSETS_DIR / "icons" / "user-minus.svg"

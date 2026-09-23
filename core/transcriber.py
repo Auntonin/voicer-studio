@@ -62,6 +62,7 @@ class Transcriber:
                 speech_pad_ms=200
             ),
             "condition_on_previous_text": False,
+            "word_timestamps": True,
         }
         if self.language is None:
             transcribe_kwargs["multilingual"] = True
@@ -174,7 +175,7 @@ class Transcriber:
                 speech_pad_ms=200
             ),
             "condition_on_previous_text": False,
-            "word_timestamps": False,
+            "word_timestamps": True,
         }
         if self.language is None:
             kwargs["multilingual"] = True
@@ -191,12 +192,28 @@ class Transcriber:
             for seg in segments_gen:
                 start = max(0.0, seg.start)
                 end = seg.end
+
+                # Word-level timestamp refinement to eliminate trailing silence
+                if hasattr(seg, "words") and seg.words:
+                    valid_words = [
+                        w for w in seg.words
+                        if getattr(w, "start", None) is not None and getattr(w, "end", None) is not None
+                    ]
+                    if valid_words:
+                        w_start = valid_words[0].start
+                        w_end = valid_words[-1].end
+                        # 100ms lead-in padding and 120ms lead-out padding for natural speech boundaries
+                        refined_start = max(0.0, w_start - 0.10)
+                        refined_end = w_end + 0.12
+                        if refined_end > refined_start:
+                            start = refined_start
+                            end = min(end, refined_end) if refined_end < end else refined_end
                 if total_duration > 0:
                     end = min(end, total_duration)
                 duration = end - start
 
-                # Skip very short or likely hallucinated segments
-                if duration < 0.15:
+                # Skip inverted, zero-length, very short, or likely hallucinated segments
+                if end <= start or duration < 0.15:
                     continue
 
                 raw_text = seg.text.strip()

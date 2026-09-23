@@ -29,6 +29,10 @@ class DialogueTable(QWidget):
     merge_next_requested = Signal(int)
     split_requested = Signal(int)
     playback_toggle_requested = Signal()
+    enroll_voiceprint_requested = Signal(DialogueItem)
+    match_speakers_requested = Signal()
+    refine_alignment_clip_requested = Signal(DialogueItem)
+    refine_alignment_all_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,9 +186,15 @@ class DialogueTable(QWidget):
     def _fill_row(self, row: int, item: DialogueItem, color_hex: str):
         has_img = "✓" if item.image_path and item.image_path.exists() else "—"
         has_aud = "✓" if item.audio_path and item.audio_path.exists() else "—"
+        speaker_name = self.state.get_speaker(item.speaker_id).display_name if self.state and item.speaker_id in self.state.speakers else item.speaker_id
+        if getattr(item, 'needs_review', False):
+            display_speaker = f"{speaker_name} [?]"
+        else:
+            display_speaker = speaker_name
+
         col_data = [
             str(item.index),
-            self.state.get_speaker(item.speaker_id).display_name if self.state and item.speaker_id in self.state.speakers else item.speaker_id,
+            display_speaker,
             item.format_start(),
             item.format_end(),
             f"{item.duration:.3f}s",
@@ -202,7 +212,14 @@ class DialogueTable(QWidget):
                 t_item.setText(text)
 
             if col == 1:
-                t_item.setForeground(QColor(color_hex))
+                if getattr(item, 'needs_review', False):
+                    t_item.setForeground(QColor("#f59e0b"))
+                    conf_pct = int(getattr(item, 'speaker_confidence', 0.0) * 100)
+                    t_item.setToolTip(tr("dt_tip_needs_review", conf=f"{conf_pct}%"))
+                else:
+                    t_item.setForeground(QColor(color_hex))
+                    conf_pct = int(getattr(item, 'speaker_confidence', 1.0) * 100)
+                    t_item.setToolTip(f"{speaker_name} ({conf_pct}%)")
             elif col in (6, 7) and text == "✓":
                 t_item.setForeground(QColor("#3fb950"))
             elif col in (6, 7):
@@ -314,6 +331,17 @@ class DialogueTable(QWidget):
         play_action = menu.addAction(tr("dt_menu_play_audio"))
         view_action = menu.addAction(tr("dt_menu_view_image"))
         menu.addSeparator()
+
+        confirm_spk_action = None
+        if getattr(target_item, 'needs_review', False):
+            confirm_spk_action = menu.addAction(tr("dt_menu_confirm_speaker"))
+
+        enroll_action = menu.addAction(tr("dt_menu_enroll_voiceprint"))
+        match_action = menu.addAction(tr("dt_menu_match_speakers"))
+        align_clip_action = menu.addAction(tr("dt_menu_refine_alignment_clip"))
+        align_all_action = menu.addAction(tr("dt_menu_refine_alignment_all"))
+        menu.addSeparator()
+
         merge_action = menu.addAction(tr("dt_menu_merge_next"))
         split_action = menu.addAction(tr("dt_menu_split"))
         menu.addSeparator()
@@ -326,6 +354,19 @@ class DialogueTable(QWidget):
             self.play_audio_requested.emit(target_item)
         elif action == view_action:
             self.view_image_requested.emit(target_item)
+        elif action == confirm_spk_action and confirm_spk_action is not None:
+            target_item.needs_review = False
+            target_item.speaker_confidence = 1.0
+            self.dialogue_changed.emit(target_item)
+            self.update_row(target_item, self.state)
+        elif action == enroll_action:
+            self.enroll_voiceprint_requested.emit(target_item)
+        elif action == match_action:
+            self.match_speakers_requested.emit()
+        elif action == align_clip_action:
+            self.refine_alignment_clip_requested.emit(target_item)
+        elif action == align_all_action:
+            self.refine_alignment_all_requested.emit()
         elif action == merge_action:
             self.merge_next_requested.emit(idx)
         elif action == split_action:

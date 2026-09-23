@@ -166,8 +166,9 @@ class PipelineWorker(QThread):
                 "min_silence_ms":self.options.get("vad_min_silence_ms", VAD_MIN_SILENCE_DURATION_MS),
                 "merge_gap_ms":  self.options.get("vad_merge_gap_ms", VAD_MERGE_GAP_MS),
             }
+            source_audio = self.state.separated_vocals_path or self.state.work_audio_path
             detector = VADDetector()
-            detector.detect(self.state.work_audio_path, self.state, vad_config)
+            detector.detect(source_audio, self.state, vad_config)
             self._log(f"Detected {len(self.state.dialogues)} dialogue segments", "ok")
             self.signals.dialogues_ready.emit()
             self._complete_step(step)
@@ -188,8 +189,9 @@ class PipelineWorker(QThread):
                 min_speakers=self.options.get("min_speakers", 2),
                 max_speakers=self.options.get("max_speakers", 8),
             )
+            source_audio = self.state.separated_vocals_path or self.state.work_audio_path
             diarizer.diarize(
-                self.state.work_audio_path,
+                source_audio,
                 self.state,
                 min_speakers=self.options.get("min_speakers", 2),
                 max_speakers=self.options.get("max_speakers", 8),
@@ -210,11 +212,29 @@ class PipelineWorker(QThread):
         self._begin_step(step)
         try:
             from core.transcriber import Transcriber
+            source_audio = self.state.separated_vocals_path or self.state.work_audio_path
+
+            # Dynamically include known character names in Whisper's initial prompt
+            char_names = sorted(list({
+                spk.display_name.strip() for spk in self.state.speakers.values()
+                if spk.display_name and not spk.display_name.startswith("Speaker_") and not spk.display_name.startswith("Speaker ")
+            }))
+            initial_prompt = self.options.get("whisper_initial_prompt")
+            whisper_lang = self.options.get("whisper_language", WHISPER_LANGUAGE_DEFAULT)
+            if char_names:
+                chars_str = ", ".join(char_names)
+                is_th = (whisper_lang == "th") or (whisper_lang is None and any('\u0e00' <= c <= '\u0e7f' for c in chars_str))
+                label = "ตัวละคร:" if is_th else "Characters:"
+                if initial_prompt:
+                    initial_prompt = f"{initial_prompt}. {label} {chars_str}"
+                else:
+                    initial_prompt = f"{label} {chars_str}"
+
             transcriber = Transcriber(
                 model_size=self.options.get("whisper_model", WHISPER_MODEL_DEFAULT),
                 language=self.options.get("whisper_language", WHISPER_LANGUAGE_DEFAULT),
                 device=self.options.get("compute_device", "auto"),
-                initial_prompt=self.options.get("whisper_initial_prompt"),
+                initial_prompt=initial_prompt,
             )
             self.signals.sub_progress.emit(0, 1, tr("pipe_loading_whisper"))
             transcriber.load_model()
@@ -233,13 +253,22 @@ class PipelineWorker(QThread):
                     self.signals.dialogues_ready.emit()  # refresh table incrementally
 
                 ok = transcriber.transcribe_and_segment(
-                    self.state.work_audio_path,
+                    source_audio,
                     self.state,
                     total_duration=self.state.video_duration,
                     progress_cb=on_seg_progress,
                 )
 
                 if ok:
+                    # Multi-tier timeline precision alignment
+                    try:
+                        from core.aligner import ForcedAligner
+                        align_res = ForcedAligner.align_all(self.state, source_audio)
+                        if align_res.get("adjusted", 0) > 0:
+                            self._log(f"Timeline alignment: refined {align_res['adjusted']} dialogue boundaries", "ok")
+                    except Exception as e_al:
+                        log.debug(f"Timeline alignment refinement skipped: {e_al}")
+
                     n = len(self.state.active_dialogues())
                     self.signals.sub_progress.emit(n, n, tr("pipe_whisper_seg_done", count=n))
                     self._log(tr("pipe_whisper_seg_done", count=n), "ok")
@@ -260,7 +289,7 @@ class PipelineWorker(QThread):
             try:
                 import scipy.io.wavfile as wavfile
                 res = _sp.run(
-                    ["ffmpeg", "-y", "-i", str(self.state.work_audio_path),
+                    ["ffmpeg", "-y", "-i", str(source_audio),
                      "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"],
                     stdout=_sp.PIPE, stderr=_sp.DEVNULL, timeout=120,
                     creationflags=SUBPROCESS_FLAGS
@@ -279,11 +308,20 @@ class PipelineWorker(QThread):
                     f"Transcribing [{idx+1}/{total}] {item.format_start()}–{item.format_end()}"
                 )
                 text = transcriber.transcribe_segment(
-                    self.state.work_audio_path, item.start, item.end,
+                    source_audio, item.start, item.end,
                     audio_data=audio_data, sample_rate=sr
                 )
                 item.caption = text
                 log.debug(f"Transcribed item {item.index}: {text[:40]}")
+
+            # Multi-tier timeline precision alignment
+            try:
+                from core.aligner import ForcedAligner
+                align_res = ForcedAligner.align_all(self.state, source_audio)
+                if align_res.get("adjusted", 0) > 0:
+                    self._log(f"Timeline alignment: refined {align_res['adjusted']} dialogue boundaries", "ok")
+            except Exception as e_al:
+                log.debug(f"Timeline alignment refinement skipped: {e_al}")
 
             self.signals.sub_progress.emit(total, total, f"Transcribed {total} clips")
             self._log(f"Transcribed {total} dialogue(s)", "ok")
@@ -590,10 +628,10 @@ class PipelineWorker(QThread):
 
             steps = [
                 self._step_audio_extract,
+                self._step_voice_separation,
                 self._step_vad,
                 self._step_transcription,
                 self._step_diarization,
-                self._step_voice_separation,
                 self._step_clip_generation,
                 self._step_frame_extraction,
                 self._step_backing_track,

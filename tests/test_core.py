@@ -70,6 +70,26 @@ def test_pipeline_invalidation_keeps_expensive_analysis_cache():
     assert not state.is_step_done(PipelineStep.FRAME_EXTRACTION)
 
 
+def test_pipeline_step_order_and_voice_separation_invalidation():
+    from core.models import PIPELINE_STEP_PROGRESS
+    # Verify voice separation is prioritized right after audio extract
+    assert PIPELINE_STEP_PROGRESS[PipelineStep.AUDIO_EXTRACT] < PIPELINE_STEP_PROGRESS[PipelineStep.VOICE_SEPARATION]
+    assert PIPELINE_STEP_PROGRESS[PipelineStep.VOICE_SEPARATION] < PIPELINE_STEP_PROGRESS[PipelineStep.VAD]
+    assert PIPELINE_STEP_PROGRESS[PipelineStep.VAD] < PIPELINE_STEP_PROGRESS[PipelineStep.TRANSCRIPTION]
+    assert PIPELINE_STEP_PROGRESS[PipelineStep.TRANSCRIPTION] < PIPELINE_STEP_PROGRESS[PipelineStep.DIARIZATION]
+
+    # Invalidate from VOICE_SEPARATION should invalidate VAD, TRANSCRIPTION, DIARIZATION
+    state = PipelineState()
+    for s in [PipelineStep.AUDIO_EXTRACT, PipelineStep.VOICE_SEPARATION, PipelineStep.VAD, PipelineStep.TRANSCRIPTION, PipelineStep.DIARIZATION]:
+        state.step_completed[s] = True
+    state.invalidate_from(PipelineStep.VOICE_SEPARATION)
+    assert state.is_step_done(PipelineStep.AUDIO_EXTRACT)
+    assert not state.is_step_done(PipelineStep.VOICE_SEPARATION)
+    assert not state.is_step_done(PipelineStep.VAD)
+    assert not state.is_step_done(PipelineStep.TRANSCRIPTION)
+    assert not state.is_step_done(PipelineStep.DIARIZATION)
+
+
 def test_zip_export_is_atomic_on_failure():
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)

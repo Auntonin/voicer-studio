@@ -382,7 +382,6 @@ class MainWindow(QMainWindow):
 
         self._menu_file.addSeparator()
         self._act_quit = self._menu_file.addAction(tr("menu_quit"))
-        self._act_quit.setShortcut("Ctrl+Q")
         self._act_quit.triggered.connect(self.close)
 
         # Edit Menu (Undo / Redo)
@@ -928,6 +927,7 @@ class MainWindow(QMainWindow):
         self._timeline.merge_requested.connect(self._on_merge_next)
         self._timeline.delete_requested.connect(self._on_dialogue_deleted)
         self._timeline.tracks_reordered.connect(self._on_timeline_tracks_reordered)
+        self._timeline.track_selected.connect(self._set_active_speaker)
         self._timeline.add_clip_requested.connect(self._on_add_clip_at)
         self._timeline.playback_toggle_requested.connect(self._toggle_global_playback)
         self._timeline.playback_start_requested.connect(self._start_global_playback)
@@ -939,6 +939,8 @@ class MainWindow(QMainWindow):
         self._speaker_panel.speaker_deleted.connect(self._on_speaker_deleted)
         self._speaker_panel.speaker_reordered.connect(self._refresh_all_views)
         self._speaker_panel.speaker_selected.connect(self._set_active_speaker)
+        self._speaker_panel.speaker_enroll_requested.connect(self._on_speaker_enroll_requested)
+        self._speaker_panel.speaker_clear_voiceprint_requested.connect(self._on_speaker_clear_voiceprint_requested)
 
         # ── Connect Clip Editor Signals ──
         self._clip_editor.caption_changed.connect(self._on_caption_changed)
@@ -955,6 +957,10 @@ class MainWindow(QMainWindow):
         # ── Connect Pack Info Panel & Table Edit Signals ──
         self._pack_info_panel.pack_info_changed.connect(self._on_pack_info_changed)
         self._dialogue_table.dialogue_changed.connect(self._on_dialogue_changed)
+        self._dialogue_table.enroll_voiceprint_requested.connect(self._on_enroll_voiceprint_from_dialogue)
+        self._dialogue_table.match_speakers_requested.connect(self._on_match_speakers_requested)
+        self._dialogue_table.refine_alignment_clip_requested.connect(self._on_refine_alignment_clip)
+        self._dialogue_table.refine_alignment_all_requested.connect(self._on_refine_alignment_all)
 
     def _set_active_speaker(self, spk_id: str):
         if spk_id and spk_id in self._state.speakers:
@@ -1084,6 +1090,10 @@ class MainWindow(QMainWindow):
     def _push_undo(self):
         self._undo_manager.push(self._state)
 
+    def _pop_undo(self):
+        if hasattr(self, '_undo_manager'):
+            self._undo_manager.pop_last()
+
     # ── Manual Track & Speaker Handlers ──────────────────────────────────────
 
     def _on_add_track(self):
@@ -1166,19 +1176,29 @@ class MainWindow(QMainWindow):
         speakers_list = self._timeline._get_speaker_list()
         top_speaker = speakers_list[0] if speakers_list else (next(iter(self._state.speakers.keys())) if self._state.speakers else "SPEAKER_00")
 
-        if spk_id is None or t is None:
-            calc_spk, calc_t = self._timeline.get_cursor_target()
-            if spk_id is None:
-                spk_id = calc_spk
-            if t is None:
-                t = calc_t
+        # Prioritize explicitly passed speaker (must be valid string), or last active speaker, or selected clip speaker, or top speaker
+        if spk_id is None or not isinstance(spk_id, str) or spk_id not in self._state.speakers:
+            if hasattr(self, '_active_speaker_id') and self._active_speaker_id in self._state.speakers:
+                spk_id = self._active_speaker_id
+            elif self._timeline.selected_index >= 0:
+                for d in self._state.active_dialogues():
+                    if d.index == self._timeline.selected_index:
+                        spk_id = d.speaker_id
+                        break
+            if spk_id is None or spk_id not in self._state.speakers:
+                spk_id = top_speaker
 
         if spk_id not in self._state.speakers:
             spk_id = top_speaker
 
+        # Default time to current playhead position
+        if t is None or not isinstance(t, (int, float)):
+            t = self._timeline.current_time
+
         self._push_undo()
         clip_dur = 1.5
         max_dur = self._timeline.duration if self._timeline.duration > 0 else 99999.0
+        t = max(0.0, min(float(t), max_dur))
         new_d = DialogueItem(
             index=len(self._state.dialogues) + 1,
             speaker_id=spk_id,
@@ -1190,14 +1210,20 @@ class MainWindow(QMainWindow):
         self._state.renumber()
         self._active_speaker_id = spk_id
         self._timeline.selected_index = new_d.index
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
+        self._clip_editor.item = new_d
         self._refresh_all_views()
         self._clip_editor.load_item(new_d, self._state)
-        self.seek_to_time(t)
-        self._log_message(f"Added new dialogue clip #{new_d.index} for speaker {spk_id}", "ok")
+        self._timeline.seek(t)
+        self._video_panel.set_position(t)
+        self._timeline.ensure_playhead_visible()
+        self._log_message(f"Added new dialogue clip #{new_d.index} for speaker {spk_id} at {t:.2f}s", "ok")
 
-    def _on_add_clip(self):
-        self._on_add_clip_at()
+    def _on_add_clip(self, checked: bool = False):
+        # Adding via top button or shortcut targets active character at current playhead time
+        active_spk = self._active_speaker_id if (hasattr(self, '_active_speaker_id') and self._active_speaker_id in self._state.speakers) else None
+        self._on_add_clip_at(spk_id=active_spk, t=self._timeline.current_time)
 
     def _on_delete_selected_clip(self):
         idx = self._timeline.selected_index
@@ -1232,6 +1258,7 @@ class MainWindow(QMainWindow):
                 self._state.dialogues.append(new_d)
                 break
         self._state.renumber()
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(f"Split clip #{target.index} at {cur_t:.2f}s", "ok")
@@ -1250,6 +1277,7 @@ class MainWindow(QMainWindow):
             if d.index == target.index:
                 d.start = cur_t
                 break
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(f"Trimmed start of clip #{target.index} to {cur_t:.2f}s (Q)", "ok")
@@ -1268,6 +1296,7 @@ class MainWindow(QMainWindow):
             if d.index == target.index:
                 d.end = cur_t
                 break
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(f"Trimmed end of clip #{target.index} to {cur_t:.2f}s (W)", "ok")
@@ -1281,40 +1310,203 @@ class MainWindow(QMainWindow):
     def _on_speaker_deleted(self, spk_id: str):
         self._on_delete_track(spk_id)
 
-    # ── Keyboard Shortcuts (Spacebar & Global Event Filter) ───────────────────
+    def _on_speaker_enroll_requested(self, spk_id: str):
+        if not self._state or spk_id not in self._state.speakers:
+            return
+        target_item = None
+        if hasattr(self, '_clip_editor') and self._clip_editor.item:
+            target_item = self._clip_editor.item
+        elif hasattr(self, '_timeline') and getattr(self._timeline, 'selected_index', None) is not None:
+            for itm in self._state.active_dialogues():
+                if itm.index == self._timeline.selected_index:
+                    target_item = itm
+                    break
+
+        if not target_item:
+            QMessageBox.information(self, tr("spk_panel_title"), tr("spk_msg_no_clip_selected"))
+            return
+
+        self._on_enroll_voiceprint_for_speaker(target_item, spk_id)
+
+    def _on_enroll_voiceprint_from_dialogue(self, item: DialogueItem):
+        if not self._state or not item:
+            return
+        self._on_enroll_voiceprint_for_speaker(item, item.speaker_id)
+
+    def _on_enroll_voiceprint_for_speaker(self, item: DialogueItem, spk_id: str):
+        source_audio = self._state.separated_vocals_path or self._state.work_audio_path
+        if not source_audio or not source_audio.exists():
+            QMessageBox.warning(self, tr("spk_panel_title"), "Audio source file not found.")
+            return
+
+        from core.speaker_matcher import SpeakerMatcher
+        spk = self._state.get_speaker(spk_id)
+        self._push_undo()
+        ok = SpeakerMatcher.enroll_speaker_sample(
+            self._state, spk_id, source_audio, item.start, item.end,
+            sample_name=f"Clip #{item.index} ({item.start:.1f}s–{item.end:.1f}s)"
+        )
+        if ok:
+            item.speaker_id = spk_id
+            item.speaker_confidence = 1.0
+            item.needs_review = False
+            self._mark_dirty(True)
+            self._refresh_all_views()
+            self._log_message(tr("spk_enroll_success", name=spk.display_name), "ok")
+        else:
+            self._pop_undo()
+            QMessageBox.warning(self, tr("spk_panel_title"), "Could not extract voiceprint from audio segment.")
+
+    def _on_speaker_clear_voiceprint_requested(self, spk_id: str):
+        if not self._state or spk_id not in self._state.speakers:
+            return
+        from core.speaker_matcher import SpeakerMatcher
+        self._push_undo()
+        SpeakerMatcher.remove_voiceprint(self._state, spk_id)
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(f"Cleared voiceprint for speaker {spk_id}", "info")
+
+    def _on_match_speakers_requested(self):
+        if not self._state:
+            return
+        from core.speaker_matcher import SpeakerMatcher
+        if not SpeakerMatcher.has_enrolled_speakers(self._state):
+            QMessageBox.information(self, tr("spk_panel_title"), tr("spk_voiceprint_none_hint"))
+            return
+
+        source_audio = self._state.separated_vocals_path or self._state.work_audio_path
+        if not source_audio or not source_audio.exists():
+            QMessageBox.warning(self, tr("spk_panel_title"), "Audio source file not found.")
+            return
+
+        self._push_undo()
+        res = SpeakerMatcher.match_dialogues(self._state, source_audio)
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(
+            f"Speaker matching: {res.get('total', 0)} clips processed "
+            f"({res.get('needs_review', 0)} flagged for review)", "ok"
+        )
+
+    def _on_refine_alignment_clip(self, item: DialogueItem):
+        if not self._state or not item:
+            return
+        source_audio = self._state.separated_vocals_path or self._state.work_audio_path
+        if not source_audio or not source_audio.exists():
+            QMessageBox.warning(self, tr("msg_align_done_title"), "Audio source file not found.")
+            return
+
+        from core.aligner import ForcedAligner
+        self._push_undo()
+        adjusted = ForcedAligner.align_clip(item, source_audio, max_duration=self._state.video_duration)
+        if adjusted:
+            self._mark_dirty(True)
+            self._refresh_all_views()
+            msg = tr("msg_align_clip_done", index=item.index, start=f"{item.start:.2f}", end=f"{item.end:.2f}")
+            self._log_message(msg, "ok")
+            self._show_toast(tr("msg_align_done_title"), msg, "ok")
+        else:
+            self._pop_undo()
+            msg = tr("msg_align_clip_no_change", index=item.index)
+            self._log_message(msg, "info")
+            self._show_toast(tr("msg_align_done_title"), msg, "info")
+
+    def _on_refine_alignment_all(self):
+        if not self._state or not self._state.active_dialogues():
+            return
+        source_audio = self._state.separated_vocals_path or self._state.work_audio_path
+        if not source_audio or not source_audio.exists():
+            QMessageBox.warning(self, tr("msg_align_done_title"), "Audio source file not found.")
+            return
+
+        from core.aligner import ForcedAligner
+        self._push_undo()
+        res = ForcedAligner.align_all(self._state, source_audio)
+        if res.get("adjusted", 0) > 0:
+            self._mark_dirty(True)
+            self._refresh_all_views()
+            msg = tr(
+                "msg_align_all_done",
+                adjusted=res.get("adjusted", 0),
+                total=res.get("total", 0),
+                shift=res.get("avg_shift_ms", 0.0)
+            )
+            self._log_message(msg, "ok")
+            self._show_toast(tr("msg_align_done_title"), msg, "ok")
+        else:
+            self._pop_undo()
+            msg = tr("msg_align_clip_no_change", index=0)
+            self._log_message(msg, "info")
+            self._show_toast(tr("msg_align_done_title"), msg, "info")
+
+    # ── Keyboard Shortcuts (Spacebar, Q/W Trimming, Split, & Global Event Filter) ──
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space:
-            # If target widget receiving the key is a text input field, let it type a space
+        if event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            modifiers = event.modifiers()
+            has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+
+            # If target widget or active focus is a text input field, let normal typing pass
             if isinstance(obj, (QLineEdit, QTextEdit, QPlainTextEdit)):
                 return super().eventFilter(obj, event)
 
-            # If a modal dialog is active, let it handle its own keys
-            if QApplication.activeModalWidget() is not None:
+            focus = QApplication.focusWidget()
+            if focus and isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
                 return super().eventFilter(obj, event)
 
-            focus = QApplication.focusWidget()
-            if focus:
-                # If focus is inside a secondary window or dialog, let it pass
-                if focus.window() != self:
-                    return super().eventFilter(obj, event)
-                # If user is actively typing in a text field, let it type a space
-                if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
-                    return super().eventFilter(obj, event)
+            # If a modal dialog is active or focus is inside another window, let it pass
+            if QApplication.activeModalWidget() is not None:
+                return super().eventFilter(obj, event)
+            if focus and focus.window() != self:
+                return super().eventFilter(obj, event)
 
-            self._toggle_global_playback()
-            return True
+            if key == Qt.Key.Key_Space:
+                self._toggle_global_playback()
+                return True
+            elif key == Qt.Key.Key_Q:
+                self._on_trim_left()
+                return True
+            elif key == Qt.Key.Key_W:
+                self._on_trim_right()
+                return True
+            elif key == Qt.Key.Key_S or (key in (Qt.Key.Key_B, Qt.Key.Key_K) and has_ctrl):
+                self._on_split_at_playhead()
+                return True
+            elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self._on_delete_selected_clip()
+                return True
+            elif key == Qt.Key.Key_M and not has_ctrl:
+                if self._timeline.selected_index >= 0:
+                    self._on_merge_next(self._timeline.selected_index)
+                    return True
 
         return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event):
         key = event.key()
+        modifiers = event.modifiers()
+        has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+
+        focus = QApplication.focusWidget()
+        if focus and isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            super().keyPressEvent(event)
+            return
+
         if key == Qt.Key.Key_Space:
-            focus = QApplication.focusWidget()
-            if focus and (isinstance(focus, QLineEdit) or isinstance(focus, QTextEdit) or isinstance(focus, QPlainTextEdit)):
-                super().keyPressEvent(event)
-                return
             self._toggle_global_playback()
+        elif key == Qt.Key.Key_Q:
+            self._on_trim_left()
+        elif key == Qt.Key.Key_W:
+            self._on_trim_right()
+        elif key == Qt.Key.Key_S or (key in (Qt.Key.Key_B, Qt.Key.Key_K) and has_ctrl):
+            self._on_split_at_playhead()
+        elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self._on_delete_selected_clip()
+        elif key == Qt.Key.Key_M and not has_ctrl:
+            if self._timeline.selected_index >= 0:
+                self._on_merge_next(self._timeline.selected_index)
         else:
             super().keyPressEvent(event)
 

@@ -28,6 +28,7 @@ class TimelineWidget(QWidget):
     add_track_requested = Signal()
     delete_track_requested = Signal(str)
     track_renamed = Signal(str, str)
+    track_selected = Signal(str)
     undo_requested = Signal()
     redo_requested = Signal()
     add_clip_requested = Signal(str, float)
@@ -511,7 +512,13 @@ class TimelineWidget(QWidget):
         fm_reg = QFontMetrics(font_reg)
 
         if self.state:
-            for item in self.state.active_dialogues():
+            active_items = self.state.active_dialogues()
+            # Draw unselected clips first, and selected clip last to ensure top layer / highest z-order
+            unselected = [d for d in active_items if d.index != self.selected_index]
+            selected = [d for d in active_items if d.index == self.selected_index]
+            ordered_items = unselected + selected
+
+            for item in ordered_items:
                 x1 = self.HEADER_WIDTH + item.start * self.pixels_per_second
                 w = max(4.0, item.duration * self.pixels_per_second)
 
@@ -948,11 +955,18 @@ class TimelineWidget(QWidget):
         if y < self.RULER_HEIGHT:
             return "ruler", None
 
-        # 4. Clips on track lanes
+        # 4. Clips on track lanes (hit-test selected clip first, then newest clips)
         speakers_list = self._get_speaker_list()
         t = (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)
 
-        for item in self.state.active_dialogues() if self.state else []:
+        active_dialogues = self.state.active_dialogues() if self.state else []
+        sorted_dialogues = sorted(
+            active_dialogues,
+            key=lambda itm: (1 if itm.index == self.selected_index else 0, itm.index),
+            reverse=True
+        )
+
+        for item in sorted_dialogues:
             try:
                 spk_idx = speakers_list.index(item.speaker_id)
             except ValueError:
@@ -1043,11 +1057,12 @@ class TimelineWidget(QWidget):
                 menu = QMenu(self)
                 if 0 <= track_idx < len(speakers_list) and self.state:
                     spk_id = speakers_list[track_idx]
+                    self.track_selected.emit(spk_id)
                     spk_info = self.state.get_speaker(spk_id)
                     act_rename = menu.addAction(tr("tl_menu_rename_track", name=spk_info.display_name))
-                    act_rename.triggered.connect(lambda s=spk_id: self._prompt_rename_track(s))
+                    act_rename.triggered.connect(lambda _=False, s=spk_id: self._prompt_rename_track(s))
                     act_del = menu.addAction(tr("tl_menu_delete_track", name=spk_info.display_name))
-                    act_del.triggered.connect(lambda s=spk_id: self.delete_track_requested.emit(s))
+                    act_del.triggered.connect(lambda _=False, s=spk_id: self.delete_track_requested.emit(s))
                     menu.addSeparator()
 
                 act_pin = menu.addAction(tr("tl_menu_pin_tracks"))
@@ -1063,6 +1078,7 @@ class TimelineWidget(QWidget):
                 if item:
                     self.selected_index = item.index
                     self.segment_selected.emit(item.index)
+                    self.track_selected.emit(item.speaker_id)
                     self.update()
 
                     menu = QMenu(self)
@@ -1077,7 +1093,7 @@ class TimelineWidget(QWidget):
 
                     menu.addSeparator()
                     act_del = menu.addAction(tr("tl_menu_delete_clip"))
-                    act_del.triggered.connect(lambda: self.delete_requested.emit(item.index))
+                    act_del.triggered.connect(lambda _=False, idx=item.index: self.delete_requested.emit(idx))
 
                     menu.exec(event.globalPosition().toPoint())
                     event.accept()
@@ -1088,10 +1104,11 @@ class TimelineWidget(QWidget):
                     track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
                     if 0 <= track_idx < len(speakers_list) and y >= self.RULER_HEIGHT and x >= self.HEADER_WIDTH:
                         spk_id = speakers_list[track_idx]
+                        self.track_selected.emit(spk_id)
                         click_t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
                         menu = QMenu(self)
-                        act_add = menu.addAction(tr("tl_btn_add_clip"))
-                        act_add.triggered.connect(lambda s=spk_id, t=click_t: self.add_clip_requested.emit(s, t))
+                        act_add = menu.addAction(tr("tl_menu_add_clip_here"))
+                        act_add.triggered.connect(lambda _=False, s=spk_id, t=click_t: self.add_clip_requested.emit(s, t))
                         menu.exec(event.globalPosition().toPoint())
                         event.accept()
                         return
@@ -1123,6 +1140,12 @@ class TimelineWidget(QWidget):
             if self._is_playing:
                 self.playback_stop_requested.emit()
 
+            if y >= self.RULER_HEIGHT:
+                track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
+                speakers_list = self._get_speaker_list()
+                if 0 <= track_idx < len(speakers_list):
+                    self.track_selected.emit(speakers_list[track_idx])
+
             t = max(0.0, min(self.duration, (x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second)))
             self.seek(t)
             self.seek_requested.emit(t)
@@ -1135,12 +1158,14 @@ class TimelineWidget(QWidget):
             track_idx = int((y - self.RULER_HEIGHT) / (self.TRACK_HEIGHT + self.TRACK_GAP))
             speakers_list = self._get_speaker_list()
             if 0 <= track_idx < len(speakers_list):
+                self.track_selected.emit(speakers_list[track_idx])
                 self._dragging = ("track_header", speakers_list[track_idx], x, y, y)
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self.update()
         elif item:
             self.selected_index = item.index
             self.segment_selected.emit(item.index)
+            self.track_selected.emit(item.speaker_id)
             self._dragging = (mode, item, x, item.start if mode != "end" else item.end)
             self.setCursor(Qt.CursorShape.ClosedHandCursor if mode == "body" else Qt.CursorShape.SizeHorCursor)
             self.seek_requested.emit(item.start)
@@ -1350,18 +1375,18 @@ class TimelineWidget(QWidget):
     # ── Keyboard Shortcuts ─────────────────────────────────────────────────────
 
     def _get_clip_at_time(self, t: float) -> Optional[DialogueItem]:
-        """Find the dialogue clip at timestamp t, prioritizing selected item."""
+        """Find the dialogue clip at timestamp t, prioritizing selected item then clips under playhead."""
         if not self.state:
             return None
-        # First priority: if selected clip contains t
+        # First priority: if selected clip contains t (with small 0.05s tolerance)
         for d in self.state.active_dialogues():
-            if d.index == self.selected_index and d.start <= t <= d.end:
+            if d.index == self.selected_index and (d.start - 0.05) <= t <= (d.end + 0.05):
                 return d
         # Second priority: any clip containing t
         for d in self.state.active_dialogues():
-            if d.start <= t <= d.end:
+            if (d.start - 0.05) <= t <= (d.end + 0.05):
                 return d
-        # Third priority: selected clip even if playhead is slightly off
+        # Third priority: if a clip is currently selected, return it as fallback
         if self.selected_index >= 0:
             for d in self.state.active_dialogues():
                 if d.index == self.selected_index:
@@ -1387,7 +1412,7 @@ class TimelineWidget(QWidget):
             self.trim_left_requested.emit()
         elif key == Qt.Key.Key_W:
             self.trim_right_requested.emit()
-        elif key == Qt.Key.Key_S or (key == Qt.Key.Key_B and has_ctrl):
+        elif key == Qt.Key.Key_S or (key in (Qt.Key.Key_B, Qt.Key.Key_K) and has_ctrl):
             self.split_at_playhead_requested.emit()
         elif key == Qt.Key.Key_M:
             if self.selected_index >= 0:

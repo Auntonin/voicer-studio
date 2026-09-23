@@ -101,17 +101,55 @@ class TestClipEditorOperations(unittest.TestCase):
         self.assertEqual(new_clip.start, 7.5)
         self.assertEqual(new_clip.end, 9.0)
 
-    def test_add_clip_at_specific_track_and_time(self):
-        """Add Clip with specific track/time places clip exactly at requested speaker track and timestamp."""
+    def test_add_clip_targets_active_speaker_and_playhead(self):
+        """Add Clip via toolbar button uses active speaker and current playhead time."""
         self.window._timeline.populate(self.state)
-        self.window._on_add_clip_at(spk_id="SPEAKER_01", t=12.0)
-        
+        self.window._active_speaker_id = "SPEAKER_01"
+        self.window._timeline.current_time = 15.0
+        self.window._on_add_clip()
+
         active = self.window._state.active_dialogues()
         self.assertEqual(len(active), 4)
         new_clip = active[-1]
         self.assertEqual(new_clip.speaker_id, "SPEAKER_01")
-        self.assertEqual(new_clip.start, 12.0)
-        self.assertEqual(new_clip.end, 13.5)
+        self.assertEqual(new_clip.start, 15.0)
+        self.assertEqual(new_clip.end, 16.5)
+        self.assertEqual(self.window._timeline.selected_index, new_clip.index)
+
+    def test_trim_left_start_of_clip(self):
+        """Trim Left (Q) cuts the start of the clip under playhead to current playhead time."""
+        self.window._timeline.populate(self.state)
+        self.window._timeline.current_time = 0.8
+        self.window._on_trim_left()
+
+        active = self.window._state.active_dialogues()
+        first_clip = [d for d in active if d.index == 1][0]
+        self.assertEqual(first_clip.start, 0.8)
+        self.assertEqual(first_clip.end, 2.0)
+
+    def test_trim_right_end_of_clip(self):
+        """Trim Right (W) cuts the end of the clip under playhead to current playhead time."""
+        self.window._timeline.populate(self.state)
+        self.window._timeline.current_time = 1.4
+        self.window._on_trim_right()
+
+        active = self.window._state.active_dialogues()
+        first_clip = [d for d in active if d.index == 1][0]
+        self.assertEqual(first_clip.start, 0.0)
+        self.assertEqual(first_clip.end, 1.4)
+
+    def test_add_clip_at_specific_track_from_context_menu(self):
+        """Right-click Add Clip on track lane (spk_id, timestamp) adds to that exact character."""
+        self.window._timeline.populate(self.state)
+        self.window._on_add_clip_at(spk_id="SPEAKER_01", t=22.5)
+
+        active = self.window._state.active_dialogues()
+        self.assertEqual(len(active), 4)
+        new_clip = active[-1]
+        self.assertEqual(new_clip.speaker_id, "SPEAKER_01")
+        self.assertEqual(new_clip.start, 22.5)
+        self.assertEqual(new_clip.end, 24.0)
+        self.assertEqual(self.window._active_speaker_id, "SPEAKER_01")
 
 
 if __name__ == "__main__":

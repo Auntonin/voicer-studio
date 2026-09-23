@@ -81,6 +81,19 @@ class SpeakerDiarizer:
     ) -> None:
         min_spk = min_speakers or self.min_speakers
         max_spk = max_speakers or self.max_speakers
+
+        # 1. Closed-set speaker enrollment matching (if voiceprints are enrolled)
+        try:
+            from core.speaker_matcher import SpeakerMatcher
+            if SpeakerMatcher.has_enrolled_speakers(state):
+                logger.info("Enrolled character voiceprints detected — running closed-set speaker matching.")
+                res = SpeakerMatcher.match_dialogues(state, audio_path)
+                logger.info(f"Closed-set speaker matching complete: {res}")
+                return
+        except Exception as e:
+            logger.warning(f"Speaker matching error ({e}), falling back to clustering.")
+
+        # 2. Fallback to unsupervised diarization (PyAnnote / acoustic clustering)
         if self.available and self.pipeline:
             self._pyannote_diarize(audio_path, state, min_spk, max_spk)
         else:

@@ -77,7 +77,10 @@ class TestExportRecovery(unittest.TestCase):
         """
         Verify ExportDialog._detect_missing_assets safely detects missing assets without raising AttributeError.
         """
-        from gui.export_dialog import ExportDialog
+        try:
+            from gui.export_dialog import ExportDialog
+        except ImportError:
+            self.skipTest("GUI not available")
         state = PipelineState()
         state.pack_backing_track_path = None
         item = DialogueItem(index=1, speaker_id="1", start=0.0, end=1.0, caption="test")

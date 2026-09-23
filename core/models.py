@@ -30,12 +30,18 @@ class SpeakerInfo:
     """
     speaker_id: str                  # e.g. "SPEAKER_00"
     display_name: str = ""           # e.g. "Weazemon"
+    voiceprint_samples: List[str] = field(default_factory=list)  # Enrolled reference sample labels
+    embedding: Optional[List[float]] = None                      # L2-normalized voiceprint vector
 
     def __post_init__(self):
         if not self.display_name:
             # Default display name from id: SPEAKER_00 → Speaker_1
             idx = self._extract_index()
             self.display_name = f"Speaker_{idx + 1}"
+
+    def has_voiceprint(self) -> bool:
+        """Returns True if this character has an enrolled voiceprint."""
+        return bool(self.embedding and len(self.embedding) > 0)
 
     def _extract_index(self) -> int:
         m = re.search(r"\d+", self.speaker_id)
@@ -56,16 +62,22 @@ class SpeakerInfo:
         return name or f"Speaker_{self._extract_index() + 1}"
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "speaker_id": self.speaker_id,
             "display_name": self.display_name,
+            "voiceprint_samples": list(self.voiceprint_samples),
         }
+        if self.embedding:
+            d["embedding"] = [round(float(v), 5) for v in self.embedding]
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> SpeakerInfo:
         return cls(
             speaker_id=str(data.get("speaker_id", "SPEAKER_00")),
-            display_name=str(data.get("display_name", ""))
+            display_name=str(data.get("display_name", "")),
+            voiceprint_samples=list(data.get("voiceprint_samples", [])),
+            embedding=list(data.get("embedding", [])) if data.get("embedding") else None,
         )
 
 
@@ -107,6 +119,10 @@ class DialogueItem:
 
     # ── Additional speakers (multi-speaker dialogue) ─────────────────────────
     extra_speakers: List[str] = field(default_factory=list)
+
+    # ── Confidence & Review ──────────────────────────────────────────────────
+    speaker_confidence: float = 1.0      # 0.0 - 1.0 confidence score
+    needs_review: bool = False           # Ambiguous or low-confidence attribution flag
 
     @property
     def duration(self) -> float:
@@ -165,6 +181,8 @@ class DialogueItem:
             "is_deleted": self.is_deleted,
             "selected_frame_idx": self.selected_frame_idx,
             "extra_speakers": list(self.extra_speakers),
+            "speaker_confidence": round(float(self.speaker_confidence), 3),
+            "needs_review": bool(self.needs_review),
         }
 
     @classmethod
@@ -197,6 +215,8 @@ class DialogueItem:
             is_deleted=bool(data.get("is_deleted", False)),
             selected_frame_idx=data.get("selected_frame_idx"),
             extra_speakers=list(data.get("extra_speakers", [])),
+            speaker_confidence=float(data.get("speaker_confidence", 1.0)),
+            needs_review=bool(data.get("needs_review", False)),
         )
 
 
@@ -293,13 +313,13 @@ PIPELINE_STEP_LABELS: Dict[PipelineStep, str] = {
 
 PIPELINE_STEP_PROGRESS: Dict[PipelineStep, int] = {
     PipelineStep.IDLE:             0,
-    PipelineStep.AUDIO_EXTRACT:    8,
-    PipelineStep.VAD:              18,
-    PipelineStep.TRANSCRIPTION:    38,
-    PipelineStep.DIARIZATION:      52,
-    PipelineStep.VOICE_SEPARATION: 65,
-    PipelineStep.CLIP_GENERATION:  75,
-    PipelineStep.FRAME_EXTRACTION: 85,
+    PipelineStep.AUDIO_EXTRACT:    5,
+    PipelineStep.VOICE_SEPARATION: 25,
+    PipelineStep.VAD:              38,
+    PipelineStep.TRANSCRIPTION:    55,
+    PipelineStep.DIARIZATION:      68,
+    PipelineStep.CLIP_GENERATION:  78,
+    PipelineStep.FRAME_EXTRACTION: 86,
     PipelineStep.BACKING_TRACK:    92,
     PipelineStep.PACK_BUILD:       96,
     PipelineStep.VALIDATION:       98,
@@ -410,10 +430,10 @@ class PipelineState:
         """
         ordered_steps = [
             PipelineStep.AUDIO_EXTRACT,
+            PipelineStep.VOICE_SEPARATION,
             PipelineStep.VAD,
             PipelineStep.TRANSCRIPTION,
             PipelineStep.DIARIZATION,
-            PipelineStep.VOICE_SEPARATION,
             PipelineStep.CLIP_GENERATION,
             PipelineStep.FRAME_EXTRACTION,
             PipelineStep.BACKING_TRACK,
@@ -559,6 +579,12 @@ class UndoManager:
         if len(self.undo_stack) > self.max_depth:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
+
+    def pop_last(self) -> Optional[Dict]:
+        """Discards the most recent snapshot from undo stack if no change occurred."""
+        if self.undo_stack:
+            return self.undo_stack.pop()
+        return None
 
     def undo(self, current_state: PipelineState) -> bool:
         if not self.undo_stack:

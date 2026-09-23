@@ -147,10 +147,10 @@ class ProgressPanel(QWidget):
 
         self.steps = [
             (PipelineStep.AUDIO_EXTRACT,   "pp_step_extract"),
-            (PipelineStep.VAD,             "pp_step_vad"),
-            (PipelineStep.DIARIZATION,     "pp_step_diarize"),
-            (PipelineStep.TRANSCRIPTION,   "pp_step_transcribe"),
             (PipelineStep.VOICE_SEPARATION,"pp_step_separate"),
+            (PipelineStep.VAD,             "pp_step_vad"),
+            (PipelineStep.TRANSCRIPTION,   "pp_step_transcribe"),
+            (PipelineStep.DIARIZATION,     "pp_step_diarize"),
             (PipelineStep.CLIP_GENERATION, "pp_step_clips"),
             (PipelineStep.FRAME_EXTRACTION,"pp_step_frames"),
             (PipelineStep.BACKING_TRACK,   "pp_step_bgtrack"),

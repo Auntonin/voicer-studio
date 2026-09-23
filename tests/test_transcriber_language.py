@@ -47,6 +47,40 @@ class TestTranscriberLanguage(unittest.TestCase):
         cleaned_dynamic = ThaiTextCleaner.process_transcript(thai_with_keywords, language=None)
         self.assertEqual(cleaned_dynamic, "สวัสดีครับ Boss เล่น Quest นี้")
 
+    def test_word_timestamp_boundary_refinement(self):
+        from core.models import PipelineState
+        from collections import namedtuple
+
+        Word = namedtuple("Word", ["start", "end", "word", "probability"])
+        Segment = namedtuple("Segment", ["start", "end", "text", "words"])
+
+        t = Transcriber(language="th")
+        t.available = True
+        t.model = MagicMock()
+
+        # Mock segment spanning 1.0s to 5.0s, but words spoken only from 2.0s to 3.5s
+        words = [
+            Word(start=2.0, end=2.5, word="สวัสดี", probability=0.9),
+            Word(start=2.6, end=3.5, word="ครับ", probability=0.95),
+        ]
+        mock_seg = Segment(start=1.0, end=5.0, text="สวัสดีครับ", words=words)
+        info = MagicMock()
+        info.language = "th"
+
+        t.model.transcribe.return_value = ([mock_seg], info)
+
+        state = PipelineState()
+        ok = t.transcribe_and_segment(Path("mock.wav"), state, total_duration=10.0)
+
+        self.assertTrue(ok)
+        self.assertEqual(len(state.dialogues), 1)
+        dialogue = state.dialogues[0]
+        # First word starts at 2.0 -> refined_start = max(0.0, 2.0 - 0.10) = 1.90
+        # Last word ends at 3.5 -> refined_end = 3.5 + 0.12 = 3.62
+        self.assertAlmostEqual(dialogue.start, 1.90, places=2)
+        self.assertAlmostEqual(dialogue.end, 3.62, places=2)
+        self.assertEqual(dialogue.caption, "สวัสดีครับ")
+
 
 if __name__ == "__main__":
     unittest.main()

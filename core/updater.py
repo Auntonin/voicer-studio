@@ -31,7 +31,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
-from PySide6.QtCore import QThread, Signal
+try:
+    from PySide6.QtCore import QThread, Signal
+except ImportError:
+    QThread = object
+    Signal = lambda *args, **kwargs: None
 
 from config import (
     APP_VERSION, GITHUB_REPO, GITHUB_RELEASES_API, TEMP_DIR,
