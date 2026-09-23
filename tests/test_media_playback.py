@@ -17,14 +17,14 @@ try:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
+    from gui.video_panel import VideoPanel
+    from gui.timeline_widget import TimelineWidget
     _gui_available = True
 except Exception:
     _gui_available = False
     app = None
 
 from core.models import PipelineState, DialogueItem
-from gui.video_panel import VideoPanel
-from gui.timeline_widget import TimelineWidget
 
 
 @unittest.skipIf(not _gui_available, "GUI required")
