@@ -8,13 +8,16 @@ smart Split Clip (playhead position priority & smart caption splitting).
 import unittest
 from core.models import PipelineState, DialogueItem, SpeakerInfo
 try:
+    import os
+    if "QT_QPA_PLATFORM" not in os.environ:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from gui.main_window import MainWindow
     from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
     _gui_available = True
-except ImportError:
+except Exception:
     _gui_available = False
-
-app = QApplication.instance() or QApplication([]) if _gui_available else None
+    app = None
 
 
 @unittest.skipIf(not _gui_available, "GUI not available")

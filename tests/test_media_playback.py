@@ -12,12 +12,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
+    import os
+    if "QT_QPA_PLATFORM" not in os.environ:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
     _gui_available = True
-except ImportError:
+except Exception:
     _gui_available = False
-
-app = QApplication.instance() or QApplication([]) if _gui_available else None
+    app = None
 
 from core.models import PipelineState, DialogueItem
 from gui.video_panel import VideoPanel
