@@ -7,12 +7,13 @@ from typing import List, Optional, Tuple
 from PySide6.QtWidgets import (
     QWidget, QToolTip, QApplication, QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QTimer, QUrl, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QEvent
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QCursor, QFontMetrics, QLinearGradient
 
 from core.models import PipelineState, DialogueItem
 from config import COLORS, SPEAKER_PALETTE
 from core.i18n import tr
+from core.platform_utils import platform_utils
 
 
 class TimelineWidget(QWidget):
@@ -312,6 +313,32 @@ class TimelineWidget(QWidget):
 
         self.update()
 
+    def event(self, event: QEvent) -> bool:
+        # Native macOS trackpad pinch-to-zoom gesture support
+        if event.type() == QEvent.Type.NativeGesture:
+            gesture_type = getattr(event, "gestureType", lambda: None)()
+            if gesture_type == Qt.NativeGestureType.ZoomNativeGesture:
+                scale = getattr(event, "value", lambda: 0.0)()
+                if scale != 0.0:
+                    self.stop_camera_animation()
+                    scroll_area = self._get_scroll_area()
+                    mouse_pos = getattr(event, "position", lambda: QPointF(0, 0))()
+                    mouse_x = mouse_pos.x()
+                    time_under_mouse = max(0.0, (mouse_x - self.HEADER_WIDTH) / max(1.0, self.pixels_per_second))
+                    zoom_factor = 1.0 + scale
+                    new_pps = max(10.0, min(500.0, self.pixels_per_second * zoom_factor))
+                    if abs(new_pps - self.pixels_per_second) > 0.05:
+                        old_h = scroll_area.horizontalScrollBar().value() if scroll_area else 0
+                        self.pixels_per_second = new_pps
+                        self._recalculate_size()
+                        if scroll_area:
+                            new_mouse_x = self.HEADER_WIDTH + time_under_mouse * self.pixels_per_second
+                            delta_x = int(new_mouse_x - mouse_x)
+                            scroll_area.horizontalScrollBar().setValue(old_h + delta_x)
+                        self.update()
+                    return True
+        return super().event(event)
+
     def wheelEvent(self, event):
         self.stop_camera_animation()
         """
@@ -326,8 +353,8 @@ class TimelineWidget(QWidget):
         modifiers = event.modifiers()
         scroll_area = self._get_scroll_area()
 
-        # 1. Ctrl + Wheel OR Alt + Wheel: Zoom Timeline horizontally (centered at mouse position!)
-        if (modifiers & Qt.KeyboardModifier.ControlModifier) or (modifiers & Qt.KeyboardModifier.AltModifier):
+        # 1. Primary Modifier (Ctrl / Cmd) OR Alt / Option + Wheel: Zoom Timeline horizontally
+        if platform_utils.is_primary_modifier(modifiers) or platform_utils.is_secondary_modifier(modifiers):
             if y_delta == 0:
                 event.accept()
                 return
@@ -1396,7 +1423,7 @@ class TimelineWidget(QWidget):
     def keyPressEvent(self, event):
         key = event.key()
         modifiers = event.modifiers()
-        has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        has_ctrl = platform_utils.is_primary_modifier(modifiers)
         has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
         if key == Qt.Key.Key_Space:

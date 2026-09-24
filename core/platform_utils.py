@@ -17,7 +17,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 # ── Platform Detection ────────────────────────────────────────────────────────
 IS_WINDOWS: bool = (sys.platform == "win32")
@@ -94,7 +94,33 @@ def reveal_in_file_manager(file_path: Path | str) -> bool:
         return False
 
 
-# ── Keyboard Shortcut Formatting ──────────────────────────────────────────────
+# ── Keyboard Shortcut Formatting & Modifiers ──────────────────────────────────
+
+def is_primary_modifier(modifiers: Any) -> bool:
+    """
+    Returns True if the primary accelerator key modifier is active.
+    - Windows / Linux: Ctrl (ControlModifier)
+    - macOS: Command (Qt maps Command to ControlModifier, but also checks MetaModifier for external keyboards)
+    """
+    try:
+        from PySide6.QtCore import Qt
+        if IS_MACOS:
+            return bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        return bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+    except Exception:
+        return False
+
+
+def is_secondary_modifier(modifiers: Any) -> bool:
+    """
+    Returns True if the secondary modifier key is active (Alt on Windows/Linux, Option on macOS).
+    """
+    try:
+        from PySide6.QtCore import Qt
+        return bool(modifiers & Qt.KeyboardModifier.AltModifier)
+    except Exception:
+        return False
+
 
 def format_shortcut(shortcut_str: str) -> str:
     """
@@ -119,13 +145,23 @@ def format_shortcut(shortcut_str: str) -> str:
     formatted = formatted.replace("Ctrl + ", "⌘ + ")
     formatted = formatted.replace("Ctrl+", "⌘")
     formatted = formatted.replace("Ctrl", "⌘")
+    formatted = formatted.replace("Cmd + ", "⌘ + ")
+    formatted = formatted.replace("Cmd+", "⌘")
+    formatted = formatted.replace("Cmd", "⌘")
+    formatted = formatted.replace("Command + ", "⌘ + ")
+    formatted = formatted.replace("Command+", "⌘")
+    formatted = formatted.replace("Command", "⌘")
     formatted = formatted.replace("Alt + ", "⌥ + ")
     formatted = formatted.replace("Alt+", "⌥")
     formatted = formatted.replace("Alt", "⌥")
+    formatted = formatted.replace("Option + ", "⌥ + ")
+    formatted = formatted.replace("Option+", "⌥")
+    formatted = formatted.replace("Option", "⌥")
     formatted = formatted.replace("Shift + ", "⇧ + ")
     formatted = formatted.replace("Shift+", "⇧")
-    formatted = formatted.replace("Shift", "⇧")
     formatted = formatted.replace("Backspace", "⌫")
+    if "Delete" in formatted and "⌫" not in formatted:
+        formatted = formatted.replace("Delete", "⌫ Delete")
     return formatted
 
 
@@ -221,6 +257,8 @@ class PlatformUtils:
     open_in_file_manager = staticmethod(open_in_file_manager)
     reveal_in_file_manager = staticmethod(reveal_in_file_manager)
     format_shortcut = staticmethod(format_shortcut)
+    is_primary_modifier = staticmethod(is_primary_modifier)
+    is_secondary_modifier = staticmethod(is_secondary_modifier)
     get_default_font_family = staticmethod(get_default_font_family)
     get_thai_font_family = staticmethod(get_thai_font_family)
     get_appdata_dir = staticmethod(get_appdata_dir)

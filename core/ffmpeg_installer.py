@@ -57,7 +57,22 @@ def get_ffmpeg_executable() -> Optional[Path]:
         _ensure_in_path(APPDATA_TOOLS_DIR)
         return appdata_exe
 
-    # 4. Check system PATH via shutil.which
+    # 4. Check well-known Unix / macOS installation paths
+    if sys.platform != "win32":
+        unix_candidates = [
+            Path("/opt/homebrew/bin/ffmpeg"),       # macOS Apple Silicon (Homebrew)
+            Path("/usr/local/bin/ffmpeg"),          # macOS Intel / Linux /usr/local
+            Path("/opt/local/bin/ffmpeg"),          # macOS MacPorts
+            Path("/usr/bin/ffmpeg"),                # Linux standard distro package
+            Path("/snap/bin/ffmpeg"),               # Linux Snap package
+            Path.home() / ".local/bin/ffmpeg",      # User local install
+        ]
+        for candidate in unix_candidates:
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                _ensure_in_path(candidate.parent)
+                return candidate
+
+    # 5. Check system PATH via shutil.which
     sys_path_exe = shutil.which("ffmpeg")
     if sys_path_exe:
         return Path(sys_path_exe)
@@ -139,6 +154,27 @@ def ensure_ffmpeg(progress_cb: Optional[Callable[[int, str], None]] = None) -> b
                     return True
         except Exception as e:
             log.warning(f"Winget auto-installation failed: {e}")
+
+    # ── Strategy 1b: macOS Homebrew Auto-Install ──────────────────────────────
+    if sys.platform == "darwin" and shutil.which("brew"):
+        try:
+            if progress_cb:
+                progress_cb(40, "Installing FFmpeg via Homebrew...")
+            log.info("Attempting brew install ffmpeg...")
+            res = subprocess.run(["brew", "install", "ffmpeg"], capture_output=True, text=True, timeout=600)
+            if res.returncode == 0:
+                for candidate_dir in ["/opt/homebrew/bin", "/usr/local/bin"]:
+                    cand_path = Path(candidate_dir)
+                    if (cand_path / "ffmpeg").exists():
+                        _ensure_in_path(cand_path)
+                        break
+                if is_ffmpeg_available():
+                    log.info("Homebrew FFmpeg installation completed successfully!")
+                    if progress_cb:
+                        progress_cb(100, "FFmpeg installed successfully via Homebrew!")
+                    return True
+        except Exception as e:
+            log.warning(f"Homebrew auto-installation failed: {e}")
 
     # ── Strategy 2: Standalone Download & Extraction to App Tools Folder ─────
     if progress_cb:

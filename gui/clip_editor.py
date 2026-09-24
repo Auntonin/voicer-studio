@@ -13,13 +13,14 @@ from PySide6.QtGui import QPixmap, QImage, QIcon, QTextCursor
 from core.models import DialogueItem, PipelineState
 from config import COLORS, ASSETS_DIR
 from core.i18n import tr
+from core.platform_utils import platform_utils
 
 
 class CaptionTextEdit(QPlainTextEdit):
-    """QPlainTextEdit subclass that ensures Ctrl+Z, Ctrl+Y, and Ctrl+Shift+Z are reliably handled for caption undo/redo."""
+    """QPlainTextEdit subclass that ensures Ctrl+Z / Cmd+Z, Ctrl+Y, and Ctrl+Shift+Z / Cmd+Shift+Z are reliably handled for caption undo/redo."""
     def keyPressEvent(self, event):
         mods = event.modifiers()
-        if mods & Qt.KeyboardModifier.ControlModifier:
+        if platform_utils.is_primary_modifier(mods):
             if event.key() == Qt.Key.Key_Z:
                 if mods & Qt.KeyboardModifier.ShiftModifier:
                     if self.document().isRedoAvailable():
