@@ -42,6 +42,7 @@ from gui.settings_dialog import SettingsDialog
 from gui.preview_dialog import PreviewDialog
 from gui.video_panel import VideoPanel
 from gui.ui_utils import apply_dark_title_bar
+from core.platform_utils import platform_utils
 
 
 class SingleClipTranscribeWorker(QThread):
@@ -349,11 +350,11 @@ class MainWindow(QMainWindow):
         self._menu_file = menubar.addMenu(tr("menu_file"))
 
         self._act_new_proj = self._menu_file.addAction(tr("menu_new_proj"))
-        self._act_new_proj.setShortcut("Ctrl+N")
+        self._act_new_proj.setShortcut(QKeySequence.StandardKey.New)
         self._act_new_proj.triggered.connect(self.on_new_project)
 
         self._act_open_proj = self._menu_file.addAction(tr("menu_open_proj"))
-        self._act_open_proj.setShortcut("Ctrl+O")
+        self._act_open_proj.setShortcut(QKeySequence.StandardKey.Open)
         self._act_open_proj.triggered.connect(self.on_open_project)
 
         self._act_open_pack = self._menu_file.addAction(tr("menu_open_pack"))
@@ -365,17 +366,17 @@ class MainWindow(QMainWindow):
         self._menu_file.addSeparator()
 
         self._act_save_proj = self._menu_file.addAction(tr("menu_save_proj"))
-        self._act_save_proj.setShortcut("Ctrl+S")
+        self._act_save_proj.setShortcut(QKeySequence.StandardKey.Save)
         self._act_save_proj.triggered.connect(self.on_save_project)
 
         self._act_save_proj_as = self._menu_file.addAction(tr("menu_save_proj_as"))
-        self._act_save_proj_as.setShortcut("Ctrl+Shift+S")
+        self._act_save_proj_as.setShortcut(QKeySequence.StandardKey.SaveAs)
         self._act_save_proj_as.triggered.connect(self.on_save_project_as)
 
         self._menu_file.addSeparator()
 
         self._act_import_menu = self._menu_file.addAction(tr("menu_import_video"))
-        self._act_import_menu.setShortcut("Ctrl+I")
+        self._act_import_menu.setShortcut(QKeySequence("Ctrl+I"))
         self._act_import_menu.triggered.connect(self.on_import_video)
 
         self._menu_recent_videos = self._menu_file.addMenu(tr("menu_recent_videos"))
@@ -384,22 +385,24 @@ class MainWindow(QMainWindow):
         self._menu_file.addSeparator()
 
         self._act_export_menu = self._menu_file.addAction(tr("menu_export_pack"))
-        self._act_export_menu.setShortcut("Ctrl+E")
+        self._act_export_menu.setShortcut(QKeySequence("Ctrl+E"))
         self._act_export_menu.triggered.connect(self.on_export)
 
         self._menu_file.addSeparator()
         self._act_quit = self._menu_file.addAction(tr("menu_quit"))
+        self._act_quit.setShortcut(QKeySequence.StandardKey.Quit)
+        self._act_quit.setMenuRole(QAction.MenuRole.QuitRole)
         self._act_quit.triggered.connect(self.close)
 
         # Edit Menu (Undo / Redo)
         self._menu_edit = menubar.addMenu(tr("menu_edit"))
         
         self.act_undo = self._menu_edit.addAction(tr("menu_undo"))
-        self.act_undo.setShortcut("Ctrl+Z")
+        self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
         self.act_undo.triggered.connect(self.on_undo)
 
         self.act_redo = self._menu_edit.addAction(tr("menu_redo"))
-        self.act_redo.setShortcut("Ctrl+Shift+Z")
+        self.act_redo.setShortcut(QKeySequence.StandardKey.Redo)
         self.act_redo.triggered.connect(self.on_redo)
 
         self._menu_edit.addSeparator()
@@ -407,13 +410,15 @@ class MainWindow(QMainWindow):
         self._act_kb_shortcuts.triggered.connect(self._show_shortcuts_dialog)
 
         self._act_settings = self._menu_edit.addAction(tr("menu_settings"))
+        self._act_settings.setShortcut(QKeySequence.StandardKey.Preferences)
+        self._act_settings.setMenuRole(QAction.MenuRole.PreferencesRole)
         self._act_settings.triggered.connect(self.on_settings)
 
         # View Menu (Toggle visibility of panels & Full Screen)
         self._menu_view = menubar.addMenu(tr("menu_view"))
 
         self.act_fullscreen = self._menu_view.addAction(tr("menu_fullscreen"))
-        self.act_fullscreen.setShortcut("F11")
+        self.act_fullscreen.setShortcut(QKeySequence.StandardKey.FullScreen)
         self.act_fullscreen.setCheckable(True)
         self.act_fullscreen.setChecked(False)
         self.act_fullscreen.triggered.connect(self._toggle_fullscreen)
@@ -1494,7 +1499,7 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event):
         key = event.key()
         modifiers = event.modifiers()
-        has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        has_ctrl = platform_utils.is_primary_modifier(modifiers)
 
         focus = QApplication.focusWidget()
         if focus and isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):

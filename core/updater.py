@@ -454,6 +454,79 @@ echo Done.
     return updater_bat_path
 
 
+def generate_updater_posix_script(
+    downloaded_file: Path,
+    is_zip: bool,
+    target_app_dir: Path,
+    target_exe: Path,
+    current_pid: int
+) -> Path:
+    """
+    Generates a portable POSIX shell script (.sh) for background detached updating on macOS / Linux.
+    """
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    updater_sh_path = TEMP_DIR / "voicer_updater.sh"
+
+    sh_content = f"""#!/bin/sh
+PID="{current_pid}"
+SOURCE_FILE="{str(downloaded_file)}"
+TARGET_DIR="{str(target_app_dir)}"
+TARGET_EXE="{str(target_exe)}"
+IS_ZIP="{'1' if is_zip else '0'}"
+
+echo "[1/4] Waiting for Voicer Studio (PID $PID) to close..."
+RETRIES=0
+while kill -0 "$PID" 2>/dev/null; do
+    RETRIES=$((RETRIES + 1))
+    if [ "$RETRIES" -ge 25 ]; then
+        echo "[INFO] Terminating process $PID..."
+        kill -9 "$PID" 2>/dev/null
+    fi
+    sleep 1
+done
+
+echo "[2/4] Process closed. Preparing installation..."
+sleep 1
+
+echo "[3/4] Installing updated files..."
+if [ "$IS_ZIP" = "1" ]; then
+    echo "[INFO] Extracting update archive into $TARGET_DIR..."
+    TEMP_EXTRACT="$TARGET_DIR/voicer_upd_temp_$$"
+    mkdir -p "$TEMP_EXTRACT"
+    if which unzip >/dev/null 2>&1; then
+        unzip -q -o "$SOURCE_FILE" -d "$TEMP_EXTRACT"
+    elif which python3 >/dev/null 2>&1; then
+        python3 -c "import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$SOURCE_FILE" "$TEMP_EXTRACT"
+    fi
+    cp -Rf "$TEMP_EXTRACT"/* "$TARGET_DIR"/
+    rm -rf "$TEMP_EXTRACT"
+else
+    echo "[INFO] Updating executable: $TARGET_EXE..."
+    cp -f "$TARGET_EXE" "$TARGET_EXE.bak" 2>/dev/null
+    cp -f "$SOURCE_FILE" "$TARGET_EXE"
+    chmod +x "$TARGET_EXE" 2>/dev/null
+fi
+
+echo "[4/4] Update applied successfully! Relaunching Voicer Studio..."
+sleep 1
+cd "$TARGET_DIR"
+if [ -x "$TARGET_EXE" ]; then
+    "$TARGET_EXE" &
+else
+    python3 main.py &
+fi
+
+rm -f "$SOURCE_FILE" 2>/dev/null
+rm -f "$0"
+"""
+    updater_sh_path.write_text(sh_content, encoding="utf-8")
+    try:
+        os.chmod(updater_sh_path, 0o755)
+    except Exception:
+        pass
+    return updater_sh_path
+
+
 def apply_update_and_restart(
     downloaded_file: Path,
     is_zip: bool,
@@ -477,24 +550,40 @@ def apply_update_and_restart(
     current_pid = os.getpid()
 
     try:
-        bat_file = generate_updater_batch(
-            downloaded_file=downloaded_file,
-            is_zip=is_zip,
-            target_app_dir=target_app_dir,
-            target_exe=resolved_exe,
-            current_pid=current_pid
-        )
+        if sys.platform == "win32":
+            bat_file = generate_updater_batch(
+                downloaded_file=downloaded_file,
+                is_zip=is_zip,
+                target_app_dir=target_app_dir,
+                target_exe=resolved_exe,
+                current_pid=current_pid
+            )
 
-        # Launch detached process with high-level flags on Windows
-        # DETACHED_PROCESS (0x00000008) + CREATE_NEW_PROCESS_GROUP (0x00000200)
-        detached_flags = 0x00000008 | 0x00000200 if sys.platform == "win32" else 0
-        
-        subprocess.Popen(
-            ["cmd.exe", "/c", str(bat_file)],
-            creationflags=detached_flags,
-            close_fds=True,
-            cwd=str(target_app_dir)
-        )
+            # Launch detached process with high-level flags on Windows
+            # DETACHED_PROCESS (0x00000008) + CREATE_NEW_PROCESS_GROUP (0x00000200)
+            detached_flags = 0x00000008 | 0x00000200
+            
+            subprocess.Popen(
+                ["cmd.exe", "/c", str(bat_file)],
+                creationflags=detached_flags,
+                close_fds=True,
+                cwd=str(target_app_dir)
+            )
+        else:
+            sh_file = generate_updater_posix_script(
+                downloaded_file=downloaded_file,
+                is_zip=is_zip,
+                target_app_dir=target_app_dir,
+                target_exe=resolved_exe,
+                current_pid=current_pid
+            )
+            subprocess.Popen(
+                ["/bin/sh", str(sh_file)],
+                start_new_session=True,
+                close_fds=True,
+                cwd=str(target_app_dir)
+            )
+
         return True, "Updater launched successfully."
     except Exception as e:
         log.error(f"Failed to launch updater: {e}", exc_info=True)
@@ -506,20 +595,21 @@ def restart_application(target_app_dir: Optional[Path] = None):
     Relaunches Voicer Studio and cleanly exits the current process.
     """
     target_dir = target_app_dir or APP_DIR
-    target_exe = target_dir / "VoicerStudio.exe"
+    target_exe = target_dir / ("VoicerStudio.exe" if sys.platform == "win32" else "VoicerStudio")
     current_pid = os.getpid()
 
-    restart_bat = TEMP_DIR / "voicer_restart.bat"
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    if target_exe.exists():
-        launch_cmd = f'start "" "{target_exe}"'
-    else:
-        py_exe = sys.executable
-        main_py = target_dir / "main.py"
-        launch_cmd = f'start "" "{py_exe}" "{main_py}"'
+    if sys.platform == "win32":
+        restart_bat = TEMP_DIR / "voicer_restart.bat"
+        if target_exe.exists():
+            launch_cmd = f'start "" "{target_exe}"'
+        else:
+            py_exe = sys.executable
+            main_py = target_dir / "main.py"
+            launch_cmd = f'start "" "{py_exe}" "{main_py}"'
 
-    bat_content = f"""@echo off
+        bat_content = f"""@echo off
 set "PID={current_pid}"
 :WAIT_PID
 tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
@@ -532,15 +622,43 @@ cd /d "{target_dir}"
 {launch_cmd}
 (goto) 2>nul & del "%~f0"
 """
-    restart_bat.write_text(bat_content, encoding="utf-8")
+        restart_bat.write_text(bat_content, encoding="utf-8")
+        detached_flags = 0x00000008 | 0x00000200
+        subprocess.Popen(
+            ["cmd.exe", "/c", str(restart_bat)],
+            creationflags=detached_flags,
+            close_fds=True,
+            cwd=str(target_dir)
+        )
+    else:
+        # macOS / Linux POSIX restart
+        restart_sh = TEMP_DIR / "voicer_restart.sh"
+        if target_exe.exists():
+            launch_cmd = f'"{target_exe}"'
+        else:
+            py_exe = sys.executable
+            main_py = target_dir / "main.py"
+            launch_cmd = f'"{py_exe}" "{main_py}"'
 
-    detached_flags = 0x00000008 | 0x00000200 if sys.platform == "win32" else 0
-    subprocess.Popen(
-        ["cmd.exe", "/c", str(restart_bat)],
-        creationflags=detached_flags,
-        close_fds=True,
-        cwd=str(target_dir)
-    )
+        sh_content = f"""#!/bin/sh
+while kill -0 {current_pid} 2>/dev/null; do
+    sleep 0.5
+done
+cd "{target_dir}"
+{launch_cmd} &
+rm -f "$0"
+"""
+        restart_sh.write_text(sh_content, encoding="utf-8")
+        try:
+            os.chmod(restart_sh, 0o755)
+        except Exception:
+            pass
+        subprocess.Popen(
+            ["/bin/sh", str(restart_sh)],
+            start_new_session=True,
+            close_fds=True,
+            cwd=str(target_dir)
+        )
 
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance()
