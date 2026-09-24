@@ -9,14 +9,76 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QSlider, QStackedLayout, QWidget
 )
-from PySide6.QtCore import Qt, Signal, QUrl, QTime, QSize, QTimer
-from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent, QPixmap, QIcon
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtCore import Qt, Signal, QUrl, QTime, QSize, QTimer, QRect
+from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent, QPixmap, QIcon, QPainter, QImage, QColor
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
 
 from core.models import PipelineState
 from config import COLORS, ASSETS_DIR
 from core.i18n import tr
+
+
+class VideoSurfaceWidget(QWidget):
+    """
+    High-performance native Qt video render surface using QVideoSink & QPainter.
+    Eliminates standalone Direct3D SwapChain child HWNDs that cause Discord/OBS
+    window capture hooks to isolate and full-screen stream the video preview widget
+    instead of the full application workspace.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setStyleSheet("background-color: #000000; border-radius: 6px;")
+        self.sink = QVideoSink(self)
+        self.sink.videoFrameChanged.connect(self._on_video_frame_changed)
+        self._current_image: QImage | None = None
+
+    def _on_video_frame_changed(self, frame: QVideoFrame):
+        if frame.isValid():
+            self._current_image = frame.toImage()
+        else:
+            self._current_image = None
+        self.update()
+
+    def clear(self):
+        self._current_image = None
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        
+        # Black background
+        painter.fillRect(self.rect(), QColor(0, 0, 0))
+
+        if self._current_image and not self._current_image.isNull():
+            img_w = self._current_image.width()
+            img_h = self._current_image.height()
+            w = self.width()
+            h = self.height()
+
+            if img_w > 0 and img_h > 0 and w > 0 and h > 0:
+                img_ratio = img_w / img_h
+                widget_ratio = w / h
+
+                if widget_ratio > img_ratio:
+                    # Pillarbox: fit height, center horizontally
+                    target_h = h
+                    target_w = int(target_h * img_ratio)
+                    target_x = (w - target_w) // 2
+                    target_y = 0
+                else:
+                    # Letterbox: fit width, center vertically
+                    target_w = w
+                    target_h = int(target_w / img_ratio)
+                    target_x = 0
+                    target_y = (h - target_h) // 2
+
+                target_rect = QRect(target_x, target_y, target_w, target_h)
+                painter.drawImage(target_rect, self._current_image)
+
+        painter.end()
 
 
 class VideoPanel(QFrame):
@@ -49,16 +111,15 @@ class VideoPanel(QFrame):
         self._volume: float = 1.0
         self._is_muted: bool = False
 
-        # ── QMediaPlayer Setup ─────────────────────────────────────────
-        self.player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
+        # ── QMediaPlayer & VideoSurface Setup ─────────────────────────
+        self.player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
         self.audio_output.setVolume(1.0)
         self.audio_output.setMuted(False)
         self.player.setAudioOutput(self.audio_output)
 
-        self.video_widget = QVideoWidget()
-        self.video_widget.setStyleSheet("background-color: #000000; border-radius: 6px;")
-        self.player.setVideoOutput(self.video_widget)
+        self.video_widget = VideoSurfaceWidget(self)
+        self.player.setVideoSink(self.video_widget.sink)
 
         self.player.positionChanged.connect(self._on_player_position_changed)
         self.player.durationChanged.connect(self._on_player_duration_changed)
@@ -603,6 +664,7 @@ class VideoPanel(QFrame):
     def reset(self):
         self.player.stop()
         self.player.setSource(QUrl())
+        self.video_widget.clear()
         self._stack_layout.setCurrentIndex(0)
         self._info_label.setText("")
         self._update_badge("ORIGINAL")

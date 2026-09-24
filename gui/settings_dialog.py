@@ -338,14 +338,17 @@ class SettingsDialog(QDialog):
         for dev in devices:
             self.combo_device.addItem(dev.display_title, userData=dev.device_id)
         self.combo_device.blockSignals(False)
-        self._on_device_changed()
+        self._update_device_hint()
 
-    def _on_device_changed(self):
+    def _update_device_hint(self):
         from core.device_manager import device_manager
         cur_data = self.combo_device.currentData() or "auto"
         dev = device_manager.get_optimal_device(cur_data)
         if hasattr(self, 'lbl_device_hint'):
             self.lbl_device_hint.setText(dev.description)
+
+    def _on_device_changed(self):
+        self._update_device_hint()
         if hasattr(self, 'combo_perf_profile') and hasattr(self, '_on_perf_profile_changed'):
             self._on_perf_profile_changed()
 
@@ -559,21 +562,28 @@ class SettingsDialog(QDialog):
         self.chk_check_updates.setChecked(settings.get("check_updates_startup", True))
 
         # 2. AI Models tab
+        self.combo_device.blockSignals(True)
         compute_dev = settings.get("compute_device", "auto")
         dev_idx = self.combo_device.findData(compute_dev)
         if dev_idx >= 0:
             self.combo_device.setCurrentIndex(dev_idx)
         else:
             self.combo_device.setCurrentIndex(0)
-        self._on_device_changed()
+        self.combo_device.blockSignals(False)
+        self._update_device_hint()
 
+        self.combo_perf_profile.blockSignals(True)
         perf_profile = settings.get("performance_profile", "auto")
         p_idx = self.combo_perf_profile.findData(perf_profile)
         if p_idx >= 0:
             self.combo_perf_profile.setCurrentIndex(p_idx)
         else:
             self.combo_perf_profile.setCurrentIndex(0)
+        self.combo_perf_profile.blockSignals(False)
+        
+        self.spin_custom_workers.blockSignals(True)
         self.spin_custom_workers.setValue(settings.get("custom_workers", 4))
+        self.spin_custom_workers.blockSignals(False)
         self._on_perf_profile_changed()
 
         self.edit_hf.setText(settings.get("hf_token", ""))

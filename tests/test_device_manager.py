@@ -113,6 +113,20 @@ class TestDeviceManager(unittest.TestCase):
         except Exception as e:
             self.fail(f"configure_runtime_environment threw exception: {e}")
 
+    def test_prewarm_async(self):
+        """Prewarm async should start a background daemon thread and populate cache safely."""
+        DeviceManager.prewarm_async()
+        if DeviceManager._prewarm_thread:
+            DeviceManager._prewarm_thread.join(timeout=5)
+        devices = DeviceManager.detect_available_devices()
+        self.assertTrue(len(devices) >= 1)
+
+    def test_detect_os_gpus_fast(self):
+        """Native OS GPU detection must return a list of strings without error."""
+        from core.device_manager import _detect_os_gpus
+        gpus = _detect_os_gpus()
+        self.assertIsInstance(gpus, list)
+
 
 if __name__ == "__main__":
     unittest.main()

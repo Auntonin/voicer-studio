@@ -285,6 +285,11 @@ def main():
     # ── Neural models & environment ───────────────────────────────────────────
     splash.set_stage(70, "Loading BS-RoFormer & Speech Recognition Pipelines...")
     app.processEvents()
+    try:
+        from core.device_manager import device_manager
+        device_manager.prewarm_async()
+    except Exception:
+        pass
     time.sleep(0.08)
 
     # ── Import & create main window ────────────────────────────────────────────

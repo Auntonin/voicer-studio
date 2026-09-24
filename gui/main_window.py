@@ -140,6 +140,13 @@ class MainWindow(QMainWindow):
         self._clip_transcribe_worker: SingleClipTranscribeWorker | None = None
         self._last_saved_time: str | None = None
 
+        # Asynchronously prewarm hardware detection and AI model engine
+        try:
+            from core.device_manager import device_manager
+            device_manager.prewarm_async()
+        except Exception:
+            pass
+
         # Background Auto-Save timer (checks dirty flag every 30 seconds)
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setInterval(30000)
