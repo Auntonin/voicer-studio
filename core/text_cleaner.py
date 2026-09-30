@@ -61,17 +61,89 @@ COMMON_ENGLISH_KEYWORDS = {
     "yes": "Yes",
 }
 
+# Common subtitle and Whisper credit hallucinations in Thai / English
+HALLUCINATION_PATTERNS = [
+    # Subtitle credits & translator signatures
+    r"ขอบคุณสำหรับการรับชม",
+    r"ขอบคุณที่รับชม",
+    r"ขอบคุณสำหรับการติดตามรับชม",
+    r"ขอบคุณที่ติดตามรับชม",
+    r"ขอบคุณสำหรับการรับฟัง",
+    r"ขอบคุณครับสำหรับการรับชม",
+    r"ขอบคุณค่ะสำหรับการรับชม",
+    r"อย่าลืมกด\s*(?:Like|Share|Subscribe|ไลค์|แชร์|ติดตาม|กระดิ่ง)",
+    r"ฝากกด\s*(?:Like|Share|Subscribe|ไลค์|แชร์|ติดตาม|กระดิ่ง)",
+    r"ซับไทยโดย[^\n]+",
+    r"แปลไทยโดย[^\n]+",
+    r"แปลโดย[^\n]+",
+    r"บรรยายโดย[^\n]+",
+    r"ทีมพากย์[^\n]+",
+    r"ให้เสียงภาษาไทยโดย[^\n]+",
+    r"Subtitles\s+by[^\n]+",
+    r"Translated\s+by[^\n]+",
+    r"Transcribed\s+by[^\n]+",
+    r"Amara\.org",
+    r"MBC\s+News",
+    r"CNN\s+News",
+    r"BBC\s+News",
+    # Sound effect brackets / annotations during silence
+    r"\([เสียง]*ดนตรี[บรรเลง]*\)",
+    r"\[[เสียง]*ดนตรี[บรรเลง]*\]",
+    r"\(เสียงปรบมือ\)",
+    r"\[เสียงปรบมือ\]",
+    r"\(ดนตรีประกอบ\)",
+    r"\[ดนตรีประกอบ\]",
+    r"\(เสียงหัวเราะ\)",
+    r"\[เสียงหัวเราะ\]",
+    r"\(เสียงถอนหายใจ\)",
+    r"\[เสียงถอนหายใจ\]",
+    r"\((?:applause|music|laughter|sigh|silence)\)",
+    r"\[(?:applause|music|laughter|sigh|silence)\]",
+]
+
+_COMPILED_HALLUCINATION_REGEX = [re.compile(p, re.IGNORECASE) for p in HALLUCINATION_PATTERNS]
+
+
 class ThaiTextCleaner:
+    @staticmethod
+    def remove_hallucination_phrases(text: str) -> str:
+        """
+        Strips known subtitle credits, channel promos, and sound effect annotations.
+        """
+        if not text:
+            return ""
+        cleaned = text
+        for pattern in _COMPILED_HALLUCINATION_REGEX:
+            cleaned = pattern.sub("", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def is_hallucination(text: str) -> bool:
+        """
+        Checks if the entire transcript segment is purely a hallucination artifact or noise.
+        """
+        if not text or not text.strip():
+            return True
+        cleaned = ThaiTextCleaner.remove_hallucination_phrases(text)
+        if not cleaned or not re.search(r'[\w\u0e00-\u0e7f]', cleaned):
+            return True
+        return False
+
     @staticmethod
     def remove_repetitive_hallucinations(text: str) -> str:
         """
-        Removes repetitive Whisper hallucination loops (e.g. 'ขอบคุณครับ ขอบคุณครับ ขอบคุณครับ').
+        Removes repetitive Whisper hallucination loops (e.g. 'ขอบคุณครับ ขอบคุณครับ ขอบคุณครับ'
+        or single character loops like 'กกกกกกก').
         """
         if not text:
             return ""
 
-        # Remove repeated words (2+ chars) repeated 3 or more times consecutively
-        # e.g. "ขอบคุณครับ ขอบคุณครับ ขอบคุณครับ" -> "ขอบคุณครับ"
+        # 1. Reduce repeating identical characters (e.g. 5+ repeats -> max 2)
+        # Avoid destroying laughter numbers like '555' by keeping up to 3 for digits
+        text = re.sub(r'([^\d\s])\1{4,}', r'\1\1', text)
+        text = re.sub(r'(\d)\1{5,}', r'\1\1\1', text)
+
+        # 2. Token-level repeat reduction
         words = text.strip().split()
         if not words:
             return ""
@@ -95,20 +167,37 @@ class ThaiTextCleaner:
 
             # Check 2-word phrase repeat
             if i + 3 < n:
-                phrase2 = (words[i], words[i+1])
+                phrase2 = (words[i].lower(), words[i+1].lower())
                 phrase_repeat = 1
-                while i + phrase_repeat * 2 + 1 < n and (words[i + phrase_repeat*2], words[i + phrase_repeat*2 + 1]) == phrase2:
+                while (
+                    i + (phrase_repeat + 1) * 2 <= n and
+                    (words[i + phrase_repeat * 2].lower(), words[i + phrase_repeat * 2 + 1].lower()) == phrase2
+                ):
                     phrase_repeat += 1
                 if phrase_repeat >= 3:
-                    cleaned_words.extend(list(phrase2))
+                    cleaned_words.extend(words[i:i+2])
                     i += phrase_repeat * 2
+                    continue
+
+            # Check 3-word phrase repeat
+            if i + 5 < n:
+                phrase3 = (words[i].lower(), words[i+1].lower(), words[i+2].lower())
+                phrase3_repeat = 1
+                while (
+                    i + (phrase3_repeat + 1) * 3 <= n and
+                    (words[i + phrase3_repeat * 3].lower(), words[i + phrase3_repeat * 3 + 1].lower(), words[i + phrase3_repeat * 3 + 2].lower()) == phrase3
+                ):
+                    phrase3_repeat += 1
+                if phrase3_repeat >= 3:
+                    cleaned_words.extend(words[i:i+3])
+                    i += phrase3_repeat * 3
                     continue
 
             cleaned_words.append(word)
             i += 1
 
         text = " ".join(cleaned_words)
-        # Catch unspaced repeating Thai phrases
+        # Catch unspaced repeating Thai phrases (e.g. "สวัสดีสวัสดีสวัสดี" -> "สวัสดี")
         text = re.sub(r'(.{3,15}?)\1{2,}', r'\1', text)
         return text
 
@@ -171,7 +260,11 @@ class ThaiTextCleaner:
         result = text.strip()
 
         if clean_hallucinations:
+            result = cls.remove_hallucination_phrases(result)
             result = cls.remove_repetitive_hallucinations(result)
+
+        if not result:
+            return ""
 
         if language == "th" or any('\u0e00' <= c <= '\u0e7f' for c in result):
             result = cls.normalize_thai_spacing(result)

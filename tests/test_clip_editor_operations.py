@@ -151,6 +151,28 @@ class TestClipEditorOperations(unittest.TestCase):
         self.assertEqual(new_clip.end, 24.0)
         self.assertEqual(self.window._active_speaker_id, "SPEAKER_01")
 
+    def test_batch_dialogues_deleted(self):
+        """Batch delete deletes multiple selected dialogue indices simultaneously."""
+        self.window._on_batch_dialogues_deleted([1, 2])
+        active = self.window._state.active_dialogues()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0].speaker_id, "SPEAKER_01")
+
+    def test_batch_speaker_reassigned(self):
+        """Batch speaker reassignment assigns multiple selected items to target character."""
+        active = self.window._state.active_dialogues()
+        self.window._on_batch_speaker_reassigned(active, "SPEAKER_01")
+        for itm in self.window._state.active_dialogues():
+            self.assertEqual(itm.speaker_id, "SPEAKER_01")
+            self.assertFalse(itm.needs_review)
+            self.assertEqual(itm.speaker_confidence, 1.0)
+
+    def test_timeline_waveform_caching(self):
+        """Timeline widget caches waveform bar patterns across paint calls."""
+        tl = self.window._timeline
+        tl.populate(self.state)
+        self.assertEqual(len(tl._waveform_cache), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

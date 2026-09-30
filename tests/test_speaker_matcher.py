@@ -171,6 +171,26 @@ class TestSpeakerMatcher(unittest.TestCase):
         self.assertIsNotNone(popped)
         self.assertEqual(len(mgr.undo_stack), 0)
 
+    def test_clustering_diarization_confidence_assignment(self):
+        state = PipelineState()
+        item1 = DialogueItem(index=1, speaker_id="SPEAKER_UNKNOWN", start=0.0, end=2.0)
+        item2 = DialogueItem(index=2, speaker_id="SPEAKER_UNKNOWN", start=2.5, end=4.5)
+        state.dialogues = [item1, item2]
+
+        diarizer = SpeakerDiarizer()
+        feats = [
+            [1.0] + [0.0] * 51,
+            [0.0, 1.0] + [0.0] * 50
+        ]
+        with patch.object(diarizer, "_extract_features", return_value=feats):
+            diarizer.diarize(Path("mock.wav"), state)
+
+        self.assertEqual(len(state.speakers), 2)
+        self.assertTrue(item1.speaker_confidence > 0.0)
+        self.assertTrue(item2.speaker_confidence > 0.0)
+        self.assertFalse(item1.needs_review)
+        self.assertFalse(item2.needs_review)
+
 
 if __name__ == "__main__":
     unittest.main()

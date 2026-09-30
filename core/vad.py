@@ -47,7 +47,7 @@ class VADDetector:
 
         tot_dur = state.video_duration if state.video_duration > 0 else 999999.0
         # 1. Merge micro-pauses within the same phrase first
-        segments = self._merge_segments(segments, merge_gap_ms)
+        segments = self._merge_segments(segments, merge_gap_ms, min_speech_ms)
         # 2. Apply smart pre-roll / post-roll padding with midpoint collision avoidance
         segments = self._apply_smart_padding(segments, padding_ms, tot_dur)
         
@@ -142,23 +142,41 @@ class VADDetector:
 
         return segments
 
-    def _merge_segments(self, segments: List[Tuple[float, float]], gap_ms: int) -> List[Tuple[float, float]]:
+    def _merge_segments(self, segments: List[Tuple[float, float]], gap_ms: int, min_speech_ms: int = 150) -> List[Tuple[float, float]]:
         if not segments:
             return []
         
-        # Ensure chronological order
-        sorted_segs = sorted(segments, key=lambda x: x[0])
-        gap_sec = gap_ms / 1000.0
+        # Ensure chronological order and valid positive intervals
+        valid_segs = [(round(s, 3), round(e, 3)) for s, e in segments if e > s]
+        if not valid_segs:
+            return []
+
+        sorted_segs = sorted(valid_segs, key=lambda x: x[0])
+        gap_sec = max(0.05, gap_ms / 1000.0)
+        min_speech_sec = max(0.08, min_speech_ms / 1000.0)
+        
         merged = [sorted_segs[0]]
         
         for current in sorted_segs[1:]:
             prev = merged[-1]
-            if current[0] - prev[1] <= gap_sec:
+            cur_dur = current[1] - current[0]
+            gap = current[0] - prev[1]
+
+            # Merge if gap is smaller than threshold
+            if gap <= gap_sec:
+                merged[-1] = (prev[0], max(prev[1], current[1]))
+            # Merge if current or prev is a tiny fragment (< min_speech_sec) and gap is small (<= 0.30s)
+            elif (cur_dur < min_speech_sec or (prev[1] - prev[0]) < min_speech_sec) and gap <= 0.30:
                 merged[-1] = (prev[0], max(prev[1], current[1]))
             else:
+                # If isolated and too short (< 0.10s), skip noise spike
+                if cur_dur < 0.10 and gap > 0.30:
+                    continue
                 merged.append(current)
                 
-        return merged
+        # Final pass: filter out any remaining isolated micro-noise fragments < 0.10s
+        cleaned = [s for s in merged if (s[1] - s[0]) >= 0.10]
+        return cleaned
 
     def _apply_smart_padding(self, segments: List[Tuple[float, float]], pad_ms: int, total_duration: float) -> List[Tuple[float, float]]:
         """
@@ -202,8 +220,8 @@ class VADDetector:
                 else:
                     p_end = end + pad_sec
                     
-            p_start = round(p_start, 3)
-            p_end = round(max(p_start + 0.1, p_end), 3)
+            p_start = max(0.0, round(p_start, 3))
+            p_end = min(total_duration, round(max(p_start + 0.15, p_end), 3))
             padded.append((p_start, p_end))
             
         return padded

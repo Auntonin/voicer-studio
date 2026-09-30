@@ -187,6 +187,41 @@ class TestProjectManager(unittest.TestCase):
             self.assertEqual(state.get_speaker(state.dialogues[0].speaker_id).display_name, 'Hero "One"')
             self.assertEqual(state.dialogues[0].extra_speakers, ['Path\\Team'])
 
+    def test_cleanup_stale_temp_files(self):
+        import time, os
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            temp_root = Path(tmp_dir)
+            sub_dir = temp_root / "separated" / "roformer"
+            sub_dir.mkdir(parents=True)
+
+            # Stale file (2 days old)
+            stale_file = sub_dir / "old_vocals.wav"
+            stale_file.write_bytes(b"old_audio_data_12345")
+            old_time = time.time() - (48 * 3600)
+            os.utime(stale_file, (old_time, old_time))
+
+            # Fresh file (created now)
+            fresh_file = temp_root / "fresh_audio.wav"
+            fresh_file.write_bytes(b"fresh_audio_data")
+
+            # Active file (marked to keep)
+            active_file = temp_root / "active_file.wav"
+            active_file.write_bytes(b"active_data")
+            os.utime(active_file, (old_time, old_time))
+
+            # Run cleanup with 24 hours threshold
+            deleted_count, freed_bytes = ProjectManager.cleanup_stale_temp_files(
+                temp_dir=temp_root,
+                max_age_hours=24.0,
+                keep_active_paths={active_file}
+            )
+
+            self.assertEqual(deleted_count, 1)
+            self.assertEqual(freed_bytes, len(b"old_audio_data_12345"))
+            self.assertFalse(stale_file.exists(), "Stale file should have been deleted")
+            self.assertTrue(fresh_file.exists(), "Fresh file should NOT be deleted")
+            self.assertTrue(active_file.exists(), "Active file should NOT be deleted")
+
 
 if __name__ == "__main__":
     unittest.main()

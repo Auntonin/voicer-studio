@@ -123,7 +123,7 @@ class SpeakerDiarizer:
             # Chronological mapping so first speaker is SPEAKER_00
             unique_in_order = []
             for i, item in enumerate(state.active_dialogues()):
-                raw_spk = mapping.get(i, "SPEAKER_00")
+                raw_spk, _ = mapping.get(i, ("SPEAKER_00", 0.0))
                 if raw_spk not in unique_in_order:
                     unique_in_order.append(raw_spk)
 
@@ -131,8 +131,11 @@ class SpeakerDiarizer:
 
             state.speakers = {}
             for i, item in enumerate(state.active_dialogues()):
-                final_spk = spk_remap.get(mapping.get(i, "SPEAKER_00"), "SPEAKER_00")
+                raw_spk, overlap_ratio = mapping.get(i, ("SPEAKER_00", 0.0))
+                final_spk = spk_remap.get(raw_spk, "SPEAKER_00")
                 item.speaker_id = final_spk
+                item.speaker_confidence = round(min(1.0, max(0.0, overlap_ratio)), 3)
+                item.needs_review = (overlap_ratio < 0.50)
                 if final_spk not in state.speakers:
                     state.speakers[final_spk] = SpeakerInfo(speaker_id=final_spk)
 
@@ -141,8 +144,8 @@ class SpeakerDiarizer:
             logger.error(f"Pyannote runtime error: {e}, falling back to clustering.")
             self._cluster_diarize(audio_path, state, min_speakers, max_speakers)
 
-    def _match_segments(self, diarization_output: List, dialogues: List[DialogueItem]) -> Dict[int, str]:
-        mapping: Dict[int, str] = {}
+    def _match_segments(self, diarization_output: List, dialogues: List[DialogueItem]) -> Dict[int, Tuple[str, float]]:
+        mapping: Dict[int, Tuple[str, float]] = {}
         for i, item in enumerate(dialogues):
             best_speaker = "SPEAKER_00"
             max_overlap = 0.0
@@ -151,7 +154,8 @@ class SpeakerDiarizer:
                 if overlap > max_overlap:
                     max_overlap = overlap
                     best_speaker = speaker
-            mapping[i] = best_speaker
+            overlap_ratio = max_overlap / max(0.001, item.duration)
+            mapping[i] = (best_speaker, overlap_ratio)
         return mapping
 
     # ── Advanced Acoustic Clustering Fallback ──────────────────────────────────
@@ -162,6 +166,8 @@ class SpeakerDiarizer:
         fundamental pitch (F0), and spectral contrast with Agglomerative Clustering.
         Works offline without HF token or GPU.
         """
+        import numpy as np
+
         dialogues = state.active_dialogues()
         if not dialogues:
             return
@@ -174,6 +180,23 @@ class SpeakerDiarizer:
 
             labels = self._cluster_features(features, min_speakers=min_speakers, max_speakers=max_speakers)
 
+            # Compute normalized centroids and confidence scores
+            X = np.array(features, dtype=np.float32)
+            # L2 normalize feature vectors
+            norms = np.linalg.norm(X, axis=1, keepdims=True)
+            norms[norms == 0] = 1e-6
+            X_norm = X / norms
+
+            unique_labels = sorted(list(set(labels)))
+            centroids = {}
+            for ul in unique_labels:
+                cluster_members = X_norm[np.array(labels) == ul]
+                c_mean = np.mean(cluster_members, axis=0)
+                c_norm = np.linalg.norm(c_mean)
+                if c_norm > 1e-6:
+                    c_mean = c_mean / c_norm
+                centroids[ul] = c_mean
+
             # Map clusters in chronological order of appearance (SPEAKER_00, SPEAKER_01, ...)
             ordered_map = {}
             for lbl in labels:
@@ -182,8 +205,31 @@ class SpeakerDiarizer:
 
             state.speakers = {}
             for i, item in enumerate(dialogues):
-                spk_id = ordered_map.get(labels[i], "SPEAKER_00")
+                lbl = labels[i]
+                spk_id = ordered_map.get(lbl, "SPEAKER_00")
                 item.speaker_id = spk_id
+
+                # Calculate confidence & review flag
+                vec = X_norm[i]
+                own_centroid = centroids.get(lbl)
+                if own_centroid is not None:
+                    own_sim = float(np.dot(vec, own_centroid))
+                    own_sim = max(0.0, min(1.0, own_sim))
+                    other_sims = [
+                        float(np.dot(vec, c)) for o_lbl, c in centroids.items() if o_lbl != lbl
+                    ]
+                    other_max = max(other_sims) if other_sims else 0.0
+                    margin = own_sim - other_max
+
+                    item.speaker_confidence = round(own_sim, 3)
+                    if own_sim < 0.60 or (len(centroids) > 1 and margin < 0.08):
+                        item.needs_review = True
+                    else:
+                        item.needs_review = False
+                else:
+                    item.speaker_confidence = 0.50
+                    item.needs_review = True
+
                 if spk_id not in state.speakers:
                     state.speakers[spk_id] = SpeakerInfo(speaker_id=spk_id)
 
@@ -364,5 +410,7 @@ class SpeakerDiarizer:
         spk = "SPEAKER_00"
         for item in state.active_dialogues():
             item.speaker_id = spk
+            item.speaker_confidence = 0.50
+            item.needs_review = True
         state.speakers = {spk: SpeakerInfo(speaker_id=spk)}
         logger.warning("Using single-speaker assignment (feature extraction failed).")

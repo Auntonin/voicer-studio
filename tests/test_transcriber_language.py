@@ -82,5 +82,37 @@ class TestTranscriberLanguage(unittest.TestCase):
         self.assertEqual(dialogue.caption, "สวัสดีครับ")
 
 
+    def test_thai_text_cleaner_hallucination_and_repetition(self):
+        # 1. Subtitle credits and channel promos
+        credits_text = "ขอบคุณสำหรับการรับชม อย่าลืมกด Subscribe"
+        self.assertTrue(ThaiTextCleaner.is_hallucination(credits_text))
+        self.assertEqual(ThaiTextCleaner.process_transcript(credits_text), "")
+
+        # 2. Sound effect annotations in brackets
+        sound_effects = "[เสียงดนตรีบรรเลง] สวัสดีครับ (เสียงปรบมือ)"
+        cleaned_sound = ThaiTextCleaner.process_transcript(sound_effects)
+        self.assertEqual(cleaned_sound, "สวัสดีครับ")
+
+        # 3. Repeated character loop
+        char_loop = "ไปกันนนนนนนนนน"
+        cleaned_chars = ThaiTextCleaner.process_transcript(char_loop)
+        self.assertEqual(cleaned_chars, "ไปกันน")
+
+        # 4. Multi-word phrase loops
+        phrase_loop = "ไป ที่ นู่น ไป ที่ นู่น ไป ที่ นู่น ไป ที่ นู่น"
+        cleaned_phrase = ThaiTextCleaner.process_transcript(phrase_loop)
+        self.assertEqual(cleaned_phrase, "ไป ที่ นู่น")
+
+        # 5. Single-token repeated words (reduced to max 2)
+        word_loop = "ไปกันเถอะ ไปกันเถอะ ไปกันเถอะ ไปกันเถอะ"
+        cleaned_word = ThaiTextCleaner.process_transcript(word_loop)
+        self.assertEqual(cleaned_word, "ไปกันเถอะ ไปกันเถอะ")
+
+        # 6. Mixed valid speech with credit suffix
+        mixed = "วันนี้เรามาทำภารกิจกันครับ ขอบคุณสำหรับการรับชม"
+        cleaned_mixed = ThaiTextCleaner.process_transcript(mixed)
+        self.assertEqual(cleaned_mixed, "วันนี้เรามาทำภารกิจกันครับ")
+
+
 if __name__ == "__main__":
     unittest.main()

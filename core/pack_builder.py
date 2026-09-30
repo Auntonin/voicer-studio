@@ -1,4 +1,5 @@
 import logging
+import re
 import shutil
 import subprocess
 import zipfile
@@ -14,9 +15,26 @@ logger = logging.getLogger(__name__)
 class PackBuilder:
     @staticmethod
     def sanitize_pack_name(title: str) -> str:
-        name = title.strip().replace(" ", "_")
-        name = "".join(c for c in name if c in FILENAME_ALLOWED_CHARS)
+        name = title.strip()
+        name = re.sub(r'[\s/\\:*?"<>|]+', '_', name)
+        name = "".join(c for c in name if c in FILENAME_ALLOWED_CHARS).strip("._")
         return name if name else "Untitled_Pack"
+
+    @staticmethod
+    def check_theora_encoder_available() -> bool:
+        """Check if FFmpeg build has libtheora encoder available."""
+        try:
+            from config import SUBPROCESS_FLAGS
+            res = subprocess.run(
+                ["ffmpeg", "-encoders"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=SUBPROCESS_FLAGS
+            )
+            return res.returncode == 0 and "libtheora" in res.stdout
+        except Exception:
+            return False
 
     @staticmethod
     def _create_fallback_audio(dest_path: Path, duration_sec: float = 1.0):
@@ -337,67 +355,70 @@ class PackBuilder:
                 total_dur = state.video_duration if (state.video_duration and state.video_duration > 0) else 0.0
                 if progress_cb:
                     progress_cb(vid_enc_base, tr("exp_step_encoding_ogv", cur="0.0", total=f"{total_dur:.1f}", pct="0"))
-                try:
-                    cmd = [
-                        "ffmpeg", "-y", "-i", str(state.video_path),
-                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                        "-c:v", "libtheora", "-qscale:v", "10", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "20M",
-                        "-pix_fmt", "yuv420p", "-g", "15",
-                        "-c:a", "libvorbis", "-qscale:a", "8",
-                        "-progress", "pipe:1", "-nostats", "-v", "error",
-                        str(dest_vid)
-                    ]
-                    from config import SUBPROCESS_FLAGS
-                    proc = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.DEVNULL,
-                        text=True,
-                        bufsize=1,
-                        universal_newlines=True,
-                        creationflags=SUBPROCESS_FLAGS
-                    )
 
-                    if proc.stdout:
-                        try:
-                            for line in proc.stdout:
-                                line = line.strip()
-                                if line.startswith("out_time_us="):
+                if not self.check_theora_encoder_available():
+                    logger.warning("FFmpeg build lacks libtheora encoder. Skipping dub_video.ogv encoding.")
+                else:
+                    try:
+                        cmd = [
+                            "ffmpeg", "-y", "-i", str(state.video_path),
+                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                            "-c:v", "libtheora", "-qscale:v", "10", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "20M",
+                            "-pix_fmt", "yuv420p", "-g", "15",
+                            "-c:a", "libvorbis", "-qscale:a", "8",
+                            "-progress", "pipe:1", "-nostats", "-v", "error",
+                            str(dest_vid)
+                        ]
+                        from config import SUBPROCESS_FLAGS
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL,
+                            text=True,
+                            bufsize=1,
+                            universal_newlines=True,
+                            creationflags=SUBPROCESS_FLAGS
+                        )
+
+                        if proc.stdout:
+                            try:
+                                for line in proc.stdout:
+                                    line = line.strip()
+                                    if line.startswith("out_time_us="):
+                                        try:
+                                            us_val = int(line.split("=", 1)[1])
+                                            cur_sec = us_val / 1_000_000.0
+                                            if total_dur > 0:
+                                                frac = min(1.0, max(0.0, cur_sec / total_dur))
+                                                pct = vid_enc_base + vid_enc_span * frac
+                                                if progress_cb:
+                                                    progress_cb(
+                                                        pct,
+                                                        tr("exp_step_encoding_ogv",
+                                                           cur=f"{cur_sec:.1f}",
+                                                           total=f"{total_dur:.1f}",
+                                                           pct=int(frac * 100))
+                                                    )
+                                        except (ValueError, IndexError):
+                                            pass
+                                    elif line.startswith("progress=end"):
+                                        if progress_cb:
+                                            progress_cb(vid_enc_base + vid_enc_span, tr("exp_step_validating"))
+                            except Exception:
+                                proc.kill()
+                                proc.wait()
+                                if dest_vid.exists():
                                     try:
-                                        us_val = int(line.split("=", 1)[1])
-                                        cur_sec = us_val / 1_000_000.0
-                                        if total_dur > 0:
-                                            frac = min(1.0, max(0.0, cur_sec / total_dur))
-                                            pct = vid_enc_base + vid_enc_span * frac
-                                            if progress_cb:
-                                                progress_cb(
-                                                    pct,
-                                                    tr("exp_step_encoding_ogv",
-                                                       cur=f"{cur_sec:.1f}",
-                                                       total=f"{total_dur:.1f}",
-                                                       pct=int(frac * 100))
-                                                )
-                                    except (ValueError, IndexError):
+                                        dest_vid.unlink()
+                                    except Exception:
                                         pass
-                                elif line.startswith("progress=end"):
-                                    if progress_cb:
-                                        progress_cb(vid_enc_base + vid_enc_span, tr("exp_step_validating"))
-                        except Exception:
-                            proc.kill()
-                            proc.wait()
-                            if dest_vid.exists():
-                                try:
-                                    dest_vid.unlink()
-                                except Exception:
-                                    pass
-                            raise
+                                raise
 
-                    proc.wait()
-                    if proc.returncode != 0 or not dest_vid.exists():
-                        logger.error(f"FFmpeg OGV encoding failed (exit code {proc.returncode})")
-                except Exception as e:
-                    logger.error(f"Failed to encode dub_video.ogv: {e}")
-                    raise
+                        proc.wait()
+                        if proc.returncode != 0 or not dest_vid.exists():
+                            logger.warning(f"FFmpeg OGV encoding finished with code {proc.returncode}")
+                    except Exception as e:
+                        logger.warning(f"Failed to encode dub_video.ogv ({e}); continuing with dub_video.mp4")
 
         if progress_cb:
             progress_cb(end_pct, tr("exp_step_validating"))

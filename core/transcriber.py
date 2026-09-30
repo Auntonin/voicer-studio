@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import os
 import logging
 import subprocess
+from typing import Optional, Callable, Dict, Any, List
 import numpy as np
 from pathlib import Path
 from config import TEMP_DIR, WHISPER_INITIAL_PROMPT_THAI
@@ -43,6 +46,16 @@ class Transcriber:
             logger.error(f"Failed to load WhisperModel: {e}")
             self.available = False
 
+    def unload_model(self):
+        """Release Whisper model from memory and flush GPU VRAM cache."""
+        self.model = None
+        self.available = False
+        try:
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
+        except Exception:
+            pass
+
     def transcribe_segment(self, audio_path: Path, start: float, end: float, audio_data: np.ndarray = None, sample_rate: int = 16000) -> str:
         if not self.available or not self.model:
             return ""
@@ -50,10 +63,15 @@ class Transcriber:
         raw_text = ""
         transcribed_ok = False
         
-        # Build transcribe kwargs with precision settings
+        # Build transcribe kwargs with precision settings and anti-hallucination filtering
         transcribe_kwargs = {
             "language": self.language,
             "beam_size": 5,
+            "repetition_penalty": 1.15,
+            "compression_ratio_threshold": 2.4,
+            "log_prob_threshold": -1.0,
+            "no_speech_threshold": 0.6,
+            "hallucination_silence_threshold": 2.0,
             "vad_filter": True,
             "vad_parameters": dict(
                 threshold=0.2,
@@ -105,18 +123,17 @@ class Transcriber:
                 if temp_wav.exists():
                     temp_wav.unlink(missing_ok=True)
 
-        # Apply ThaiTextCleaner post-processing if language is Thai or contains Thai characters
-        if self.language == 'th' or (self.language is None and any('\u0e00' <= c <= '\u0e7f' for c in raw_text)):
-            cleaned_text = ThaiTextCleaner.process_transcript(
-                raw_text,
-                language=self.language or "th",
-                clean_hallucinations=True,
-                format_keywords=True
-            )
-            return cleaned_text
-        return raw_text.strip()
+        # Apply ThaiTextCleaner post-processing
+        is_thai = self.language == 'th' or (self.language is None and any('\u0e00' <= c <= '\u0e7f' for c in raw_text))
+        cleaned_text = ThaiTextCleaner.process_transcript(
+            raw_text,
+            language=self.language or ("th" if is_thai else "en"),
+            clean_hallucinations=True,
+            format_keywords=True
+        )
+        return cleaned_text
 
-    def transcribe_all(self, state: PipelineState, work_audio_path: Path):
+    def transcribe_all(self, state: PipelineState, work_audio_path: Path, cancel_check: Optional[Callable[[], bool]] = None):
         if not self.available:
             logger.warning("Transcriber not available. Filling empty captions.")
             for item in state.active_dialogues():
@@ -143,13 +160,17 @@ class Transcriber:
             logger.warning(f"Could not load full audio into memory for fast transcription: {e}")
 
         for item in state.active_dialogues():
+            if cancel_check and cancel_check():
+                logger.info("Transcription cancelled by user.")
+                return
             text = self.transcribe_segment(work_audio_path, item.start, item.end, audio_data=audio_data, sample_rate=sr)
             item.caption = text
             logger.debug(f"Transcribed item {item.index}: {text}")
 
     def transcribe_and_segment(self, work_audio_path: Path, state: PipelineState,
                                 total_duration: float = 0.0,
-                                progress_cb=None) -> bool:
+                                progress_cb=None,
+                                cancel_check: Optional[Callable[[], bool]] = None) -> bool:
         """
         PRIMARY SEGMENTER for music-heavy audio.
 
@@ -162,11 +183,19 @@ class Transcriber:
         if not self.available or not self.model:
             return False
 
+        if cancel_check and cancel_check():
+            return False
+
         logger.info(f"Whisper-based segmentation: transcribing full audio for segment timestamps (Language={self.language or 'auto-dynamic'})...")
 
         kwargs = {
             "language": self.language,
             "beam_size": 5,
+            "repetition_penalty": 1.15,
+            "compression_ratio_threshold": 2.4,
+            "log_prob_threshold": -1.0,
+            "no_speech_threshold": 0.6,
+            "hallucination_silence_threshold": 2.0,
             "vad_filter": True,
             "vad_parameters": dict(
                 threshold=0.2,
@@ -190,6 +219,10 @@ class Transcriber:
             idx = 1
 
             for seg in segments_gen:
+                if cancel_check and cancel_check():
+                    logger.info("Whisper segmentation cancelled by user.")
+                    return False
+
                 start = max(0.0, seg.start)
                 end = seg.end
 
@@ -220,13 +253,17 @@ class Transcriber:
                 if not raw_text:
                     continue
 
-                # Clean Thai text if language is Thai or contains Thai characters
-                if self.language == "th" or any('\u0e00' <= c <= '\u0e7f' for c in raw_text):
-                    raw_text = ThaiTextCleaner.process_transcript(
-                        raw_text, language="th",
-                        clean_hallucinations=True,
-                        format_keywords=True
-                    )
+                # Clean text and filter hallucinations
+                is_thai = self.language == "th" or any('\u0e00' <= c <= '\u0e7f' for c in raw_text)
+                raw_text = ThaiTextCleaner.process_transcript(
+                    raw_text,
+                    language=self.language or ("th" if is_thai else "en"),
+                    clean_hallucinations=True,
+                    format_keywords=True
+                )
+
+                if not raw_text or ThaiTextCleaner.is_hallucination(raw_text):
+                    continue
 
                 item = DialogueItem(
                     index=idx,
@@ -240,6 +277,9 @@ class Transcriber:
                 if progress_cb:
                     progress_cb(idx, -1, f"Segment [{idx}] {start:.1f}s–{end:.1f}s: {raw_text[:30]}...")
                 idx += 1
+
+            if cancel_check and cancel_check():
+                return False
 
             if not new_dialogues:
                 logger.warning("Whisper segmentation returned no segments.")
@@ -255,5 +295,7 @@ class Transcriber:
             return True
 
         except Exception as e:
+            if cancel_check and cancel_check():
+                return False
             logger.error(f"Whisper segmentation failed: {e}")
             return False

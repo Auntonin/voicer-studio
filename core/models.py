@@ -53,12 +53,14 @@ class SpeakerInfo:
 
     @property
     def safe_name(self) -> str:
-        """Sanitized name safe for Windows filenames."""
+        """Sanitized name safe for Windows filenames supporting English and Thai."""
         name = self.display_name.strip()
-        # Replace spaces with underscores
-        name = name.replace(" ", "_")
+        # Replace spaces and illegal separator chars with underscores
+        name = re.sub(r'[\s/\\:*?"<>|]+', '_', name)
         # Keep only allowed chars
         name = "".join(c for c in name if c in FILENAME_ALLOWED_CHARS)
+        # Strip leading/trailing underscores and dots
+        name = name.strip("._")
         return name or f"Speaker_{self._extract_index() + 1}"
 
     def to_dict(self) -> dict:

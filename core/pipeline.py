@@ -175,6 +175,9 @@ class PipelineWorker(QThread):
         except Exception as e:
             self._fail_step(step, str(e))
             raise
+        finally:
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
 
     def _step_diarization(self):
         step = PipelineStep.DIARIZATION
@@ -204,12 +207,16 @@ class PipelineWorker(QThread):
             self._fail_step(step, str(e))
             # Non-fatal: continue with single speaker
             self._log("Continuing without speaker diarization", "warn")
+        finally:
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
 
     def _step_transcription(self):
         step = PipelineStep.TRANSCRIPTION
         if self._skip_if_done(step):
             return
         self._begin_step(step)
+        transcriber = None
         try:
             from core.transcriber import Transcriber
             source_audio = self.state.separated_vocals_path or self.state.work_audio_path
@@ -257,6 +264,7 @@ class PipelineWorker(QThread):
                     self.state,
                     total_duration=self.state.video_duration,
                     progress_cb=on_seg_progress,
+                    cancel_check=self._check_cancel,
                 )
 
                 if ok:
@@ -329,7 +337,11 @@ class PipelineWorker(QThread):
         except Exception as e:
             self._fail_step(step, str(e))
             self._log("Transcription failed — captions will be empty", "warn")
-
+        finally:
+            if transcriber:
+                transcriber.unload_model()
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
 
     def _step_voice_separation(self):
         step = PipelineStep.VOICE_SEPARATION
@@ -351,7 +363,7 @@ class PipelineWorker(QThread):
             sep_dir = TEMP_DIR / "separated"
             sep_dir.mkdir(exist_ok=True)
             self.signals.sub_progress.emit(0, 1, tr("pipe_separating_voices"))
-            vocals, bg = sep.separate(self.state.work_audio_path, sep_dir)
+            vocals, bg = sep.separate(self.state.work_audio_path, sep_dir, cancel_check=self._check_cancel)
             self.state.separated_vocals_path = vocals
             self.state.separated_bg_path = bg
             self.signals.sub_progress.emit(1, 1, tr("pipe_separation_done"))
@@ -361,6 +373,9 @@ class PipelineWorker(QThread):
             self.state.separated_vocals_path = self.state.work_audio_path
             self.state.separated_bg_path = self.state.work_audio_path
             self._log("Falling back to original audio", "warn")
+        finally:
+            from core.device_manager import device_manager
+            device_manager.release_gpu_memory()
 
     def _step_clip_generation(self):
         step = PipelineStep.CLIP_GENERATION
@@ -620,11 +635,24 @@ class PipelineWorker(QThread):
             cfg = device_manager.get_optimal_concurrency_config(profile=perf_profile, custom_workers=custom_w)
             self._log(f"Compute Engine: {active_dev.display_title} [{cfg.tier.value.upper()} Tier | Parallel Workers: {cfg.clip_workers} | Whisper Threads: {cfg.whisper_threads} | Host RAM: {cfg.ram_gb:.1f} GB]", "info")
 
-            # 2. Check disk space safety before processing
+            # 2. Check disk space safety and clean stale temp files (>24h old)
             from core.edge_guards import check_disk_space
             has_space, free_gb, _ = check_disk_space(TEMP_DIR, min_required_gb=1.0)
             if not has_space:
                 self._log(f"Low disk space warning: {free_gb:.1f} GB available on temporary drive", "warn")
+
+            try:
+                from core.project_manager import ProjectManager
+                active_files = set()
+                if self.state.work_audio_path:
+                    active_files.add(self.state.work_audio_path)
+                if self.state.separated_vocals_path:
+                    active_files.add(self.state.separated_vocals_path)
+                if self.state.separated_bg_path:
+                    active_files.add(self.state.separated_bg_path)
+                ProjectManager.cleanup_stale_temp_files(max_age_hours=24.0, keep_active_paths=active_files)
+            except Exception as e_clean:
+                log.debug(f"Stale temp cleanup skipped: {e_clean}")
 
             steps = [
                 self._step_audio_extract,

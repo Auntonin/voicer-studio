@@ -33,6 +33,8 @@ class DialogueTable(QWidget):
     match_speakers_requested = Signal()
     refine_alignment_clip_requested = Signal(DialogueItem)
     refine_alignment_all_requested = Signal()
+    batch_delete_requested = Signal(list)
+    batch_reassign_requested = Signal(list, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,6 +102,7 @@ class DialogueTable(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
@@ -109,6 +112,22 @@ class DialogueTable(QWidget):
         layout.addWidget(self.table)
         
         self.colors = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#a371f7"]
+
+    def get_selected_dialogue_items(self) -> list:
+        """Returns all selected DialogueItem objects in current table selection."""
+        selected_rows = sorted(list({idx.row() for idx in self.table.selectedIndexes()}))
+        items = []
+        for r in selected_rows:
+            item_id = self.table.item(r, 0)
+            if item_id:
+                try:
+                    idx = int(item_id.text())
+                    found = next((it for it in self._items if it.index == idx), None)
+                    if found and found not in items:
+                        items.append(found)
+                except ValueError:
+                    pass
+        return items
 
     def _apply_headers_and_tooltips(self):
         headers = [
@@ -312,25 +331,80 @@ class DialogueTable(QWidget):
                 break
 
     def show_context_menu(self, pos):
+        selected_items = self.get_selected_dialogue_items()
         row = self.table.rowAt(pos.y())
         if row < 0: return
-        
+
         idx_item = self.table.item(row, 0)
         if not idx_item: return
         idx = int(idx_item.text())
-        
-        target_item = None
-        for item in self._items:
-            if item.index == idx:
-                target_item = item
-                break
-                
+
+        target_item = next((it for it in self._items if it.index == idx), None)
         if not target_item: return
 
+        # If clicked row is not in current selection, select only this row
+        if target_item not in selected_items:
+            selected_items = [target_item]
+
         menu = QMenu(self)
+
+        # ── Multi-selection Batch Context Menu ──
+        if len(selected_items) > 1:
+            title_action = menu.addAction(tr("dt_batch_selected_count", count=len(selected_items)) if tr("dt_batch_selected_count", count=len(selected_items)) != "dt_batch_selected_count" else f"Selected ({len(selected_items)} clips)")
+            title_action.setEnabled(False)
+            menu.addSeparator()
+
+            # Batch Assign Speaker Submenu
+            spk_menu = menu.addMenu(tr("dt_menu_reassign_speaker") if tr("dt_menu_reassign_speaker") != "dt_menu_reassign_speaker" else "Assign Character")
+            spk_actions = {}
+            if self.state and self.state.speakers:
+                for sid, spk in sorted(self.state.speakers.items(), key=lambda x: x[1].display_name):
+                    act = spk_menu.addAction(spk.display_name or sid)
+                    spk_actions[act] = sid
+
+            # Batch Confirm Speakers
+            has_unconfirmed = any(getattr(it, 'needs_review', False) for it in selected_items)
+            batch_confirm_action = None
+            if has_unconfirmed:
+                batch_confirm_action = menu.addAction(tr("dt_menu_confirm_speaker") if tr("dt_menu_confirm_speaker") != "dt_menu_confirm_speaker" else "Confirm Characters")
+
+            menu.addSeparator()
+            batch_delete_action = menu.addAction(tr("dt_menu_delete") if tr("dt_menu_delete") != "dt_menu_delete" else f"Delete ({len(selected_items)} clips)")
+
+            action = menu.exec(self.table.viewport().mapToGlobal(pos))
+            if action in spk_actions:
+                target_spk = spk_actions[action]
+                self.batch_reassign_requested.emit(selected_items, target_spk)
+                for itm in selected_items:
+                    itm.speaker_id = target_spk
+                    itm.needs_review = False
+                    itm.speaker_confidence = 1.0
+                    self.dialogue_changed.emit(itm)
+                self.refresh_table()
+            elif action == batch_confirm_action and batch_confirm_action is not None:
+                for itm in selected_items:
+                    itm.needs_review = False
+                    itm.speaker_confidence = 1.0
+                    self.dialogue_changed.emit(itm)
+                self.refresh_table()
+            elif action == batch_delete_action:
+                self.batch_delete_requested.emit([it.index for it in selected_items])
+            return
+
+        # ── Single Item Context Menu ──
         play_action = menu.addAction(tr("dt_menu_play_audio"))
         view_action = menu.addAction(tr("dt_menu_view_image"))
         menu.addSeparator()
+
+        # Single Reassign Speaker Submenu
+        spk_menu = menu.addMenu(tr("dt_menu_reassign_speaker") if tr("dt_menu_reassign_speaker") != "dt_menu_reassign_speaker" else "Assign Character")
+        spk_actions = {}
+        if self.state and self.state.speakers:
+            for sid, spk in sorted(self.state.speakers.items(), key=lambda x: x[1].display_name):
+                act = spk_menu.addAction(spk.display_name or sid)
+                if sid == target_item.speaker_id:
+                    act.setIcon(menu.style().standardIcon(menu.style().StandardPixmap.SP_DialogApplyButton))
+                spk_actions[act] = sid
 
         confirm_spk_action = None
         if getattr(target_item, 'needs_review', False):
@@ -348,7 +422,13 @@ class DialogueTable(QWidget):
         delete_action = menu.addAction(tr("dt_menu_delete"))
         
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
-        if action == delete_action:
+        if action in spk_actions:
+            target_item.speaker_id = spk_actions[action]
+            target_item.needs_review = False
+            target_item.speaker_confidence = 1.0
+            self.dialogue_changed.emit(target_item)
+            self.update_row(target_item, self.state)
+        elif action == delete_action:
             self.dialogue_deleted.emit(idx)
         elif action == play_action:
             self.play_audio_requested.emit(target_item)

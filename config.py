@@ -142,10 +142,11 @@ PACK_INFO_FILENAME = "_pack_info.ini"
 PACK_DUB_VIDEO_FILENAME = "dub_video.ogv"
 PACK_INCLUDE_DUB_VIDEO_DEFAULT = True
 
-# Allowed characters in sanitized speaker/character names
+# Allowed characters in sanitized speaker/character names (ASCII alphanumeric + Thai + underscore + hyphen)
+THAI_CHAR_SET = set("".join(chr(c) for c in range(0x0E01, 0x0E5C)))
 FILENAME_ALLOWED_CHARS = set(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
-)
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+).union(THAI_CHAR_SET)
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 WINDOW_TITLE = APP_NAME

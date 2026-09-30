@@ -919,6 +919,8 @@ class MainWindow(QMainWindow):
             self._on_dialogue_double_clicked
         )
         self._dialogue_table.dialogue_deleted.connect(self._on_dialogue_deleted)
+        self._dialogue_table.batch_delete_requested.connect(self._on_batch_dialogues_deleted)
+        self._dialogue_table.batch_reassign_requested.connect(self._on_batch_speaker_reassigned)
         self._dialogue_table.merge_next_requested.connect(self._on_merge_next)
         self._dialogue_table.split_requested.connect(self._on_split)
         self._dialogue_table.dialogue_changed.connect(lambda itm: self._mark_dirty(True))
@@ -1549,6 +1551,33 @@ class MainWindow(QMainWindow):
         self._clip_editor.clear()
         self._mark_dirty(True)
         self._refresh_all_views()
+
+    def _on_batch_dialogues_deleted(self, indices: list):
+        if not indices:
+            return
+        self._push_undo()
+        idx_set = set(indices)
+        for item in self._state.dialogues:
+            if item.index in idx_set:
+                item.is_deleted = True
+        self._state.renumber()
+        self._clip_editor.clear()
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        self._log_message(f"Deleted {len(idx_set)} dialogue clips", "ok")
+
+    def _on_batch_speaker_reassigned(self, items: list, new_spk_id: str):
+        if not items or not new_spk_id:
+            return
+        self._push_undo()
+        for itm in items:
+            itm.speaker_id = new_spk_id
+            itm.needs_review = False
+            itm.speaker_confidence = 1.0
+        self._mark_dirty(True)
+        self._refresh_all_views()
+        spk_name = self._state.get_speaker_display_name(new_spk_id)
+        self._log_message(f"Reassigned {len(items)} clips to character '{spk_name}'", "ok")
 
     def _on_merge_next(self, idx: int):
         target = None

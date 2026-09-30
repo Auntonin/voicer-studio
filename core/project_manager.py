@@ -12,8 +12,9 @@ import logging
 import os
 import re
 import shutil
+import time
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Set
 
 from config import TEMP_DIR
 from core.models import PipelineState, PipelineStep, DialogueItem, SpeakerInfo, PackInfo
@@ -425,3 +426,68 @@ class ProjectManager:
             if cand.exists() and cand.is_file() and cand.stat().st_size > 0:
                 return cand
         return None
+
+    @classmethod
+    def cleanup_stale_temp_files(
+        cls,
+        temp_dir: Path = TEMP_DIR,
+        max_age_hours: float = 24.0,
+        keep_active_paths: Optional[Set[Path]] = None
+    ) -> Tuple[int, int]:
+        """
+        Safely purges stale temporary files (.wav, .tmp, .png, temp audio cuts)
+        older than `max_age_hours` from the temporary workspace directory.
+
+        - Protects files in `keep_active_paths` (e.g. active project audio or exports).
+        - Skips files modified within `max_age_hours`.
+        - Safely handles locked files on Windows without raising exceptions.
+        - Prunes empty subdirectories inside `temp_dir`.
+
+        Returns (deleted_files_count, freed_bytes).
+        """
+        temp_dir = Path(temp_dir).resolve()
+        if not temp_dir.exists() or not temp_dir.is_dir():
+            return 0, 0
+
+        now = time.time()
+        max_age_seconds = max_age_hours * 3600.0
+        active = {p.resolve() for p in keep_active_paths if p} if keep_active_paths else set()
+
+        deleted_count = 0
+        freed_bytes = 0
+
+        for root, dirs, files in os.walk(temp_dir, topdown=False):
+            root_path = Path(root)
+            for fname in files:
+                file_path = root_path / fname
+                try:
+                    resolved_file = file_path.resolve()
+                    if resolved_file in active:
+                        continue
+
+                    stat = file_path.stat()
+                    file_age = now - stat.st_mtime
+                    if file_age >= max_age_seconds:
+                        size = stat.st_size
+                        file_path.unlink()
+                        deleted_count += 1
+                        freed_bytes += size
+                        logger.debug(f"Cleaned stale temp file: {file_path}")
+                except (PermissionError, OSError) as e:
+                    logger.debug(f"Skipping locked/inaccessible temp file {file_path}: {e}")
+                except Exception as e:
+                    logger.warning(f"Error checking/deleting temp file {file_path}: {e}")
+
+            # Prune empty subdirectories (never delete root temp_dir itself)
+            if root_path != temp_dir:
+                try:
+                    if not any(root_path.iterdir()):
+                        root_path.rmdir()
+                        logger.debug(f"Pruned empty temp directory: {root_path}")
+                except Exception:
+                    pass
+
+        if deleted_count > 0:
+            logger.info(f"Cleaned {deleted_count} stale temp files ({freed_bytes / (1024*1024):.2f} MB freed).")
+
+        return deleted_count, freed_bytes

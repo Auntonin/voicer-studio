@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from core.models import PipelineState
 from config import FILENAME_ALLOWED_CHARS
@@ -41,12 +41,17 @@ class QualityChecker:
             results.append(CheckResult('error', "Unreadable audio file: _backing_track.mp3"))
 
         if state.pack_info.include_dub_video:
-            for video_name in ("dub_video.mp4", "dub_video.ogv"):
-                video_file = pack_dir / video_name
-                if not video_file.exists():
-                    results.append(CheckResult('error', f"Missing {video_name}"))
-                elif not self._check_media_readable(video_file):
-                    results.append(CheckResult('error', f"Unreadable video file: {video_name}"))
+            mp4_file = pack_dir / "dub_video.mp4"
+            ogv_file = pack_dir / "dub_video.ogv"
+            if not mp4_file.exists() and not ogv_file.exists():
+                results.append(CheckResult('error', "Missing dub_video (neither dub_video.mp4 nor dub_video.ogv found)"))
+            else:
+                if mp4_file.exists() and not self._check_media_readable(mp4_file):
+                    results.append(CheckResult('error', "Unreadable video file: dub_video.mp4"))
+                if ogv_file.exists() and not self._check_media_readable(ogv_file):
+                    results.append(CheckResult('warn', "Unreadable or corrupted video file: dub_video.ogv"))
+                elif not ogv_file.exists():
+                    results.append(CheckResult('warn', "dub_video.ogv omitted (Theora encoder not available)"))
             
         seen_indices = set()
         
@@ -141,6 +146,51 @@ class QualityChecker:
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("Could not validate media %s: %s", path.name, exc)
             return False
+
+    def validate_pack_integrity(self, pack_dir: Path, state: Optional[PipelineState] = None) -> Tuple[bool, List[CheckResult]]:
+        """
+        Comprehensive pack integrity validator before ZIP creation.
+        Validates _pack_info.ini, _backing_track.mp3, videos, and all dialogue clips.
+        """
+        pack_dir = Path(pack_dir)
+        if not pack_dir.exists() or not pack_dir.is_dir():
+            return False, [CheckResult('error', f"Pack directory does not exist: {pack_dir}")]
+
+        if state is not None:
+            results = self.check_all(state, pack_dir)
+        else:
+            results = []
+            info_file = pack_dir / "_pack_info.ini"
+            if not info_file.exists():
+                results.append(CheckResult('error', "Missing _pack_info.ini"))
+            else:
+                txt = info_file.read_text(encoding='utf-8')
+                if "[data]" not in txt:
+                    results.append(CheckResult('error', "_pack_info.ini missing [data] section"))
+
+            bg_file = pack_dir / "_backing_track.mp3"
+            if not bg_file.exists():
+                results.append(CheckResult('error', "Missing _backing_track.mp3"))
+
+            # Check matching mp3/png/txt triples
+            mp3_files = sorted(pack_dir.glob("*.mp3"))
+            for mp3 in mp3_files:
+                if mp3.name.startswith("_backing_track"):
+                    continue
+                stem = mp3.stem
+                png = pack_dir / f"{stem}.png"
+                txt = pack_dir / f"{stem}.txt"
+                if not png.exists():
+                    results.append(CheckResult('error', f"Missing corresponding image for {mp3.name}"))
+                if not txt.exists():
+                    results.append(CheckResult('error', f"Missing corresponding txt for {mp3.name}"))
+                else:
+                    txt_content = txt.read_text(encoding='utf-8')
+                    if "[data]" not in txt_content or "caption=" not in txt_content:
+                        results.append(CheckResult('error', f"Corrupted txt file: {txt.name}"))
+
+        is_valid = not self.has_errors(results)
+        return is_valid, results
 
     def has_errors(self, results: List[CheckResult]) -> bool:
         return any(r.level == 'error' for r in results)

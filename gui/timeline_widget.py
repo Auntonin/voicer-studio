@@ -87,12 +87,14 @@ class TimelineWidget(QWidget):
         self._hover_track_id: Optional[str] = None
         self._hover_time: Optional[float] = None
         self._is_mouse_inside: bool = False
+        self._waveform_cache = {}
         self.setMouseTracking(True)
 
     # ── State & Layout Management ──────────────────────────────────────────────
 
     def populate(self, state: PipelineState):
         self.state = state
+        self._waveform_cache.clear()
         self.set_duration(state.video_duration)
         self._recalculate_size()
         self.update()
@@ -598,15 +600,26 @@ class TimelineWidget(QWidget):
                     wave_color = QColor(255, 255, 255, 55 if is_sel else 28)
                     painter.setBrush(QBrush(wave_color))
                     n_bars = min(60, int(wave_w // 3))
-                    bar_x = x1 + 5
-                    for b_idx in range(n_bars):
-                        progress = b_idx / max(1, n_bars)
-                        env = math.sin(progress * math.pi)
-                        freq = math.sin(b_idx * 0.75 + item.index * 1.9) * 0.5 + 0.5
-                        bh = max(2.0, wave_h * env * freq)
+
+                    # Fast waveform bar lookup from cache
+                    cache_key = (item.index, n_bars)
+                    cached_bars = self._waveform_cache.get(cache_key)
+                    if cached_bars is None:
+                        cached_bars = []
+                        for b_idx in range(n_bars):
+                            progress = b_idx / max(1, n_bars)
+                            env = math.sin(progress * math.pi)
+                            freq = math.sin(b_idx * 0.75 + item.index * 1.9) * 0.5 + 0.5
+                            norm_bh = max(0.1, env * freq)
+                            cached_bars.append((b_idx * 3.0, norm_bh))
+                        if len(self._waveform_cache) > 2000:
+                            self._waveform_cache.clear()
+                        self._waveform_cache[cache_key] = cached_bars
+
+                    for rel_x, norm_bh in cached_bars:
+                        bh = max(2.0, wave_h * norm_bh)
                         by = wave_y + (wave_h - bh) / 2.0
-                        painter.drawRect(QRectF(bar_x, by, 1.8, bh))
-                        bar_x += 3.0
+                        painter.drawRect(QRectF(x1 + 5 + rel_x, by, 1.8, bh))
 
                 # Selected clip trim handles at ends
                 if is_sel and w > 12:
