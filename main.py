@@ -33,7 +33,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TheChoiceVoicer.VoicerStudio.1.1.0")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TheChoiceVoicer.VoicerStudio.1.1.1")
     except Exception:
         pass
 
@@ -211,7 +211,7 @@ def main():
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TheChoiceVoicer.VoicerStudio.1.1.0")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TheChoiceVoicer.VoicerStudio.1.1.1")
         except Exception:
             pass
 
