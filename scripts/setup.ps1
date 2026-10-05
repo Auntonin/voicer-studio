@@ -91,7 +91,7 @@ Write-Host "       [OK] Activated" -ForegroundColor Green
 # ── Upgrade pip ───────────────────────────────────────────
 Write-Host ""
 Write-Host "[5/7] Upgrading pip..." -ForegroundColor Yellow
-python -m pip install --upgrade pip --quiet
+python -m pip install --upgrade pip setuptools wheel --quiet
 Write-Host "       [OK] pip upgraded" -ForegroundColor Green
 
 # ── Install PyTorch ───────────────────────────────────────
@@ -106,18 +106,18 @@ try {
 
 if ($hasGPU) {
     Write-Host "       [INFO] NVIDIA GPU detected - installing CUDA 12.1 PyTorch" -ForegroundColor Cyan
-    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu121 --quiet
+    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu121 --prefer-binary --retries 5 --quiet
 } else {
     Write-Host "       [INFO] No NVIDIA GPU detected - installing CPU PyTorch" -ForegroundColor Yellow
     Write-Host "       [INFO] Voice separation (Demucs) will be slower on CPU" -ForegroundColor Yellow
-    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cpu --quiet
+    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cpu --prefer-binary --retries 5 --quiet
 }
 Write-Host "       [OK] PyTorch installed" -ForegroundColor Green
 
 # ── Install Requirements ──────────────────────────────────
 Write-Host ""
 Write-Host "[7/7] Installing project requirements..." -ForegroundColor Yellow
-pip install -r requirements.txt --quiet
+pip install -r requirements.txt --prefer-binary --retries 5 --quiet
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[WARNING] Some packages may have failed. Check output." -ForegroundColor Yellow
 } else {

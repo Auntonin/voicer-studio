@@ -104,7 +104,7 @@ echo        [OK] Activated
 :: ── Upgrade pip ───────────────────────────────────────────
 echo.
 echo [5/7] Upgrading pip...
-python -m pip install --upgrade pip --quiet
+python -m pip install --upgrade pip setuptools wheel --quiet
 echo        [OK] pip upgraded
 
 :: ── Install PyTorch (CUDA 12.1 or CPU fallback) ──────────
@@ -116,17 +116,17 @@ python -c "import subprocess; r=subprocess.run(['nvidia-smi'],capture_output=Tru
 if errorlevel 1 (
     echo        [INFO] No NVIDIA GPU detected — installing CPU-only PyTorch.
     echo        [INFO] Voice separation (Demucs) will be slower on CPU.
-    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cpu --quiet
+    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cpu --prefer-binary --retries 5 --quiet
 ) else (
     echo        [INFO] NVIDIA GPU detected — installing CUDA 12.1 PyTorch.
-    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu121 --quiet
+    pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu121 --prefer-binary --retries 5 --quiet
 )
 echo        [OK] PyTorch installed
 
 :: ── Install remaining requirements ────────────────────────
 echo.
 echo [7/7] Installing project requirements...
-pip install -r requirements.txt --quiet
+pip install -r requirements.txt --prefer-binary --retries 5 --quiet
 if errorlevel 1 (
     echo [WARNING] Some packages may have failed. Check output above.
 ) else (
