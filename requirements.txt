@@ -8,6 +8,11 @@
 # --- GUI ---
 PySide6>=6.7.0
 
+# --- AI: Deep Learning Runtime ---
+torch>=2.1.0
+torchaudio>=2.1.0
+torchvision>=0.16.0
+
 # --- Video / Audio Processing ---
 ffmpeg-python>=0.2.0
 pydub>=0.25.0
@@ -17,11 +22,6 @@ faster-whisper>=1.0.0
 
 # --- AI: Speaker Diarization ---
 pyannote.audio>=3.1.0
-
-# --- AI: Deep Learning Runtime ---
-torch>=2.1.0
-torchaudio>=2.1.0
-torchvision>=0.16.0
 
 # --- AI: Voice / Stem Separation ---
 audio-separator>=0.20.0
