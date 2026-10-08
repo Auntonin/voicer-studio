@@ -1262,6 +1262,8 @@ class MainWindow(QMainWindow):
             if d.index == target.index:
                 old_end = d.end
                 d.end = cur_t
+                d.audio_path = None
+                d.audio_confirmed = False
                 new_d = DialogueItem(
                     index=len(self._state.dialogues) + 1,
                     speaker_id=d.speaker_id,
@@ -1290,6 +1292,8 @@ class MainWindow(QMainWindow):
         for d in self._state.active_dialogues():
             if d.index == target.index:
                 d.start = cur_t
+                d.audio_path = None
+                d.audio_confirmed = False
                 break
         self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
@@ -1309,6 +1313,8 @@ class MainWindow(QMainWindow):
         for d in self._state.active_dialogues():
             if d.index == target.index:
                 d.end = cur_t
+                d.audio_path = None
+                d.audio_confirmed = False
                 break
         self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
@@ -1603,6 +1609,8 @@ class MainWindow(QMainWindow):
 
         self._push_undo()
         target.end = max(target.end, next_d.end)
+        target.audio_path = None
+        target.audio_confirmed = False
         if next_d.caption:
             if target.caption:
                 target.caption = f"{target.caption} {next_d.caption}".strip()
@@ -1638,6 +1646,8 @@ class MainWindow(QMainWindow):
         self._push_undo()
         old_end = target.end
         target.end = split_time
+        target.audio_path = None
+        target.audio_confirmed = False
 
         # Smart Caption Splitting (divide text proportionally by split ratio)
         cap1, cap2 = "", ""
@@ -1664,6 +1674,7 @@ class MainWindow(QMainWindow):
         self._state.dialogues.append(new_d)
 
         self._state.renumber()
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._refresh_all_views()
         self._log_message(split_msg, "ok")
@@ -1698,6 +1709,8 @@ class MainWindow(QMainWindow):
             if d.index == idx:
                 d.start = start
                 d.end = max(start + 0.05, end)
+                d.audio_path = None
+                d.audio_confirmed = False
                 target_item = d
                 break
         

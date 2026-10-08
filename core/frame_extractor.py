@@ -1,4 +1,6 @@
 import logging
+import subprocess
+import shutil
 from pathlib import Path
 import numpy as np
 
@@ -13,11 +15,18 @@ class FrameExtractor:
         self.available = False
         self.cv2 = None
         self.face_cascade = None
+        self.cap = None
+        self._use_ffmpeg = video_path.suffix.lower() == ".ogv"
         
         try:
             import cv2
             self.cv2 = cv2
             self._frame_cache = {}
+            # OpenCV's bundled Theora decoder can crash natively while seeking.
+            # Isolate OGV decoding in FFmpeg so failures remain recoverable.
+            if self._use_ffmpeg:
+                self.available = video_path.is_file() and bool(shutil.which("ffmpeg"))
+                return
             v_str = str(video_path)
             self.cap = cv2.VideoCapture(v_str)
             if not self.cap.isOpened():
@@ -52,8 +61,19 @@ class FrameExtractor:
             return self._frame_cache[ts_key]
 
         try:
-            self.cap.set(self.cv2.CAP_PROP_POS_MSEC, timestamp_sec * 1000)
-            ret, frame = self.cap.read()
+            if getattr(self, '_use_ffmpeg', False):
+                from config import SUBPROCESS_FLAGS
+                result = subprocess.run(
+                    ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, timestamp_sec):.3f}",
+                     "-i", str(self.video_path), "-frames:v", "1", "-f", "image2pipe",
+                     "-vcodec", "png", "pipe:1"],
+                    capture_output=True, timeout=20, creationflags=SUBPROCESS_FLAGS
+                )
+                frame = self.cv2.imdecode(np.frombuffer(result.stdout, dtype=np.uint8), self.cv2.IMREAD_COLOR) if result.returncode == 0 and result.stdout else None
+                ret = frame is not None
+            else:
+                self.cap.set(self.cv2.CAP_PROP_POS_MSEC, timestamp_sec * 1000)
+                ret, frame = self.cap.read()
             if ret and frame is not None:
                 if hasattr(self, '_frame_cache'):
                     if len(self._frame_cache) >= 50:

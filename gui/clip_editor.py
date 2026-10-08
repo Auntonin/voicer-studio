@@ -1,4 +1,5 @@
 import tempfile
+import logging
 import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -51,7 +52,7 @@ class ClipEditor(QWidget):
     split_requested = Signal(int)
     merge_requested = Signal(int)
     play_started = Signal()
-    _frame_qimage_ready = Signal(int, QImage)
+    _frame_qimage_ready = Signal(int, QImage, object, str)
     _preview_audio_ready = Signal(str)
 
     def __init__(self, parent=None):
@@ -534,10 +535,14 @@ class ClipEditor(QWidget):
     def _set_save_status(self, text: str):
         pass
 
-    def _on_frame_qimage_ready(self, req_id: int, qimg: QImage):
-        if req_id == self._frame_preview_req_id and not qimg.isNull():
+    def _on_frame_qimage_ready(self, req_id: int, qimg: QImage, item: DialogueItem, image_path: str):
+        if req_id == self._frame_preview_req_id and item is self.item and not qimg.isNull():
+            if image_path:
+                item.image_path = Path(image_path)
             pix = QPixmap.fromImage(qimg).scaled(152, 86, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.image_preview.setPixmap(pix)
+        elif image_path:
+            Path(image_path).unlink(missing_ok=True)
 
     def _on_preview_audio_ready(self, file_path_str: str):
         if file_path_str and Path(file_path_str).exists():
@@ -555,24 +560,38 @@ class ClipEditor(QWidget):
             return
         ts = self.spin_start.value()
         req_id = self._frame_preview_req_id
+        item = self.item
+        save_image = bool(item and (not item.image_path or not item.image_path.is_file()))
+        frame_dir = self.state.video_path.parent / "output" / "frames"
         # Prioritize lightweight proxy video (seeks in < 2ms) if available
         video_src = self.state.preview_proxy_path if (self.state.preview_proxy_path and self.state.preview_proxy_path.exists()) else self.state.video_path
+        if save_image:
+            video_src = self.state.video_path
 
         def _worker():
             try:
-                import cv2
-                cap = cv2.VideoCapture(str(video_src))
-                if not cap.isOpened():
-                    return
-                cap.set(cv2.CAP_PROP_POS_MSEC, ts * 1000)
-                ret, frame = cap.read()
-                cap.release()
-                if ret and frame is not None and req_id == self._frame_preview_req_id:
+                from core.frame_extractor import FrameExtractor
+                extractor = FrameExtractor(video_src)
+                try:
+                    frame = extractor.extract_frame(ts)
+                finally:
+                    extractor.release()
+                if frame is not None and req_id == self._frame_preview_req_id:
                     h, w, ch = frame.shape
                     bytes_per_line = ch * w
                     # QImage copy is thread-safe across threads
                     qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_BGR888).copy()
-                    self._frame_qimage_ready.emit(req_id, qimg)
+                    image_path = ""
+                    if save_image:
+                        from uuid import uuid4
+                        try:
+                            frame_dir.mkdir(parents=True, exist_ok=True)
+                            dest = frame_dir / f"{uuid4().hex}.png"
+                            if qimg.save(str(dest), "PNG"):
+                                image_path = str(dest)
+                        except OSError as exc:
+                            logging.getLogger(__name__).warning("Could not save preview frame: %s", exc)
+                    self._frame_qimage_ready.emit(req_id, qimg, item, image_path)
             except Exception:
                 pass
 
@@ -580,6 +599,8 @@ class ClipEditor(QWidget):
         threading.Thread(target=_worker, daemon=True).start()
 
     def load_item(self, item: DialogueItem, state: PipelineState):
+        self._frame_preview_req_id += 1
+        self._frame_preview_timer.stop()
         self._is_loading = True
         self.item = item
         self.state = state
