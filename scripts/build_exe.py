@@ -19,7 +19,7 @@ try:
     from config import APP_NAME, APP_VERSION
 except ImportError:
     APP_NAME = "Voicer Studio"
-    APP_VERSION = "1.1.1"
+    APP_VERSION = "1.1.2"
 
 def log(msg: str, status: str = "INFO"):
     icons = {"INFO": "[-]", "OK": "[+]", "WARN": "[!]", "ERR": "[x]"}

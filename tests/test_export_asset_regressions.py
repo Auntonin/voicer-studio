@@ -189,6 +189,8 @@ def test_cancelled_export_creates_no_zip(source_state, tmp_path):
     assert source_state.dialogues[0].image_path is None
 
 def test_ogv_source_still_exports_compatible_videos(source_state, tmp_path):
+    if not PackBuilder.check_theora_encoder_available():
+        pytest.skip('FFmpeg does not provide libtheora to generate the OGV fixture')
     ogv = tmp_path / 'source.ogv'
     subprocess.run(['ffmpeg', '-y', '-i', str(source_state.video_path), '-c:v', 'libtheora',
                     '-c:a', 'libvorbis', str(ogv)], check=True, capture_output=True,
