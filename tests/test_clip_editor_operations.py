@@ -6,6 +6,7 @@ smart Split Clip (playhead position priority & smart caption splitting).
 """
 
 import unittest
+from unittest.mock import patch
 from core.models import PipelineState, DialogueItem, SpeakerInfo
 try:
     import os
@@ -36,7 +37,9 @@ class TestClipEditorOperations(unittest.TestCase):
 
         self.state.dialogues = [self.item1, self.item3, self.item2]
         self.state.video_duration = 60.0
-        self.window = MainWindow()
+        # Unit tests must not start delayed live GitHub requests during event processing.
+        with patch.object(MainWindow, '_load_settings', return_value={'check_updates_startup': False}):
+            self.window = MainWindow()
         self.window._state = self.state
         self.window._timeline.duration = 60.0
 

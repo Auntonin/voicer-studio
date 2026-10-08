@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import zipfile
 from copy import copy
+from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -319,6 +320,7 @@ class PackBuilder:
                     ]
                     res = subprocess.run(cmd, capture_output=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
                     if res.returncode != 0 or not checker._check_audio_readable(dest_bg):
+                        logger.error('Backing track FFmpeg failed: %s', res.stderr.decode('utf-8', errors='replace')[-4096:], extra={'operation': 'export', 'stage': 'backing_track'})
                         raise RuntimeError("FFmpeg failed to encode the backing track")
                 except Exception as e:
                     raise RuntimeError(f"Could not generate backing track: {e}") from e
@@ -354,6 +356,7 @@ class PackBuilder:
                                 capture_output=True, creationflags=SUBPROCESS_FLAGS
                             )
                             if result.returncode != 0:
+                                logger.error('MP4 FFmpeg failed: %s', result.stderr.decode('utf-8', errors='replace')[-4096:], extra={'operation': 'export', 'stage': 'mp4'})
                                 raise RuntimeError("FFmpeg could not convert the source video into MP4")
                         if progress_cb:
                             progress_cb(vid_copy_base + vid_copy_span, tr("exp_step_validating"))
@@ -395,17 +398,21 @@ class PackBuilder:
                         proc = subprocess.Popen(
                             cmd,
                             stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL,
+                            stderr=subprocess.STDOUT,
                             text=True,
+                            encoding='utf-8',
+                            errors='replace',
                             bufsize=1,
                             universal_newlines=True,
                             creationflags=SUBPROCESS_FLAGS
                         )
 
+                        recent_output = deque(maxlen=20)
                         if proc.stdout:
                             try:
                                 for line in proc.stdout:
                                     line = line.strip()
+                                    recent_output.append(line[-2048:])
                                     if line.startswith("out_time_us="):
                                         try:
                                             us_val = int(line.split("=", 1)[1])
@@ -438,6 +445,7 @@ class PackBuilder:
 
                         proc.wait()
                         if proc.returncode != 0 or not dest_vid.exists():
+                            logger.error('OGV FFmpeg failed: %s', '\n'.join(recent_output), extra={'operation': 'export', 'stage': 'ogv'})
                             raise RuntimeError(f"FFmpeg OGV encoding finished with code {proc.returncode}")
                     except Exception as e:
                         raise RuntimeError(f"Failed to encode dub_video.ogv: {e}") from e

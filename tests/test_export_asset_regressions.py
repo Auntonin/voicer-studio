@@ -129,6 +129,22 @@ def test_failed_backing_encoder_does_not_report_success(source_state, tmp_path):
         with pytest.raises(RuntimeError):
             PackBuilder().build_pack(source_state, tmp_path / 'output', {})
 
+def test_ogv_error_output_decoding_does_not_mask_encoder_failure(source_state, tmp_path, caplog):
+    import io
+    real_popen = subprocess.Popen
+    source_state.pack_info.include_dub_video = True
+    def fail_ogv(command, *args, **kwargs):
+        if str(command[-1]).endswith('.ogv'):
+            output = io.TextIOWrapper(io.BytesIO('FFmpeg: ข้อผิดพลาด '.encode('utf-8') + b'\xff\n'),
+                                      encoding=kwargs.get('encoding', 'ascii'), errors=kwargs.get('errors', 'strict'))
+            return SimpleNamespace(stdout=output, returncode=1, wait=lambda: None, kill=lambda: None)
+        return real_popen(command, *args, **kwargs)
+    with patch('core.pack_builder.subprocess.Popen', side_effect=fail_ogv), \
+            patch.object(PackBuilder, 'check_theora_encoder_available', return_value=True):
+        with pytest.raises(RuntimeError, match='FFmpeg OGV encoding finished with code 1'):
+            PackBuilder().build_pack(source_state, tmp_path / 'output', {'include_dub_video': True})
+    assert 'ข้อผิดพลาด' in caplog.text
+
 def test_new_clip_preview_persists_image(source_state):
     from gui.clip_editor import ClipEditor
     app = QApplication.instance() or QApplication([])

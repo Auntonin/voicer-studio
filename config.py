@@ -16,7 +16,10 @@ SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 # ── App Metadata ───────────────────────────────────────────────────────────────
 APP_NAME = "The Choice Voicer Dialogue Extractor"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 2
+LOG_RETAIN_SESSIONS = 10
 APP_AUTHOR = "The Choice Voicer"
 APP_LANGUAGE_DEFAULT = "en"
 SUPPORTED_LANGUAGES = {"en": "English", "th": "ไทย (Thai)"}

@@ -327,10 +327,12 @@ class UpdateDownloaderThread(QThread):
             self.finished.emit(dest_path, self.update_info.is_zip)
 
         except urllib.error.URLError as e:
+            log.exception('Update download connection failed', extra={'operation': 'update'})
             temp_path.unlink(missing_ok=True)
             self.error.emit(f"Download connection failed: {e.reason}")
         except Exception as e:
             temp_path.unlink(missing_ok=True)
+            log.exception('Update download failed', extra={'operation': 'update'})
             self.error.emit(f"Failed to download update: {str(e)}")
 
 

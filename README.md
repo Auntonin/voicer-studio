@@ -177,6 +177,42 @@ Speaker Diarization (Pyannote) requires accepting user agreements on Hugging Fac
 
 ---
 
+## Local bug reports (1.1.3+)
+
+Open **Help → Export Bug Report...** after reproducing a problem and send the saved
+ZIP to the developer or AI together with the steps to reproduce it. If the app
+crashes, restart it first: the report includes the three newest sessions.
+**Help → Open Diagnostic Logs** opens the local storage folder.
+
+```text
+User application data / diagnostics / sessions /
+  session-<UTC time>-<PID>-<random ID>/
+    session.json       # version, Python/OS, installed library versions
+    app.jsonl          # time, severity, module/function/line, thread, traceback
+    app.jsonl.1/.2     # rotating history (2 MiB per file)
+    native-crash.log   # Python/native fault thread stacks, when supported
+```
+
+On Windows this lives under `%APPDATA%\VoicerStudio\diagnostics`, on macOS under
+`~/Library/Application Support/VoicerStudio/diagnostics`, and on Linux under
+`$XDG_CONFIG_HOME/voicer-studio/diagnostics` (default `~/.config/voicer-studio`).
+The ten newest sessions are retained; older sessions belonging to a running
+process are protected. Application logs use standard Python logging, with
+uncaught main/thread exceptions and caught pipeline/export/update failures.
+FFmpeg export failures include bounded diagnostic output. Detached updater
+installation failures are collected on the next launch.
+
+Reports whitelist diagnostic files only: media, project files, settings and
+environment dumps are not attached. Known token/password formats, common token
+environment values, home and application directory prefixes are scrubbed.
+Logging never uploads anything. **Review messages and filenames before sharing**:
+arbitrary secrets in exception messages cannot be guaranteed detectable; filenames
+outside the home/application directories can remain. Native stacks are scrubbed
+when exported, but their raw local files can contain paths. No variable/local
+values or memory dumps are collected. Disk/permission failures are reported rather
+than preventing the application from starting. Logging is diagnostic evidence,
+not proof that every possible bug or external process failure was captured.
+
 ## 📄 License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

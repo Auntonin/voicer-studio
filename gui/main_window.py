@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import json
+import logging
 import ctypes
 import subprocess
 from datetime import datetime
@@ -90,7 +91,25 @@ class SingleClipTranscribeWorker(QThread):
             res = t.transcribe_segment(self.audio_src, self.start_time, self.end_time)
             self.finished.emit(self.item_index, res or "")
         except Exception as e:
+            logging.getLogger(__name__).exception('Clip transcription failed', extra={'operation': 'transcription'})
             self.failed.emit(self.item_index, str(e))
+
+
+class DiagnosticReportWorker(QThread):
+    ready = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, destination: Path, parent=None):
+        super().__init__(parent)
+        self.destination = destination
+
+    def run(self):
+        try:
+            from core.diagnostics import export_diagnostic_report
+            self.ready.emit(str(export_diagnostic_report(self.destination)))
+        except Exception as exc:
+            logging.getLogger(__name__).exception('Diagnostic report export failed')
+            self.failed.emit(str(exc))
 
 
 class MainWindow(QMainWindow):
@@ -459,9 +478,52 @@ class MainWindow(QMainWindow):
         self._act_check_updates = self._menu_help.addAction(tr("menu_check_updates"))
         self._act_check_updates.triggered.connect(lambda: self.on_check_updates(manual=True))
 
+        self._act_open_diagnostics = self._menu_help.addAction(tr('menu_open_diagnostics'))
+        self._act_open_diagnostics.triggered.connect(self._open_diagnostic_logs)
+        self._act_export_diagnostics = self._menu_help.addAction(tr('menu_export_diagnostics'))
+        self._act_export_diagnostics.triggered.connect(self._export_diagnostic_report)
+
         self._menu_help.addSeparator()
         self._act_about = self._menu_help.addAction(tr("menu_about"))
         self._act_about.triggered.connect(self._show_about_dialog)
+
+    def _open_diagnostic_logs(self):
+        from core.diagnostics import get_log_directory
+        try:
+            directory = get_log_directory()
+            directory.mkdir(parents=True, exist_ok=True)
+            if not platform_utils.open_in_file_manager(directory):
+                raise OSError(str(directory))
+        except OSError as exc:
+            logging.getLogger(__name__).exception('Could not open diagnostic directory')
+            QMessageBox.warning(self, tr('menu_open_diagnostics'), tr('diagnostics_failed', error=str(exc)))
+
+    def _export_diagnostic_report(self):
+        worker = getattr(self, '_diagnostic_report_worker', None)
+        if worker is not None and worker.isRunning():
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, tr('menu_export_diagnostics'),
+            f'VoicerStudio-report-{datetime.now():%Y%m%d-%H%M%S}.zip', 'ZIP (*.zip)')
+        if not filename:
+            return
+        self._act_export_diagnostics.setEnabled(False)
+        self.statusBar().showMessage(tr('diagnostics_working'))
+        self._diagnostic_report_worker = DiagnosticReportWorker(Path(filename), self)
+        self._diagnostic_report_worker.ready.connect(self._diagnostic_report_ready)
+        self._diagnostic_report_worker.failed.connect(self._diagnostic_report_failed)
+        self._diagnostic_report_worker.finished.connect(self._diagnostic_report_finished)
+        self._diagnostic_report_worker.start()
+
+    def _diagnostic_report_ready(self, filename):
+        QMessageBox.information(self, tr('menu_export_diagnostics'), tr('diagnostics_done', path=filename))
+
+    def _diagnostic_report_failed(self, error):
+        QMessageBox.warning(self, tr('menu_export_diagnostics'), tr('diagnostics_failed', error=error))
+
+    def _diagnostic_report_finished(self):
+        self._act_export_diagnostics.setEnabled(True)
+        self.statusBar().clearMessage()
 
     def _show_shortcuts_dialog(self):
         """Open the modern Keyboard Shortcuts reference sheet dialog."""
@@ -496,8 +558,11 @@ class MainWindow(QMainWindow):
             def run(self):
                 try:
                     has_up, info, err = check_for_updates(APP_VERSION)
+                    if err:
+                        logging.getLogger(__name__).warning('Update check failed: %s', err, extra={'operation': 'update'})
                     self.result.emit(has_up, info, err)
                 except Exception as ex:
+                    logging.getLogger(__name__).exception('Update check failed', extra={'operation': 'update'})
                     self.result.emit(False, None, str(ex))
 
         self._update_worker = UpdateCheckWorker(self)
@@ -1983,6 +2048,9 @@ class MainWindow(QMainWindow):
         self._act_export.setEnabled(has_dialogues)
 
     def _log_message(self, msg: str, level: str = "info"):
+        if level in ('error', 'warn', 'warning'):
+            severity = logging.ERROR if level == 'error' else logging.WARNING
+            logging.getLogger('gui.events').log(severity, msg, exc_info=sys.exc_info()[0] is not None)
         if hasattr(self, '_progress_panel'):
             self._progress_panel.log(msg, level)
         else:
@@ -2839,6 +2907,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_menu_help'):
             self._menu_help.setTitle(tr("menu_help"))
             self._act_shortcuts_help.setText(tr("menu_shortcuts"))
+            self._act_open_diagnostics.setText(tr('menu_open_diagnostics'))
+            self._act_export_diagnostics.setText(tr('menu_export_diagnostics'))
             if hasattr(self, '_act_check_updates'):
                 self._act_check_updates.setText(tr("menu_check_updates"))
             self._act_about.setText(tr("menu_about"))
@@ -2963,6 +3033,11 @@ class MainWindow(QMainWindow):
             self._log_message(f"Could not save settings: {e}", "warn")
 
     def closeEvent(self, event):
+        report_worker = getattr(self, '_diagnostic_report_worker', None)
+        if report_worker is not None and report_worker.isRunning():
+            self.statusBar().showMessage(tr('diagnostics_working'))
+            event.ignore()
+            return
         if self._is_busy():
             reply = QMessageBox.question(
                 self,

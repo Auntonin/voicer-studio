@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import logging
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -274,6 +275,7 @@ class FullExportWorker(QThread):
 
         except Exception as e:
             if not self._is_cancelled:
+                logging.getLogger(__name__).exception('Export failed', extra={'operation': 'export'})
                 self.error.emit(str(e))
 
 
