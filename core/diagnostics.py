@@ -36,7 +36,7 @@ def redact(text: str) -> str:
         if len(value) >= 4:
             text = text.replace(value, '<REDACTED>')
     for path, label in ((APP_DIR, '<APP_DIR>'), (Path.home(), '<USER_HOME>')):
-        for spelling in (str(path), path.as_posix()):
+        for spelling in {str(path), path.as_posix(), str(path).replace('\\', '\\\\')}:
             text = re.sub(re.escape(spelling), lambda match: label, text, flags=re.IGNORECASE if os.name == 'nt' else 0)
     return text
 
