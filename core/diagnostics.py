@@ -174,7 +174,10 @@ def _uncaught_exception(exc_type, exc_value, exc_traceback):
 def export_diagnostic_report(destination: Path) -> Path:
     """Export only whitelisted diagnostic files from the three newest sessions."""
     root = get_log_directory()
-    sessions = sorted((root / 'sessions').glob('session-*'), reverse=True)[:3]
+    sessions = sorted((session for session in (root / 'sessions').glob('session-*')
+                       if session.is_dir() and not session.is_symlink()
+                       and any((session / name).is_file() and not (session / name).is_symlink()
+                               for name in ('session.json', 'app.jsonl', 'native-crash.log'))), reverse=True)[:3]
     if not sessions:
         raise RuntimeError('No diagnostic sessions are available yet')
     destination = Path(destination)
@@ -236,7 +239,12 @@ def _read_json(text):
 def _record_update_failures():
     # The detached installer outlives the GUI; collect its failures next launch.
     from config import TEMP_DIR
-    for job in sorted(TEMP_DIR.glob('voicer_update_*'), reverse=True)[:10]:
+    try:
+        jobs = sorted((job for job in TEMP_DIR.glob('voicer_update_*') if job.is_dir() and not job.is_symlink()),
+                      key=lambda job: job.stat().st_mtime, reverse=True)[:10]
+    except OSError:
+        return
+    for job in jobs:
         result = job / 'result.json'
         if job.is_symlink() or result.is_symlink() or not result.is_file():
             continue

@@ -179,6 +179,34 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn(d._session.name, included)
         self.assertNotIn(self.session.name, included)
 
+    def test_empty_failed_sessions_do_not_hide_real_evidence(self):
+        for index in range(4):
+            (self.root / 'sessions' / f'session-999{index}').mkdir()
+        report = d.export_diagnostic_report(Path(self.temp.name) / 'nonempty.zip')
+        with zipfile.ZipFile(report) as archive:
+            self.assertIn(f'sessions/{self.session.name}/app.jsonl', archive.namelist())
+        d._close_session()
+        isolated = Path(self.temp.name) / 'empty-root'
+        (isolated / 'sessions' / 'session-empty').mkdir(parents=True)
+        with patch.object(d, '_root', isolated):
+            with self.assertRaisesRegex(RuntimeError, 'No diagnostic sessions'):
+                d.export_diagnostic_report(Path(self.temp.name) / 'empty.zip')
+
+    def test_recent_updater_jobs_use_time_not_random_names(self):
+        import os
+        jobs = Path(self.temp.name) / 'ordered-jobs'
+        for index in range(11):
+            job = jobs / f'voicer_update_z{index}'
+            job.mkdir(parents=True)
+            (job / 'result.json').write_text(json.dumps({'success': True}))
+            os.utime(job, (1000, 1000))
+        latest = jobs / 'voicer_update_a'
+        latest.mkdir()
+        (latest / 'result.json').write_text(json.dumps({'success': False, 'error': 'newest installer failure'}))
+        with patch('config.TEMP_DIR', jobs):
+            d._record_update_failures()
+        self.assertIn('newest installer failure', self.records()[-1]['message'])
+
     def test_background_gui_export_and_translations(self):
         import os
         os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
