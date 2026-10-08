@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import zipfile
+from copy import copy
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -53,16 +54,7 @@ class PackBuilder:
         except Exception as e:
             logger.warning(f"Could not generate fallback audio via ffmpeg: {e}")
 
-        # Pure Python fallback: generate minimal valid silent MP3 frames
-        try:
-            # Standard MPEG 1.0 Layer III, 128 kbps, 44.1 kHz, Joint Stereo frame (417 bytes)
-            frame_header = b"\xff\xfb\x90\x64"
-            frame_payload = b"\x00" * 413
-            mp3_frame = frame_header + frame_payload
-            num_frames = max(1, int(duration_sec * 38.28))
-            dest_path.write_bytes(mp3_frame * num_frames)
-        except Exception as ex:
-            logger.warning(f"Could not write silent mp3 fallback: {ex}")
+        raise RuntimeError(f"Could not generate valid fallback audio: {dest_path.name}")
 
     @staticmethod
     def _create_fallback_image(dest_path: Path, speaker_name: str = "", clip_index: int = 1):
@@ -74,7 +66,7 @@ class PackBuilder:
             draw.rectangle([2, 2, 1277, 717], outline=(60, 60, 72), width=3)
             img.save(dest_path, "PNG")
         except Exception as e:
-            logger.warning(f"Could not generate fallback image: {e}")
+            raise RuntimeError(f"Could not generate fallback image: {dest_path.name}") from e
 
     @staticmethod
     def _copy_file_chunked(
@@ -223,6 +215,9 @@ class PackBuilder:
         timestamp_mode = options.get('timestamp_mode', 'start_only')
         active_items = state.active_dialogues()
         total_items = max(1, len(active_items))
+        from core.quality_checker import QualityChecker
+        checker = QualityChecker()
+        export_info = copy(state.pack_info)
 
         # Cache a frame extractor instance if video is available
         frame_extractor = None
@@ -234,7 +229,8 @@ class PackBuilder:
                 logger.warning(f"Could not initialize FrameExtractor for export repair: {e}")
 
         clip_generator = None
-        audio_src = state.separated_vocals_path or state.work_audio_path or (state.video_path if (state.video_path and state.video_path.exists()) else None)
+        audio_src = next((Path(p) for p in (state.separated_vocals_path, state.work_audio_path, state.video_path)
+                          if p and Path(p).is_file()), None)
         if audio_src and audio_src.exists():
             try:
                 from core.clip_generator import ClipGenerator
@@ -249,7 +245,7 @@ class PackBuilder:
 
                 # 1. Copy/repair audio (.mp3)
                 dest_audio = pack_dir / f"{base_name}.mp3"
-                if item.audio_path and Path(item.audio_path).exists():
+                if item.audio_path and checker._check_audio_readable(Path(item.audio_path)):
                     if Path(item.audio_path).resolve() != dest_audio.resolve():
                         shutil.copy2(item.audio_path, dest_audio)
                 else:
@@ -258,15 +254,15 @@ class PackBuilder:
                         try:
                             clip_generator.generate_clip(item, audio_src, pack_dir, speaker_safe_name)
                         except Exception as e:
-                            logger.warning(f"Failed to auto-generate clip audio #{item.index}: {e}")
-                            self._create_fallback_audio(dest_audio, max(0.1, item.end - item.start))
+                            raise RuntimeError(f"Failed to generate clip audio #{item.index}: {e}") from e
                     else:
                         self._create_fallback_audio(dest_audio, max(0.1, item.end - item.start))
                 item.audio_path = dest_audio
 
                 # 2. Copy/repair image (.png)
                 dest_image = pack_dir / f"{base_name}.png"
-                if item.image_path and Path(item.image_path).exists():
+                old_image_name = Path(item.image_path).name if item.image_path else ""
+                if item.image_path and checker._check_png_readable(Path(item.image_path)):
                     if Path(item.image_path).resolve() != dest_image.resolve():
                         shutil.copy2(item.image_path, dest_image)
                 else:
@@ -277,12 +273,14 @@ class PackBuilder:
                             frame = frame_extractor.find_best_frame(item.start, item.end, num_candidates=5)
                             if frame is not None:
                                 frame_extractor.save_frame(frame, dest_image)
-                                extracted_ok = True
+                                extracted_ok = checker._check_png_readable(dest_image)
                         except Exception as e:
                             logger.warning(f"Failed to auto-extract frame for clip #{item.index}: {e}")
                     if not extracted_ok:
                         self._create_fallback_image(dest_image, speaker_safe_name, item.index)
                 item.image_path = dest_image
+                if old_image_name and export_info.icon == old_image_name:
+                    export_info.icon = dest_image.name
 
                 # 3. Write txt
                 txt_path = pack_dir / f"{base_name}.txt"
@@ -298,16 +296,19 @@ class PackBuilder:
                 frame_extractor.release()
 
         # Write pack info
+        if export_info.icon and not (pack_dir / export_info.icon).is_file():
+            export_info.icon = active_items[0].image_path.name if active_items else ""
         pack_info_path = pack_dir / "_pack_info.ini"
-        pack_info_path.write_text(self.build_pack_info(state.pack_info), encoding='utf-8')
+        pack_info_path.write_text(self.build_pack_info(export_info), encoding='utf-8')
 
         # Copy/repair backing track (_backing_track.mp3)
         dest_bg = pack_dir / "_backing_track.mp3"
-        if hasattr(state, 'pack_backing_track_path') and state.pack_backing_track_path and Path(state.pack_backing_track_path).exists():
+        if state.pack_backing_track_path and checker._check_audio_readable(Path(state.pack_backing_track_path)):
             if Path(state.pack_backing_track_path).resolve() != dest_bg.resolve():
                 shutil.copy2(state.pack_backing_track_path, dest_bg)
         elif not dest_bg.exists():
-            bg_src = getattr(state, 'separated_accompaniment_path', None) or state.work_audio_path or (state.video_path if (state.video_path and state.video_path.exists()) else None)
+            bg_src = next((Path(p) for p in (state.separated_bg_path, state.work_audio_path, state.video_path)
+                           if p and Path(p).is_file()), None)
             if bg_src and Path(bg_src).exists():
                 try:
                     from config import SUBPROCESS_FLAGS
@@ -316,10 +317,11 @@ class PackBuilder:
                         "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-ar", "44100",
                         str(dest_bg)
                     ]
-                    subprocess.run(cmd, capture_output=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
+                    res = subprocess.run(cmd, capture_output=True, timeout=60, creationflags=SUBPROCESS_FLAGS)
+                    if res.returncode != 0 or not checker._check_audio_readable(dest_bg):
+                        raise RuntimeError("FFmpeg failed to encode the backing track")
                 except Exception as e:
-                    logger.warning(f"Could not auto-generate backing track: {e}")
-                    self._create_fallback_audio(dest_bg, max(1.0, state.video_duration))
+                    raise RuntimeError(f"Could not generate backing track: {e}") from e
             else:
                 self._create_fallback_audio(dest_bg, max(1.0, state.video_duration))
 
@@ -329,14 +331,34 @@ class PackBuilder:
             dest_mp4 = pack_dir / "dub_video.mp4"
             if state.video_path.resolve() != dest_mp4.resolve():
                 try:
-                    self._copy_file_chunked(
-                        state.video_path, dest_mp4,
-                        vid_copy_base, vid_copy_span,
-                        progress_cb=progress_cb,
-                        msg_template=tr("exp_step_copying_source", cur="{cur}", total="{total}")
-                    )
+                    if state.video_path.suffix.lower() == ".mp4":
+                        self._copy_file_chunked(
+                            state.video_path, dest_mp4,
+                            vid_copy_base, vid_copy_span,
+                            progress_cb=progress_cb,
+                            msg_template=tr("exp_step_copying_source", cur="{cur}", total="{total}")
+                        )
+                    else:
+                        from config import SUBPROCESS_FLAGS
+                        result = subprocess.run(
+                            ["ffmpeg", "-y", "-i", str(state.video_path), "-map", "0:v:0",
+                             "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", str(dest_mp4)],
+                            capture_output=True, timeout=300, creationflags=SUBPROCESS_FLAGS
+                        )
+                        if result.returncode != 0:
+                            # Codecs such as Theora cannot be copied into MP4.
+                            result = subprocess.run(
+                                ["ffmpeg", "-y", "-i", str(state.video_path), "-map", "0:v:0",
+                                 "-map", "0:a:0?", "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                                 "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(dest_mp4)],
+                                capture_output=True, creationflags=SUBPROCESS_FLAGS
+                            )
+                            if result.returncode != 0:
+                                raise RuntimeError("FFmpeg could not convert the source video into MP4")
+                        if progress_cb:
+                            progress_cb(vid_copy_base + vid_copy_span, tr("exp_step_validating"))
                 except Exception as e:
-                    logger.warning(f"Could not copy dub_video.mp4: {e}")
+                    raise RuntimeError(f"Could not create dub_video.mp4: {e}") from e
             else:
                 if progress_cb:
                     progress_cb(vid_copy_base + vid_copy_span, tr("exp_step_copying_source", cur="0", total="0"))
@@ -416,12 +438,14 @@ class PackBuilder:
 
                         proc.wait()
                         if proc.returncode != 0 or not dest_vid.exists():
-                            logger.warning(f"FFmpeg OGV encoding finished with code {proc.returncode}")
+                            raise RuntimeError(f"FFmpeg OGV encoding finished with code {proc.returncode}")
                     except Exception as e:
-                        logger.warning(f"Failed to encode dub_video.ogv ({e}); continuing with dub_video.mp4")
+                        raise RuntimeError(f"Failed to encode dub_video.ogv: {e}") from e
 
         if progress_cb:
             progress_cb(end_pct, tr("exp_step_validating"))
+        state.pack_info.icon = export_info.icon
+        state.pack_backing_track_path = dest_bg
         return pack_dir
 
     @staticmethod

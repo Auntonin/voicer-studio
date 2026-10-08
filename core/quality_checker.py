@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from core.models import PipelineState
+from core.project_manager import _read_quoted_value
 from config import FILENAME_ALLOWED_CHARS
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,9 @@ class QualityChecker:
             txt = (pack_dir / "_pack_info.ini").read_text(encoding='utf-8')
             if "[data]" not in txt:
                 results.append(CheckResult('error', "_pack_info.ini missing [data] section"))
+            icon = _read_quoted_value(txt, "icon")
+            if icon and not self._check_image_reference(pack_dir, icon):
+                results.append(CheckResult('error', f"Invalid pack icon reference: {icon}"))
                 
         backing_track = pack_dir / "_backing_track.mp3"
         if not backing_track.exists():
@@ -49,7 +53,7 @@ class QualityChecker:
                 if mp4_file.exists() and not self._check_media_readable(mp4_file):
                     results.append(CheckResult('error', "Unreadable video file: dub_video.mp4"))
                 if ogv_file.exists() and not self._check_media_readable(ogv_file):
-                    results.append(CheckResult('warn', "Unreadable or corrupted video file: dub_video.ogv"))
+                    results.append(CheckResult('error', "Unreadable or corrupted video file: dub_video.ogv"))
                 elif not ogv_file.exists():
                     results.append(CheckResult('warn', "dub_video.ogv omitted (Theora encoder not available)"))
             
@@ -108,11 +112,17 @@ class QualityChecker:
                     results.append(CheckResult('error', f"txt missing [data] section: {base_name}.txt", item.index))
                 if "caption=" not in txt_content or "dub_timestamps=" not in txt_content:
                     results.append(CheckResult('error', f"txt missing required keys: {base_name}.txt", item.index))
+                image_name = _read_quoted_value(txt_content, "image")
+                if not self._check_image_reference(pack_dir, image_name):
+                    results.append(CheckResult('error', f"Invalid image reference: {base_name}.txt", item.index))
 
         return results
 
     def _check_audio_readable(self, path: Path) -> bool:
         return self._check_media_readable(path)
+
+    def _check_image_reference(self, pack_dir: Path, name: str) -> bool:
+        return bool(name and Path(name).name == name and self._check_png_readable(pack_dir / name))
 
     def _check_png_readable(self, path: Path) -> bool:
         if not path.exists() or path.stat().st_size <= 0:
@@ -120,6 +130,8 @@ class QualityChecker:
         try:
             from PIL import Image
             with Image.open(path) as image:
+                if image.format != "PNG":
+                    return False
                 image.verify()
             return True
         except (ImportError, OSError, ValueError) as exc:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sys
 import time
+import subprocess
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
@@ -211,7 +213,7 @@ class FullExportWorker(QThread):
 
     def __init__(self, state: PipelineState, output_base: Path, zip_path: Path, options: dict, parent=None):
         super().__init__(parent)
-        self.state = state
+        self.state = deepcopy(state)
         self.output_base = output_base
         self.zip_path = zip_path
         self.options = options
@@ -737,10 +739,8 @@ class ExportDialog(QDialog):
             if not d.audio_path or not Path(d.audio_path).exists():
                 missing_audio += 1
 
-        missing_backing = False
         backing_p = getattr(self.state, "pack_backing_track_path", None) or getattr(self.state, "backing_track_path", None)
-        if backing_p and not Path(backing_p).exists():
-            missing_backing = True
+        missing_backing = not backing_p or not Path(backing_p).is_file()
 
         has_missing = (missing_images > 0) or (missing_audio > 0) or missing_backing
         return {

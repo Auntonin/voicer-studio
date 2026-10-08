@@ -8,6 +8,7 @@ import sys
 import unittest
 import tempfile
 import shutil
+import os
 from pathlib import Path
 
 # Add project root to sys.path
@@ -16,10 +17,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.models import PipelineState, DialogueItem, SpeakerInfo, PackInfo
 from core.pack_builder import PackBuilder
 from core.quality_checker import QualityChecker
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from PySide6.QtWidgets import QApplication
 
 
 class TestExportRecovery(unittest.TestCase):
     def setUp(self):
+        self.app = QApplication.instance() or QApplication([])
         self.temp_dir = tempfile.mkdtemp()
         self.temp_path = Path(self.temp_dir)
 
@@ -93,7 +97,7 @@ class TestExportRecovery(unittest.TestCase):
         self.assertTrue(missing_info["has_missing"])
         self.assertEqual(missing_info["images"], 1)
         self.assertEqual(missing_info["audio"], 1)
-        self.assertFalse(missing_info["backing"])
+        self.assertTrue(missing_info["backing"])
 
     def test_packbuilder_speaker_roles_separation(self):
         """
