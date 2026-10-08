@@ -29,6 +29,11 @@ if sys.stderr is None:
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Initialize before Qt/heavy imports so startup and native failures are captured.
+import logging
+from core.diagnostics import configure_diagnostics
+diagnostic_session = configure_diagnostics()
+
 # ── Windows Taskbar & Shell App ID (Must run before Qt initialization) ────────
 if sys.platform == "win32":
     try:
@@ -40,36 +45,23 @@ if sys.platform == "win32":
 # ── PySide6 imports ───────────────────────────────────────────────────────────
 try:
     from PySide6.QtWidgets import QApplication, QSplashScreen, QMessageBox, QWidget
-    from PySide6.QtCore import Qt, QTimer, QRectF
+    from PySide6.QtCore import Qt, QTimer, QRectF, QtMsgType, qInstallMessageHandler
     from PySide6.QtGui import QIcon, QPixmap, QFont, QPainter, QColor, QLinearGradient, QPen
 except ImportError:
+    logging.getLogger(__name__).exception('Qt could not be imported', extra={'operation': 'startup'})
     print("[ERROR] PySide6 is not installed.")
     print("        Run VoicerStudio.exe or setup.bat first.")
     sys.exit(1)
 
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    import traceback
-    err_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    try:
-        from core.platform_utils import get_crash_log_path
-        crash_log = get_crash_log_path()
-        crash_log.write_text(err_text, encoding="utf-8")
-    except Exception:
-        try:
-            (PROJECT_ROOT / "crash.log").write_text(err_text, encoding="utf-8")
-        except Exception:
-            pass
 
-def handle_thread_exception(args):
-    handle_exception(args.exc_type, args.exc_value, args.exc_traceback)
+def _qt_message(kind, context, message):
+    severity = {QtMsgType.QtDebugMsg: logging.DEBUG, QtMsgType.QtInfoMsg: logging.INFO,
+                QtMsgType.QtWarningMsg: logging.WARNING, QtMsgType.QtCriticalMsg: logging.ERROR,
+                QtMsgType.QtFatalMsg: logging.CRITICAL}.get(kind, logging.WARNING)
+    logging.getLogger('qt').log(severity, message)
 
-import threading
-sys.excepthook = handle_exception
-if hasattr(threading, "excepthook"):
-    threading.excepthook = handle_thread_exception
+
+qInstallMessageHandler(_qt_message)
 
 # ── App config ────────────────────────────────────────────────────────────────
 from config import APP_NAME, APP_VERSION, COLORS, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
@@ -320,6 +312,10 @@ def main():
 
     # Smooth handoff to main window
     splash.finish(window)
+
+    if diagnostic_session is None:
+        from core.i18n import tr
+        QMessageBox.warning(window, tr('menu_open_diagnostics'), tr('diagnostics_unavailable'))
 
     sys.exit(app.exec())
 

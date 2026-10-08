@@ -93,7 +93,8 @@ class PipelineWorker(QThread):
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _log(self, msg: str, level: str = "info"):
-        log.info(msg)
+        severity = {'error': logging.ERROR, 'warn': logging.WARNING, 'warning': logging.WARNING}.get(level, logging.INFO)
+        log.log(severity, msg, extra={'operation': 'pipeline', 'stage': str(self.state.current_step)})
         self.signals.log_message.emit(msg, level)
 
     def _emit_elapsed(self):
@@ -681,6 +682,7 @@ class PipelineWorker(QThread):
 
         except Exception as e:
             tb = traceback.format_exc()
+            log.exception('Pipeline failed', extra={'operation': 'pipeline', 'stage': str(self.state.current_step)})
             elapsed = time.time() - self._start_time
             self._log(f"Pipeline error after {elapsed:.1f}s: {e}", "error")
             self._log(tb, "error")
@@ -718,6 +720,7 @@ class ExportWorker(QThread):
             self.log_msg.emit(f"Exported: {self.zip_path}", "ok")
             self.finished.emit(str(self.zip_path))
         except Exception as e:
+            log.exception('Pack ZIP export failed', extra={'operation': 'export'})
             self.error.emit(str(e))
 
 

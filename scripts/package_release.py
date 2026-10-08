@@ -25,7 +25,7 @@ try:
     from config import APP_NAME, APP_VERSION
 except ImportError:
     APP_NAME = "Voicer Studio"
-    APP_VERSION = "1.1.2"
+    APP_VERSION = "1.1.3"
 
 DIST_DIR = ROOT_DIR / "dist"
 STAGE_DIR = DIST_DIR / f"VoicerStudio-v{APP_VERSION}-win64"
