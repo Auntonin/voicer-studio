@@ -61,6 +61,14 @@ class DiagnosticTests(unittest.TestCase):
     def test_basic_authorization_is_scrubbed(self):
         self.assertNotIn('fake_encoded_credentials', d.redact('Authorization: Basic fake_encoded_credentials'))
 
+    def test_windows_exception_escaped_home_path_is_scrubbed(self):
+        home = Path(r'C:\Users\fake_user_name')
+        error = FileNotFoundError(2, 'No such file', r'C:\Users\fake_user_name\private.mp4')
+        with patch.object(d.Path, 'home', return_value=home):
+            text = d.redact(str(error))
+        self.assertIn('<USER_HOME>', text)
+        self.assertNotIn('fake_user_name', text)
+
     def test_native_trace_is_scrubbed_in_report(self):
         import faulthandler
         trace = self.session / 'native-crash.log'
