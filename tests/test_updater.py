@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.updater import (
     parse_version, is_version_newer, get_current_app_path,
-    check_for_updates, generate_updater_batch, UpdateInfo
+    check_for_updates, UpdateInfo
 )
 
 
@@ -34,48 +34,6 @@ class TestUpdater(unittest.TestCase):
         self.assertIsInstance(app_path, Path)
         self.assertIsInstance(is_frozen, bool)
 
-    def test_generate_updater_batch(self):
-        tmp_dir = PROJECT_ROOT / "tests" / "fixtures"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        fake_file = tmp_dir / "VoicerStudio-update.zip"
-        fake_file.write_text("dummy", encoding="utf-8")
-        try:
-            bat_path = generate_updater_batch(
-                downloaded_file=fake_file,
-                is_zip=True,
-                target_app_dir=PROJECT_ROOT,
-                target_exe=PROJECT_ROOT / "VoicerStudio.exe",
-                current_pid=99999
-            )
-            self.assertTrue(bat_path.exists())
-            content = bat_path.read_text(encoding="utf-8")
-            self.assertIn("Voicer Studio Updater", content)
-            self.assertIn("99999", content)
-            bat_path.unlink(missing_ok=True)
-        finally:
-            fake_file.unlink(missing_ok=True)
-
-    def test_generate_updater_posix_script(self):
-        from core.updater import generate_updater_posix_script
-        tmp_dir = PROJECT_ROOT / "tests" / "fixtures"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        fake_file = tmp_dir / "VoicerStudio-update.tar.gz"
-        fake_file.write_text("dummy", encoding="utf-8")
-        try:
-            sh_path = generate_updater_posix_script(
-                downloaded_file=fake_file,
-                is_zip=False,
-                target_app_dir=PROJECT_ROOT,
-                target_exe=PROJECT_ROOT / "VoicerStudio",
-                current_pid=99999
-            )
-            self.assertTrue(sh_path.exists())
-            content = sh_path.read_text(encoding="utf-8")
-            self.assertIn("#!/bin/sh", content)
-            self.assertIn("99999", content)
-            sh_path.unlink(missing_ok=True)
-        finally:
-            fake_file.unlink(missing_ok=True)
 
     def test_check_for_updates_mock_release(self):
         mock_response_data = b'''{
@@ -102,7 +60,7 @@ class TestUpdater(unittest.TestCase):
         mock_resp.read.return_value = mock_response_data
         mock_resp.__enter__.return_value = mock_resp
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch("urllib.request.urlopen", return_value=mock_resp), patch('core.updater.sys.platform', 'win32'):
             has_update, update_info, err = check_for_updates(current_version="1.1.0")
             self.assertTrue(has_update)
             self.assertIsNotNone(update_info)

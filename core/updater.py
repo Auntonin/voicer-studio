@@ -7,7 +7,7 @@ Features:
 - Queries GitHub Releases API for latest tags, release notes, and assets.
 - Robust semantic version parser (e.g., v1.1.0 vs 1.2.0).
 - Asynchronous downloader with smooth byte-level progress, transfer speed, and ETA calculation.
-- Safe Windows file-locking bypass: generates a detached stager batch script that waits for
+- Safe Windows file-locking bypass: launches a detached Python helper that waits for
   the running process to exit, unpacks/replaces the executable and bundle files,
   relaunches the new version, and cleans up temporary update files.
 - Handles both standalone one-file executables and directory bundles (.zip).
@@ -25,6 +25,7 @@ import shutil
 import hashlib
 import logging
 import subprocess
+import tempfile
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -152,6 +153,8 @@ def check_for_updates(
     
     os_tag = "mac" if sys.platform == "darwin" else ("linux" if sys.platform.startswith("linux") else "win")
     
+    # Native launchers need the complete runtime ZIP, not just a new launcher EXE.
+    assets = sorted(assets, key=lambda asset: not asset.get('name', '').lower().endswith('.zip'))
     # Priority 1: VoicerStudio asset matching current OS tag
     for asset in assets:
         name = asset.get("name", "").lower()
@@ -159,15 +162,11 @@ def check_for_updates(
             best_asset = asset
             break
             
-    # Priority 2: Any matching VoicerStudio package
-    if not best_asset:
+    # Only generic standalone packages may fall back; never cross OS boundaries.
+    if not best_asset and getattr(sys, 'frozen', False):
         for asset in assets:
             name = asset.get("name", "").lower()
-            if "voicer" in name and (name.endswith(".exe") or name.endswith(".zip")):
-                best_asset = asset
-                break
-            name = asset.get("name", "").lower()
-            if name.endswith(".zip") or name.endswith(".exe"):
+            if "voicer" in name and name.endswith(".exe") and sys.platform == 'win32':
                 best_asset = asset
                 break
                 
@@ -181,12 +180,14 @@ def check_for_updates(
             return False, None, "The release has no supported update package. Download it from the release page instead."
         return False, None, None
 
-    # Check for optional sibling SHA-256 file
+    # The release must provide the matching checksum before offering installation.
     checksum_asset = next(
         (asset for asset in assets if asset.get("name", "") == f"{asset_name}.sha256"),
         None,
     )
     sha256_url = checksum_asset.get("browser_download_url", "") if checksum_asset else ""
+    if has_update and not sha256_url:
+        return False, None, 'The release update package is missing its SHA-256 checksum.'
 
     update_info = UpdateInfo(
         version=remote_version,
@@ -254,6 +255,8 @@ class UpdateDownloaderThread(QThread):
 
         try:
             expected_hash = None
+            if not self.update_info.sha256_url:
+                raise RuntimeError('Update package requires a SHA-256 checksum.')
             if self.update_info.sha256_url:
                 try:
                     checksum_req = urllib.request.Request(self.update_info.sha256_url, headers=headers)
@@ -263,7 +266,9 @@ class UpdateDownloaderThread(QThread):
                     if checksum_match:
                         expected_hash = checksum_match.group(1).lower()
                 except Exception as ex:
-                    log.warning(f"Could not load checksum file: {ex}")
+                    raise RuntimeError(f'Could not load checksum file: {ex}') from ex
+            if not expected_hash:
+                raise RuntimeError('Release checksum file does not contain a valid SHA-256 hash.')
 
             with urllib.request.urlopen(req, timeout=15) as response:
                 content_len = response.headers.get("Content-Length")
@@ -351,315 +356,54 @@ def get_current_app_path() -> Tuple[Path, bool]:
         return Path(sys.executable).resolve(), False
 
 
-def generate_updater_batch(
-    downloaded_file: Path,
-    is_zip: bool,
-    target_app_dir: Path,
-    target_exe: Path,
-    current_pid: int
-) -> Path:
-    """
-    Generates a robust Windows batch script (.bat) that:
-    1. Waits for the current Voicer Studio process (PID) to fully exit so file locks release.
-    2. Backs up the previous executable / files.
-    3. Replaces old files with the newly downloaded version (unzipping or direct copy).
-    4. Relaunches the updated Voicer Studio executable.
-    5. Cleans up downloaded archives and self-deletes.
-    """
-    updater_bat_path = downloaded_file.parent / "voicer_updater_run.bat"
-    
-    # Safe Windows batch script with UTF-8 encoding
-    bat_content = f"""@echo off
-chcp 65001 >nul
-title Voicer Studio Updater
-echo ======================================================================
-echo               Voicer Studio — Updating Application...
-echo ======================================================================
-echo.
-
-set "PID={current_pid}"
-set "SOURCE_FILE={str(downloaded_file)}"
-set "TARGET_DIR={str(target_app_dir)}"
-set "TARGET_EXE={str(target_exe)}"
-set "IS_ZIP={'1' if is_zip else '0'}"
-
-echo [1/4] Waiting for Voicer Studio (PID %PID%) to close...
-set RETRIES=0
-:WAIT_PID
-tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
-if not errorlevel 1 (
-    set /a RETRIES+=1
-    if %RETRIES% GEQ 25 (
-        echo [INFO] Terminating process %PID% gracefully...
-        taskkill /F /PID %PID% >nul 2>&1
-    )
-    timeout /t 1 /nobreak >nul
-    goto WAIT_PID
-)
-
-:: Wait for VoicerStudio launcher process to also release locks
-set RETRIES_EXE=0
-:WAIT_EXE
-tasklist /FI "IMAGENAME eq VoicerStudio.exe" 2>NUL | find /I "VoicerStudio.exe" >NUL
-if not errorlevel 1 (
-    set /a RETRIES_EXE+=1
-    if %RETRIES_EXE% GEQ 10 (
-        taskkill /F /IM VoicerStudio.exe >nul 2>&1
-    )
-    timeout /t 1 /nobreak >nul
-    goto WAIT_EXE
-)
-
-echo [2/4] Processes closed. Releasing Windows file handles...
-timeout /t 1 /nobreak >nul
-
-echo [3/4] Installing updated files...
-if "%IS_ZIP%"=="1" (
-    echo [INFO] Extracting update archive into %TARGET_DIR%...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ErrorActionPreference = 'Stop'; try {{ $src = $env:SOURCE_FILE; $dst = $env:TARGET_DIR; $temp = Join-Path $env:TEMP ('voicer_upd_' + [System.Guid]::NewGuid().ToString('N')); Expand-Archive -LiteralPath $src -DestinationPath $temp -Force; $items = Get-ChildItem -Path $temp; if ($items.Count -eq 1 -and $items[0].PSIsContainer) {{ Copy-Item -Path (Join-Path $items[0].FullName '*') -Destination $dst -Recurse -Force }} else {{ Copy-Item -Path (Join-Path $temp '*') -Destination $dst -Recurse -Force }}; Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue; exit 0 }} catch {{ Write-Error $_; exit 1 }}"
-) else (
-    echo [INFO] Updating executable: %TARGET_EXE%...
-    if exist "%TARGET_EXE%" (
-        copy /y "%TARGET_EXE%" "%TARGET_EXE%.bak" >nul 2>&1
-    )
-    copy /y "%SOURCE_FILE%" "%TARGET_EXE%" >nul
-)
-
-if errorlevel 1 (
-    echo.
-    echo ======================================================================
-    echo [ERROR] Update installation failed! 
-    echo If access was denied, please run the application as Administrator.
-    echo ======================================================================
-    pause
-    exit /b 1
-)
-
-echo.
-echo [4/4] Update applied successfully! Relaunching Voicer Studio...
-timeout /t 1 /nobreak >nul
-start "" "%TARGET_EXE%"
-
-:: Clean up downloaded update package
-if exist "%SOURCE_FILE%" (
-    del /f /q "%SOURCE_FILE%" >nul 2>&1
-)
-
-echo Done.
-:: Self-delete updater batch script
-(goto) 2>nul & del "%~f0"
-"""
-    updater_bat_path.write_text(bat_content, encoding="utf-8")
-    return updater_bat_path
-
-
-def generate_updater_posix_script(
-    downloaded_file: Path,
-    is_zip: bool,
-    target_app_dir: Path,
-    target_exe: Path,
-    current_pid: int
-) -> Path:
-    """
-    Generates a portable POSIX shell script (.sh) for background detached updating on macOS / Linux.
-    """
+def _launch_update_helper(target_dir: Path, target_exe: Path, package: Optional[Path] = None, is_zip: bool = False):
+    """Use the installed Python runtime, never cmd/batch or the custom app host."""
+    candidates = [
+        target_dir / '.venv' / 'Scripts' / 'pythonw.exe',
+        target_dir / '.venv' / 'bin' / 'python',
+        Path(getattr(sys, '_base_executable', sys.executable)),
+        Path(sys.executable),
+    ]
+    interpreter = next((path for path in candidates if path.is_file() and path.name.lower().startswith('python')), None)
+    if interpreter is None:
+        raise RuntimeError('A Python runtime is required to install this update')
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
-    updater_sh_path = TEMP_DIR / "voicer_updater.sh"
-
-    sh_content = f"""#!/bin/sh
-PID="{current_pid}"
-SOURCE_FILE="{str(downloaded_file)}"
-TARGET_DIR="{str(target_app_dir)}"
-TARGET_EXE="{str(target_exe)}"
-IS_ZIP="{'1' if is_zip else '0'}"
-
-echo "[1/4] Waiting for Voicer Studio (PID $PID) to close..."
-RETRIES=0
-while kill -0 "$PID" 2>/dev/null; do
-    RETRIES=$((RETRIES + 1))
-    if [ "$RETRIES" -ge 25 ]; then
-        echo "[INFO] Terminating process $PID..."
-        kill -9 "$PID" 2>/dev/null
-    fi
-    sleep 1
-done
-
-echo "[2/4] Process closed. Preparing installation..."
-sleep 1
-
-echo "[3/4] Installing updated files..."
-if [ "$IS_ZIP" = "1" ]; then
-    echo "[INFO] Extracting update archive into $TARGET_DIR..."
-    TEMP_EXTRACT="$TARGET_DIR/voicer_upd_temp_$$"
-    mkdir -p "$TEMP_EXTRACT"
-    if which unzip >/dev/null 2>&1; then
-        unzip -q -o "$SOURCE_FILE" -d "$TEMP_EXTRACT"
-    elif which python3 >/dev/null 2>&1; then
-        python3 -c "import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$SOURCE_FILE" "$TEMP_EXTRACT"
-    fi
-    cp -Rf "$TEMP_EXTRACT"/* "$TARGET_DIR"/
-    rm -rf "$TEMP_EXTRACT"
-else
-    echo "[INFO] Updating executable: $TARGET_EXE..."
-    cp -f "$TARGET_EXE" "$TARGET_EXE.bak" 2>/dev/null
-    cp -f "$SOURCE_FILE" "$TARGET_EXE"
-    chmod +x "$TARGET_EXE" 2>/dev/null
-fi
-
-echo "[4/4] Update applied successfully! Relaunching Voicer Studio..."
-sleep 1
-cd "$TARGET_DIR"
-if [ -x "$TARGET_EXE" ]; then
-    "$TARGET_EXE" &
-else
-    python3 main.py &
-fi
-
-rm -f "$SOURCE_FILE" 2>/dev/null
-rm -f "$0"
-"""
-    updater_sh_path.write_text(sh_content, encoding="utf-8")
-    try:
-        os.chmod(updater_sh_path, 0o755)
-    except Exception:
-        pass
-    return updater_sh_path
+    job = Path(tempfile.mkdtemp(prefix='voicer_update_', dir=TEMP_DIR))
+    helper = job / 'installer.py'
+    shutil.copy2(APP_DIR / 'scripts' / 'update_installer.py', helper)
+    manifest = job / 'manifest.json'
+    manifest.write_text(json.dumps({
+        'pid': os.getpid(), 'target_dir': str(target_dir.resolve()),
+        'target_exe': str(target_exe.resolve()), 'package': str(package.resolve()) if package else None,
+        'is_zip': is_zip, 'restart': True,
+    }, ensure_ascii=False), encoding='utf-8')
+    kwargs = {'close_fds': True, 'cwd': str(target_dir)}
+    if sys.platform == 'win32':
+        kwargs['creationflags'] = SUBPROCESS_FLAGS | 0x00000200
+    else:
+        kwargs['start_new_session'] = True
+    subprocess.Popen([str(interpreter), '-I', str(helper), str(manifest)], **kwargs)
 
 
-def apply_update_and_restart(
-    downloaded_file: Path,
-    is_zip: bool,
-    target_exe: Optional[Path] = None
-) -> Tuple[bool, str]:
-    """
-    Prepares and launches the detached background updater script and signals the
-    caller to exit the application.
-    
-    Returns:
-        (success: bool, message: str)
-    """
-    if not downloaded_file.exists():
-        return False, f"Downloaded update file not found: {downloaded_file}"
-
-    resolved_exe, is_frozen = get_current_app_path()
+def apply_update_and_restart(downloaded_file: Path, is_zip: bool, target_exe: Optional[Path] = None) -> Tuple[bool, str]:
+    """Launch a detached Python installer; caller exits only after successful handoff."""
+    if not downloaded_file.is_file():
+        return False, f'Downloaded update file not found: {downloaded_file}'
+    resolved_exe, _ = get_current_app_path()
     if target_exe:
         resolved_exe = target_exe.resolve()
-
-    target_app_dir = resolved_exe.parent
-    current_pid = os.getpid()
-
     try:
-        if sys.platform == "win32":
-            bat_file = generate_updater_batch(
-                downloaded_file=downloaded_file,
-                is_zip=is_zip,
-                target_app_dir=target_app_dir,
-                target_exe=resolved_exe,
-                current_pid=current_pid
-            )
-
-            # Launch detached process with high-level flags on Windows
-            # DETACHED_PROCESS (0x00000008) + CREATE_NEW_PROCESS_GROUP (0x00000200)
-            detached_flags = 0x00000008 | 0x00000200
-            
-            subprocess.Popen(
-                ["cmd.exe", "/c", str(bat_file)],
-                creationflags=detached_flags,
-                close_fds=True,
-                cwd=str(target_app_dir)
-            )
-        else:
-            sh_file = generate_updater_posix_script(
-                downloaded_file=downloaded_file,
-                is_zip=is_zip,
-                target_app_dir=target_app_dir,
-                target_exe=resolved_exe,
-                current_pid=current_pid
-            )
-            subprocess.Popen(
-                ["/bin/sh", str(sh_file)],
-                start_new_session=True,
-                close_fds=True,
-                cwd=str(target_app_dir)
-            )
-
-        return True, "Updater launched successfully."
-    except Exception as e:
-        log.error(f"Failed to launch updater: {e}", exc_info=True)
-        return False, f"Failed to launch updater stager: {str(e)}"
+        _launch_update_helper(resolved_exe.parent, resolved_exe, downloaded_file, is_zip)
+        return True, 'Updater launched successfully.'
+    except Exception as exc:
+        log.error('Failed to launch updater: %s', exc, exc_info=True)
+        return False, f'Failed to launch updater: {exc}'
 
 
 def restart_application(target_app_dir: Optional[Path] = None):
-    """
-    Relaunches Voicer Studio and cleanly exits the current process.
-    """
     target_dir = target_app_dir or APP_DIR
-    target_exe = target_dir / ("VoicerStudio.exe" if sys.platform == "win32" else "VoicerStudio")
-    current_pid = os.getpid()
-
-    TEMP_DIR.mkdir(parents=True, exist_ok=True)
-
-    if sys.platform == "win32":
-        restart_bat = TEMP_DIR / "voicer_restart.bat"
-        if target_exe.exists():
-            launch_cmd = f'start "" "{target_exe}"'
-        else:
-            py_exe = sys.executable
-            main_py = target_dir / "main.py"
-            launch_cmd = f'start "" "{py_exe}" "{main_py}"'
-
-        bat_content = f"""@echo off
-set "PID={current_pid}"
-:WAIT_PID
-tasklist /FI "PID eq %PID%" 2>NUL | find /I "%PID%" >NUL
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto WAIT_PID
-)
-timeout /t 1 /nobreak >nul
-cd /d "{target_dir}"
-{launch_cmd}
-(goto) 2>nul & del "%~f0"
-"""
-        restart_bat.write_text(bat_content, encoding="utf-8")
-        detached_flags = 0x00000008 | 0x00000200
-        subprocess.Popen(
-            ["cmd.exe", "/c", str(restart_bat)],
-            creationflags=detached_flags,
-            close_fds=True,
-            cwd=str(target_dir)
-        )
-    else:
-        # macOS / Linux POSIX restart
-        restart_sh = TEMP_DIR / "voicer_restart.sh"
-        if target_exe.exists():
-            launch_cmd = f'"{target_exe}"'
-        else:
-            py_exe = sys.executable
-            main_py = target_dir / "main.py"
-            launch_cmd = f'"{py_exe}" "{main_py}"'
-
-        sh_content = f"""#!/bin/sh
-while kill -0 {current_pid} 2>/dev/null; do
-    sleep 0.5
-done
-cd "{target_dir}"
-{launch_cmd} &
-rm -f "$0"
-"""
-        restart_sh.write_text(sh_content, encoding="utf-8")
-        try:
-            os.chmod(restart_sh, 0o755)
-        except Exception:
-            pass
-        subprocess.Popen(
-            ["/bin/sh", str(restart_sh)],
-            start_new_session=True,
-            close_fds=True,
-            cwd=str(target_dir)
-        )
-
+    target_exe = target_dir / ('VoicerStudio.exe' if sys.platform == 'win32' else 'VoicerStudio')
+    _launch_update_helper(target_dir, target_exe)
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance()
     if app:

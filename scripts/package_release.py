@@ -25,7 +25,7 @@ try:
     from config import APP_NAME, APP_VERSION
 except ImportError:
     APP_NAME = "Voicer Studio"
-    APP_VERSION = "1.1.1"
+    APP_VERSION = "1.1.2"
 
 DIST_DIR = ROOT_DIR / "dist"
 STAGE_DIR = DIST_DIR / f"VoicerStudio-v{APP_VERSION}-win64"
@@ -53,13 +53,7 @@ def step_compile_exe() -> bool:
     build_script = ROOT_DIR / "scripts" / "build_exe.py"
     if build_script.exists():
         res = subprocess.run([sys.executable, str(build_script)], cwd=str(ROOT_DIR))
-        if res.returncode != 0:
-            log("build_exe.py failed or GCC not found. Checking existing VoicerStudio.exe...", "WARN")
-            if (ROOT_DIR / "VoicerStudio.exe").exists():
-                log("Using existing VoicerStudio.exe in workspace root.", "OK")
-                return True
-            return False
-        return True
+        return res.returncode == 0
     return False
 
 def step_stage_files():
@@ -164,7 +158,9 @@ def print_instructions():
 
 if __name__ == "__main__":
     DIST_DIR.mkdir(parents=True, exist_ok=True)
-    step_compile_exe()
+    if not step_compile_exe():
+        log('Launcher build failed; release packaging cancelled.', 'ERR')
+        sys.exit(1)
     step_stage_files()
     step_create_zip()
     print_instructions()
