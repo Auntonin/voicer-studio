@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +13,93 @@ from core.agent_commands import CommandError
 from core.agent_setup import find_codex_cli, find_gateway_python, register_codex, register_claude_desktop
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_generated_configs_support_codex_claude_cursor_and_vscode(tmp_path):
+    from core.agent_setup import connection_config
+    reference = 'a' * 32
+    python = tmp_path / 'ภาษาไทย space/python.exe'
+    for target in ('json', 'codex', 'vscode'):
+        encoded = connection_config(ROOT, reference, python, target)
+        if target == 'codex':
+            if sys.version_info >= (3, 11):
+                import tomllib
+                entry = tomllib.loads(encoded)['mcp_servers']['voicer-studio']
+            else:
+                entry = {key: json.loads(value) for key, value in
+                         (line.split(' = ', 1) for line in encoded.splitlines()[1:])}
+        else:
+            key = 'servers' if target == 'vscode' else 'mcpServers'
+            entry = json.loads(encoded)[key]['voicer-studio']
+        assert entry['command'] == str(python.resolve())
+        assert entry['args'] == [str((ROOT / 'scripts/mcp_server.py').resolve()), '--session', reference]
+    with pytest.raises(CommandError, match='INVALID_ARGUMENT'):
+        connection_config(ROOT, '../bad', python, 'json')
+
+
+def test_gateway_runtime_detection_checks_all_required_dependencies(tmp_path):
+    interpreter = tmp_path / 'python.exe'
+    interpreter.touch()
+    with patch('core.agent_setup.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
+        assert find_gateway_python(tmp_path, interpreter) == interpreter
+        code = run.call_args.args[0][-1]
+        for module in ('anyio', 'jsonschema', 'keyring', 'PySide6.QtNetwork'):
+            assert module in code
+
+
+def test_install_gateway_is_isolated_and_uses_only_mcp_requirements(tmp_path):
+    from core.agent_setup import install_gateway
+    interpreter = tmp_path / 'python.exe'
+    interpreter.touch()
+    (tmp_path / 'requirements-mcp.txt').write_text('mcp==2.3.0\n')
+    runtime = tmp_path / '.venv-mcp/Scripts/python.exe'
+    with patch('core.agent_setup.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run, \
+         patch('core.agent_setup.find_gateway_python', return_value=runtime):
+        assert install_gateway(tmp_path, interpreter) == runtime
+    commands = [call.args[0] for call in run.call_args_list]
+    assert any('-m' in cmd and 'venv' in cmd and str(tmp_path / '.venv-mcp') in cmd for cmd in commands)
+    installs = [cmd for cmd in commands if 'pip' in cmd]
+    assert len(installs) == 1
+    assert str(tmp_path / 'requirements-mcp.txt') in installs[0]
+    assert str(tmp_path / 'requirements.txt') not in installs[0]
+
+
+@pytest.mark.parametrize('target,filename,container', [
+    ('cursor', '.cursor/mcp.json', 'mcpServers'),
+    ('vscode', 'Code/User/mcp.json', 'servers'),
+    ('claude-code', '.claude.json', 'mcpServers'),
+])
+def test_other_clients_preserve_existing_settings(tmp_path, monkeypatch, target, filename, container):
+    from core.agent_setup import register_client
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    monkeypatch.setenv('APPDATA', str(tmp_path))
+    monkeypatch.setattr('core.agent_setup.sys', SimpleNamespace(platform='win32'))
+    config = tmp_path / filename
+    config.parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / '.claude').mkdir(exist_ok=True)
+    data = {'preferences': {'theme': 'dark'}, container: {'other': {'command': 'preserve'}}}
+    config.write_text(json.dumps(data))
+    with patch('core.agent_setup.find_gateway_python', return_value=tmp_path / 'python.exe'):
+        register_client(ROOT, 'a' * 32, client=target)
+        updated = json.loads(config.read_text(encoding='utf-8'))
+        assert updated['preferences'] == data['preferences']
+        assert updated[container]['other'] == data[container]['other']
+        assert updated[container]['voicer-studio']['args'][-1] == 'a' * 32
+
+
+def test_client_with_custom_environment_is_not_overwritten(tmp_path, monkeypatch):
+    from core.agent_setup import register_client
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    config = tmp_path / '.cursor/mcp.json'
+    config.parent.mkdir()
+    original = json.dumps({'mcpServers': {'voicer-studio': {
+        'command': 'python', 'args': [str(ROOT / 'scripts/mcp_server.py'), '--session', 'b' * 32],
+        'env': {'CUSTOM': 'preserve'}}}})
+    config.write_text(original)
+    with patch('core.agent_setup.find_gateway_python', return_value=tmp_path / 'python.exe'):
+        with pytest.raises(CommandError, match='MCP_CONFIG_CUSTOMIZED'):
+            register_client(ROOT, 'a' * 32, client='cursor')
+    assert config.read_text() == original
 
 
 def test_registration_finds_desktop_codex_without_path(tmp_path, monkeypatch):

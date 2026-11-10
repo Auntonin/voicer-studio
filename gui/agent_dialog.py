@@ -8,7 +8,7 @@ import sys
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
     QLabel, QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget)
+    QTableWidgetItem, QVBoxLayout, QWidget, QScrollArea)
 from core.agent_commands import CommandError, TERMINAL, SCOPES
 from core.i18n import tr
 from gui.ui_utils import apply_dark_title_bar
@@ -37,7 +37,7 @@ class AgentDialog(QDialog):
         layout.addWidget(steps)
         connect_row = QHBoxLayout()
         self.target_client = QComboBox()
-        for client in ('codex', 'claude', 'manual'):
+        for client in ('codex', 'claude', 'claude-code', 'cursor', 'vscode', 'manual'):
             self.target_client.addItem(tr('mcp_target_' + client), client)
         self.target_client.currentIndexChanged.connect(self._client_changed)
         connect_row.addWidget(self.target_client, 1)
@@ -46,7 +46,15 @@ class AgentDialog(QDialog):
         connect_row.addWidget(self.connect_button)
         self.choose_python = QPushButton(tr('mcp_choose_python'))
         self.choose_python.clicked.connect(self._choose_interpreter)
-        connect_row.addWidget(self.choose_python)
+        layout.addLayout(connect_row)
+        runtime_row = QHBoxLayout()
+        self.prepare_runtime = QPushButton(tr('mcp_prepare_runtime'))
+        self.prepare_runtime.clicked.connect(lambda: self._runtime_action('prepare'))
+        runtime_row.addWidget(self.prepare_runtime)
+        self.test_connection = QPushButton(tr('mcp_test_connection'))
+        self.test_connection.clicked.connect(lambda: self._runtime_action('check'))
+        runtime_row.addWidget(self.test_connection)
+        layout.addLayout(runtime_row)
         self.status = QLabel()
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
@@ -72,12 +80,16 @@ class AgentDialog(QDialog):
         self.advanced_toggle = advanced_toggle
         advanced_toggle.setCheckable(True)
         self.advanced_panel = QWidget()
-        advanced_toggle.toggled.connect(self.advanced_panel.setVisible)
+        self.advanced_scroll = QScrollArea()
+        self.advanced_scroll.setWidgetResizable(True)
+        self.advanced_scroll.setMaximumHeight(280)
+        self.advanced_scroll.setWidget(self.advanced_panel)
+        advanced_toggle.toggled.connect(self.advanced_scroll.setVisible)
         layout.addWidget(advanced_toggle)
-        layout.addWidget(self.advanced_panel)
+        layout.addWidget(self.advanced_scroll)
         root_layout = layout
         layout = QVBoxLayout(self.advanced_panel)
-        layout.addLayout(connect_row)
+        layout.addWidget(self.choose_python)
         self.approval_mode = QComboBox()
         for mode in ('ask', 'session', 'always'):
             self.approval_mode.addItem(tr('mcp_mode_' + mode), mode)
@@ -95,7 +107,7 @@ class AgentDialog(QDialog):
             button = QPushButton(tr(key))
             button.clicked.connect(lambda _checked=False, selected=scopes: self._set_scopes(selected))
             presets.addWidget(button)
-        layout.addLayout(presets)
+        root_layout.insertLayout(4, presets)
         self.scopes = {}
         permissions = QWidget()
         permission_layout = QVBoxLayout(permissions)
@@ -118,6 +130,7 @@ class AgentDialog(QDialog):
         self.config_format = QComboBox()
         self.config_format.addItem(tr('mcp_format_json'), 'json')
         self.config_format.addItem(tr('mcp_format_codex'), 'codex')
+        self.config_format.addItem(tr('mcp_format_vscode'), 'vscode')
         self.config_format.currentIndexChanged.connect(self._clear_config)
         format_row = QHBoxLayout()
         format_row.addWidget(self.config_format)
@@ -140,7 +153,7 @@ class AgentDialog(QDialog):
         self.connection_config.setPlaceholderText(tr('mcp_config_placeholder'))
         self.connection_config.setMaximumHeight(100)
         layout.addWidget(self.connection_config)
-        self.advanced_panel.hide()
+        self.advanced_scroll.hide()
         layout = root_layout
         self.jobs = QTableWidget(0, 5)
         self.jobs.setHorizontalHeaderLabels([tr(k) for k in ('mcp_job', 'mcp_client', 'mcp_operation', 'mcp_state', 'mcp_progress')])
@@ -215,14 +228,16 @@ class AgentDialog(QDialog):
 
     def _client_changed(self, _index):
         self._connect_requested = False
-        self.config_format.setCurrentIndex(1 if self.target_client.currentData() == 'codex' else 0)
+        format = {'codex': 'codex', 'vscode': 'vscode'}.get(self.target_client.currentData(), 'json')
+        self.config_format.setCurrentIndex(self.config_format.findData(format))
         self._clear_config()
         self.connection_status.setText(tr('mcp_connect_hint'))
 
     def _connect_selected(self):
         if self.owner._agent_bridge is None:
-            self._error('APP_NOT_READY')
-            return
+            self.enabled.setChecked(True)
+            if self.owner._agent_bridge is None:
+                return
         session = self._selected_session()
         selected = {key for key, check in self.scopes.items() if check.isChecked()}
         if not session or set(self.owner.agent_commands().describe(session)['scopes']) != selected:
@@ -280,31 +295,52 @@ class AgentDialog(QDialog):
         worker.finished.connect(self._setup_finished)
         worker.start()
 
+    def _runtime_action(self, mode):
+        from gui.agent_setup_worker import AgentSetupWorker
+        if self.owner._agent_setup_worker is not None:
+            return
+        session = self._selected_session()
+        if mode == 'check' and not session:
+            self._error('APP_NOT_READY')
+            return
+        reference = self.owner._agent_connections[session]['reference'] if session else None
+        worker = AgentSetupWorker(Path(__file__).resolve().parents[1], reference, self._interpreter,
+                                  self.owner, client=self.target_client.currentData(), mode=mode)
+        self.owner._agent_setup_worker = worker
+        worker.ready.connect(self._setup_done)
+        worker.finished.connect(self._setup_finished)
+        self.connection_status.setText(tr('mcp_runtime_installing' if mode == 'prepare' else 'mcp_connection_testing'))
+        self.refresh()
+        worker.start()
+
     def _setup_finished(self):
         worker = self.owner._agent_setup_worker
         self.owner._agent_setup_worker = None
         reference = worker.reference
         worker.deleteLater()
         session = self._selected_session()
-        if (self._connect_requested and worker.client == self.target_client.currentData() and
+        if (worker.mode == 'connect' and self._connect_requested and worker.client == self.target_client.currentData() and
                 self.owner._agent_bridge and session and self.owner._agent_connections[session]['reference'] != reference):
             self._auto_setup()  # Coalesce permission changes during setup.
         self.refresh()
 
     def _setup_done(self, interpreter, error):
         worker = self.owner._agent_setup_worker
-        if worker and worker.client != self.target_client.currentData():
+        if worker and worker.mode == 'connect' and worker.client != self.target_client.currentData():
             self.connection_status.setText(tr('mcp_connect_hint'))
             return
-        if not self.owner._agent_bridge:
+        if not self.owner._agent_bridge and worker and worker.mode != 'prepare':
             self.connection_status.setText(tr('mcp_simple_off'))
         elif error:
             reason = tr('mcp_setup_reason_' + error) if error in ('CODEX_CLI_MISSING', 'DEPENDENCY_MISSING',
-                'CLIENT_NOT_INSTALLED', 'MCP_CONFIG_CUSTOMIZED', 'MCP_NAME_CONFLICT') else tr('mcp_setup_reason_default')
+                'CLIENT_NOT_INSTALLED', 'MCP_CONFIG_CUSTOMIZED', 'MCP_NAME_CONFLICT', 'PYTHON_MISSING',
+                'RUNTIME_INSTALL_FAILED', 'CONNECTION_CHECK_FAILED', 'APP_NOT_READY') else tr('mcp_setup_reason_default')
             self.connection_status.setText(tr('mcp_client_setup_error', code=error, reason=reason))
         else:
             self._interpreter = interpreter
-            self.connection_status.setText(tr('mcp_client_ready_' + self.target_client.currentData()))
+            key = {'prepare': 'mcp_runtime_ready', 'check': 'mcp_connection_verified'}.get(worker.mode if worker else '',
+                        'mcp_client_ready_' + self.target_client.currentData())
+            self.connection_status.setText(tr(key))
 
     def _selected_session(self):
         item = self.clients.currentItem()
@@ -410,16 +446,9 @@ class AgentDialog(QDialog):
         if not connection:
             self._error('APP_NOT_READY')
             return
-        config = {'mcpServers': {'voicer-studio': {
-            'command': str(Path(interpreter).resolve()),
-            'args': [str(Path(__file__).resolve().parents[1] / 'scripts' / 'mcp_server.py'),
-                     '--session', connection['reference']]}}}
-        entry = config['mcpServers']['voicer-studio']
-        if self.config_format.currentData() == 'codex':
-            encoded = ('[mcp_servers.voicer-studio]\ncommand = ' + json.dumps(entry['command'], ensure_ascii=False)
-                       + '\nargs = ' + json.dumps(entry['args'], ensure_ascii=False) + '\n')
-        else:
-            encoded = json.dumps(config, indent=2, ensure_ascii=False)
+        from core.agent_setup import connection_config
+        encoded = connection_config(Path(__file__).resolve().parents[1], connection['reference'], interpreter,
+                                    self.config_format.currentData())
         self._copied_session = session
         self.connection_config.setPlainText(encoded)
         QApplication.clipboard().setText(encoded)
@@ -454,7 +483,11 @@ class AgentDialog(QDialog):
 
     def refresh(self):
         bridge = self.owner._agent_bridge
-        self.connect_button.setEnabled(bool(bridge and self.owner._agent_setup_worker is None))
+        idle = self.owner._agent_setup_worker is None
+        self.connect_button.setEnabled(idle)
+        self.prepare_runtime.setEnabled(idle)
+        self.choose_python.setEnabled(idle)
+        self.test_connection.setEnabled(bool(bridge and idle))
         self.grant_all.setEnabled(bool(bridge))
         connected = bridge.connected_clients() if bridge else []
         self.status.setText(tr('mcp_live_status', count=len(connected)) if bridge else tr('mcp_live_off'))

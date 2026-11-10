@@ -6,18 +6,24 @@ from core.agent_commands import CommandError
 class AgentSetupWorker(QThread):
     ready = Signal(str, str)
 
-    def __init__(self, root, reference, preferred=None, parent=None, *, client='codex'):
+    def __init__(self, root, reference, preferred=None, parent=None, *, client='codex', mode='connect'):
         super().__init__(parent)
         self.root, self.reference, self.preferred = root, reference, preferred
         self.client = client
+        self.mode = mode
 
     def run(self):
-        from core.agent_setup import register_codex, register_claude_desktop
+        from core.agent_setup import register_client, install_gateway, check_gateway
         try:
-            if self.client not in ('codex', 'claude'):
+            if self.mode == 'prepare':
+                result = str(install_gateway(self.root, self.preferred))
+            elif self.mode == 'check':
+                result = check_gateway(self.root, self.reference, self.preferred)
+            elif self.mode == 'connect':
+                result = register_client(self.root, self.reference, self.preferred, client=self.client)
+            else:
                 raise CommandError('INVALID_ARGUMENT')
-            register = register_codex if self.client == 'codex' else register_claude_desktop
-            self.ready.emit(register(self.root, self.reference, self.preferred), '')
+            self.ready.emit(result, '')
         except CommandError as exc:
             self.ready.emit('', exc.code)
         except Exception:

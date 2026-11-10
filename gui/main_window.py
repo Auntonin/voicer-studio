@@ -3229,7 +3229,7 @@ class MainWindow(QMainWindow):
 
     def _add_agent_connection(self, scopes, *, approval_mode='ask'):
         from core.agent_commands import CommandError
-        from core.agent_credentials import publish
+        from core.agent_credentials import publish, _reference, remove
         bridge = self._agent_bridge
         if bridge is None:
             raise CommandError('APP_NOT_READY')
@@ -3239,7 +3239,29 @@ class MainWindow(QMainWindow):
             raise CommandError('NO_PROJECT')
         ticket = bridge.open_session(scopes, approval_mode=approval_mode)
         try:
-            reference = publish(ticket)
+            remembered = self._settings.get('mcp_connection_reference')
+            try:
+                _reference(remembered)
+            except CommandError:
+                remembered = None
+            if any(connection['reference'] == remembered for connection in self._agent_connections.values()):
+                remembered = None
+            try:
+                reference = publish(ticket, reference=remembered) if remembered else publish(ticket)
+            except CommandError as exc:
+                if exc.code != 'REFERENCE_IN_USE':
+                    raise
+                reference = publish(ticket)
+            if not self._agent_connections and reference != self._settings.get('mcp_connection_reference'):
+                previous = self._settings.get('mcp_connection_reference')
+                self._settings['mcp_connection_reference'] = reference
+                if not self._save_settings(self._settings):
+                    if previous is None:
+                        self._settings.pop('mcp_connection_reference', None)
+                    else:
+                        self._settings['mcp_connection_reference'] = previous
+                    remove(reference)
+                    raise CommandError('SETTINGS_SAVE_FAILED')
         except CommandError:
             bridge.revoke(ticket.session_id)
             raise

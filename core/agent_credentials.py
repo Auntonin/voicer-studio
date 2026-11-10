@@ -38,9 +38,17 @@ def _reference(reference):
         raise CommandError('INVALID_ARGUMENT')
 
 
-def publish(ticket):
-    reference = uuid4().hex
+def publish(ticket, *, reference=None):
+    reference = reference or uuid4().hex
+    _reference(reference)
     backend = _backend()
+    try:
+        existing = backend.get_password(SERVICE, reference)
+    except Exception:
+        raise CommandError('PERMISSION_DENIED') from None
+    if existing is not None:
+        # Another open app instance may own this remembered public reference.
+        raise CommandError('REFERENCE_IN_USE')
     value = json.dumps({'endpoint': ticket.endpoint, 'session_id': ticket.session_id,
                         'credential': ticket.credential})
     try:

@@ -76,22 +76,22 @@ def test_simple_panel_enable_grant_all_and_close_keeps_bridge(window, vault):
     win._disable_agent_bridge()
 
 
-def test_enable_is_primary_and_first_time_configuration_is_advanced(window, vault):
+def test_first_time_connection_controls_are_visible_without_advanced(window, vault):
     win, _ = window
     win.on_agent_connection()
     dialog = win._agent_dialog
     assert not dialog.advanced_panel.isVisible()
     assert dialog.enabled.isVisible()
     assert dialog.live_clients.isVisible()
-    assert not dialog.connect_button.isVisible()
-    assert dialog.advanced_panel.isAncestorOf(dialog.connect_button)
-    assert not dialog.target_client.isVisible()
-    assert not dialog.connect_button.isEnabled()
+    assert dialog.connect_button.isVisible()
+    assert not dialog.advanced_panel.isAncestorOf(dialog.connect_button)
+    assert dialog.target_client.isVisible()
+    assert dialog.prepare_runtime.isVisible() and dialog.test_connection.isVisible()
+    assert dialog.connect_button.isEnabled()
     with patch.object(dialog, '_auto_setup') as setup:
         dialog.enabled.setChecked(True)
         assert dialog.connect_button.isEnabled()
         assert setup.call_count == 0
-        dialog.advanced_toggle.setChecked(True)
         dialog.connect_button.click()
         assert setup.call_count == 1
     win._disable_agent_bridge()
@@ -194,6 +194,61 @@ def test_vault_failure_revokes_without_fallback(window, monkeypatch):
         assert not win._agent_bridge._credentials
     finally:
         win._disable_agent_bridge()
+
+
+def test_connection_reference_survives_disable_and_reenable_without_persisting_secrets(window, vault):
+    win, _ = window
+    with patch.object(win, '_save_settings', return_value=True):
+        win._enable_agent_bridge()
+        first_session = win._add_agent_connection({'read_project'})
+        first_reference = win._agent_connections[first_session]['reference']
+        first_ticket = credentials.resolve(first_reference)
+        win._disable_agent_bridge()
+        with pytest.raises(CommandError, match='APP_NOT_READY'):
+            credentials.resolve(first_reference)
+        win._enable_agent_bridge()
+        second_session = win._add_agent_connection({'read_project', 'read_transcript'})
+        second_reference = win._agent_connections[second_session]['reference']
+        second_ticket = credentials.resolve(second_reference)
+        assert first_reference == second_reference
+        assert first_ticket['credential'] != second_ticket['credential']
+        assert second_ticket['session_id'] != first_ticket['session_id']
+        for ticket in (first_ticket, second_ticket):
+            assert ticket['credential'] not in json.dumps(win._settings)
+        win._disable_agent_bridge()
+
+
+def test_gateway_reloads_rotated_ticket_and_never_replays_a_write(vault):
+    from core.agent_client import SessionAgentClient
+    from unittest.mock import MagicMock
+    reference = 'a' * 32
+    first = BridgeSession('voicer-agent-' + '1' * 32, '1' * 32, '1' * 64)
+    second = BridgeSession('voicer-agent-' + '2' * 32, '2' * 32, '2' * 64)
+    credentials.publish(first, reference=reference)
+    with patch('core.agent_client.AgentClient') as factory:
+        clients = [MagicMock(), MagicMock()]
+        factory.side_effect = clients
+        client = SessionAgentClient(reference)
+        client.request({'method': 'submit', 'command': {'test': 'one'}})
+        credentials.remove(reference)
+        with pytest.raises(CommandError, match='APP_NOT_READY'):
+            client.request({'method': 'describe'})
+        credentials.publish(second, reference=reference)
+        client.request({'method': 'describe'})
+        assert clients[0].request.call_count == 1
+        assert clients[1].request.call_args.args[0] == {'method': 'describe'}
+        clients[0].close.assert_called_once()
+        client.close()
+
+
+def test_remembered_reference_never_overwrites_another_open_instance(vault):
+    reference = 'a' * 32
+    first = BridgeSession('voicer-agent-' + '1' * 32, '1' * 32, '1' * 64)
+    second = BridgeSession('voicer-agent-' + '2' * 32, '2' * 32, '2' * 64)
+    credentials.publish(first, reference=reference)
+    with pytest.raises(CommandError, match='REFERENCE_IN_USE'):
+        credentials.publish(second, reference=reference)
+    assert credentials.resolve(reference)['session_id'] == first.session_id
 
 
 def test_public_config_contains_no_credential(window, vault, tmp_path):

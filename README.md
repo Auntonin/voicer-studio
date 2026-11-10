@@ -213,35 +213,43 @@ values or memory dumps are collected. Disk/permission failures are reported rath
 than preventing the application from starting. Logging is diagnostic evidence,
 not proof that every possible bug or external process failure was captured.
 
-## Optional MCP connection (experimental; not release-qualified)
+## Optional local MCP connection
 
-`scripts/mcp_server.py` uses the official Python MCP SDK over stdio. The regular
-application needs no MCP dependency and opens no listener by default. Install
-`requirements-mcp.txt` plus the application's existing PySide6 dependency in a
-**separate virtual environment**, not the AI environment. Nothing installs or
-downloads automatically. Use the absolute interpreter and script paths in
-`scripts/mcp_client.example.json`; edit them for your installation. Arguments
-are an array, including paths with spaces or Thai characters. No shell or batch
-launcher is used, and the gateway does not start another GUI instance.
+Open **Edit → AI / MCP Connection**. Click **Prepare MCP runtime** once to install
+`requirements-mcp.txt` into the separate `.venv-mcp` environment, without changing
+the AI environment or downloading models. Installation requires internet; normal
+MCP processing is local. A working Python 3.10–3.13 is required; select it under
+Advanced if the application's interpreter is unavailable.
 
-Open **Edit → AI / MCP Connection**, then explicitly enable the local bridge.
-It is off on every launch, even with an older saved `mcp_enabled: true` setting.
-Enabling starts the local bridge and creates a metadata-only connection without
-a Start/Copy step. The main panel shows persistent connected AI names and count.
-First-time client configuration is under Advanced: choose Codex or Claude Desktop,
-select permissions, then click Connect selected app. Enabling alone does not edit
-other apps' configuration. Explicitly requested configuration runs in the background.
-Codex uses the installed `codex mcp add` CLI, with Windows desktop-bundled CLI
-discovery when PATH is missing. Claude Desktop merges its local JSON configuration
-and preserves a pre-integration backup and unrelated entries. It chooses a validated
-Python gateway interpreter, not `VoicerStudio.exe`; missing dependencies/CLI or a
-customized existing entry produce an actionable error without automatic installs.
-Only the `voicer-studio` entry is managed; client approval/sandbox policies are not
-changed. Reconnect or start a new Codex chat after configuration is ready; fully
-quit and reopen Claude Desktop yourself. Configured does not mean connected:
-the live client count confirms a gateway connection; names are peer-reported, not
-authenticated product identities. Other clients use an explicitly
-labeled manual configuration option, not a claim of universal automatic setup.
+Enable MCP, choose a read-only or caption-editing permission preset, select
+**Codex, Claude Desktop, Claude Code, Cursor or VS Code**, then click **Connect**.
+These controls are visible on the main panel. Setup preserves other servers,
+preferences and custom policies; JSON configuration keeps its first backup.
+Reconnect/restart the chosen AI app after setup. Configuration ready is distinct
+from connected: the live client list confirms gateway connections, and names are
+peer-reported labels rather than authenticated product identities.
+
+**Test connection** performs a real stdio initialize, tools/list and app-status
+round trip. It does not read project contents or certify the selected AI app.
+Advanced also provides Codex TOML, `mcpServers` JSON and VS Code `servers` JSON
+for other local stdio clients. VS Code JSONC, nondefault profiles and remote
+workspaces require manual configuration. See [Thai setup guide](MCP_GUIDE_TH.md).
+
+The bridge remains off on every app launch, and project permissions must be
+explicitly granted. The default public reference is remembered, while real
+credentials rotate in the OS store and are removed on revoke. A running gateway
+can re-resolve the same reference after disable/re-enable without replaying a
+write. Another active app instance keeps its own reference. Recovery after a
+crash or multiple-instance setup may require updating the client configuration.
+No credentials are saved in settings, client configs or command-line arguments.
+
+Codex registration uses its installed CLI. Other supported clients merge only
+this app's stdio entry. Client approval/sandbox settings are never changed.
+This is a local stdio integration, not a remote MCP endpoint for web clients.
+External AI providers may send permitted transcript data to their cloud.
+Native AI-product end-to-end compatibility and full release qualification remain
+separate from protocol/runtime tests.
+
 Choose Always automatic if desired, then explicitly click Allow all supported
 project functions, or expand advanced permissions to grant fewer scopes. The
 all-functions button includes transcripts and speaker names: those may reach the

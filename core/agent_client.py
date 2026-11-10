@@ -9,7 +9,7 @@ import json
 import os
 import re
 import time
-from threading import Lock
+from threading import Lock, RLock
 from uuid import uuid4
 
 from core.agent_commands import MAX_MESSAGE_BYTES, CommandError, bounded_object
@@ -93,6 +93,8 @@ class AgentClient:
 
     def set_presence(self, name, version, protocol):
         with self._presence_lock:
+            if self._presence is not None and not self._presence.isRunning():
+                self._presence = None
             if self._presence is None:
                 from core.agent_presence import AgentPresence
                 self._presence = AgentPresence(self, name, version, protocol)
@@ -103,3 +105,44 @@ class AgentClient:
             if self._presence is not None:
                 self._presence.stop()
                 self._presence = None
+
+
+class SessionAgentClient:
+    """Resolve a public reference afresh; reconnect without replaying any write."""
+
+    def __init__(self, reference):
+        from core.agent_credentials import _reference
+        _reference(reference)
+        self.reference = reference
+        self._active = None
+        self._ticket = None
+        self._lock = RLock()
+
+    def _client(self):
+        from core.agent_credentials import resolve
+        with self._lock:
+            ticket = resolve(self.reference)
+            if ticket != self._ticket:
+                if self._active is not None:
+                    self._active.close()
+                self._active = AgentClient(ticket['endpoint'], ticket['credential'])
+                self._ticket = ticket
+            return self._active
+
+    def request(self, request):
+        return self._client().request(request)
+
+    def set_presence(self, name, version, protocol):
+        try:
+            self._client().set_presence(name, version, protocol)
+        except CommandError:
+            # The gateway can initialize while the app is off. Ordinary tool
+            # calls report the actionable connection error, without exiting.
+            pass
+
+    def close(self):
+        with self._lock:
+            if self._active is not None:
+                self._active.close()
+                self._active = None
+                self._ticket = None

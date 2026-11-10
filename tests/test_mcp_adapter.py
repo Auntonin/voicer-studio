@@ -26,12 +26,20 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'scripts' / 'mcp_server.py'
 
 
-def exercise(app, async_test, approvals=None, commands=None):
+def exercise(app, async_test, approvals=None, commands=None, actions=None):
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(asyncio.run, async_test())
         deadline = time.monotonic() + 25
         while not future.done() and time.monotonic() < deadline:
             app.processEvents()
+            if actions is not None:
+                try:
+                    action, ready = actions.get_nowait()
+                except queue.Empty:
+                    pass
+                else:
+                    action()
+                    ready.set()
             if approvals is not None:
                 try:
                     job, ready = approvals.get_nowait()
@@ -468,6 +476,76 @@ def test_native_windows_keyring_public_reference_stdio(window):
         win._disable_agent_bridge()
     with pytest.raises(CommandError, match='APP_NOT_READY'):
         resolve(reference)
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Native credential services required')
+def test_native_gateway_survives_disable_reenable_and_reports_real_health(window):
+    from threading import Event
+    from core.agent_setup import check_gateway
+    win, app = window
+    actions = queue.Queue()
+    win._enable_agent_bridge()
+    sid = win._add_agent_connection({'read_project'})
+    reference = win._agent_connections[sid]['reference']
+
+    async def owner_action(action):
+        ready = Event()
+        actions.put((action, ready))
+        while not ready.is_set():
+            await asyncio.sleep(.005)
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable, args=[str(ENTRY), '--session', reference])
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=8) as session:
+                await session.initialize()
+                assert not (await session.call_tool('get_project_summary', {})).is_error
+                await owner_action(win._disable_agent_bridge)
+                offline = await session.call_tool('get_app_status', {})
+                assert offline.is_error and offline.structured_content['code'] == 'APP_NOT_READY'
+                def enable():
+                    win._enable_agent_bridge()
+                    new_sid = win._add_agent_connection({'read_project', 'read_transcript', 'edit_caption'}, approval_mode='session')
+                    assert win._agent_connections[new_sid]['reference'] == reference
+                await owner_action(enable)
+                current = await session.call_tool('list_dialogues', {'limit': 1})
+                assert not current.is_error
+                assert current.structured_content['dialogues'][0]['caption'] == 'original caption'
+                page = current.structured_content
+                proposal = await session.call_tool('propose_dialogue_edits', {
+                    'operation': 'caption', 'project_epoch': page['project_epoch'],
+                    'expected_revision': page['revision'], 'clip_ref': page['dialogues'][0]['clip_ref'],
+                    'caption': 'แก้ไขผ่าน MCP จริง', 'idempotency_key': 'native-reconnected-caption'})
+                assert not proposal.is_error
+                deadline = time.monotonic() + 5
+                while True:
+                    job = await session.call_tool('get_job_status', {'job_id': proposal.structured_content['job_id']})
+                    if job.structured_content['state'] == 'succeeded':
+                        break
+                    assert time.monotonic() < deadline
+                    await asyncio.sleep(.01)
+                await owner_action(win.on_undo)
+                assert win._state.dialogues[0].caption == 'original caption'
+        checked = await asyncio.to_thread(check_gateway, ROOT, reference, Path(sys.executable))
+        assert checked == str(Path(sys.executable).resolve())
+    try:
+        exercise(app, run, actions=actions)
+    finally:
+        win._disable_agent_bridge()
+
+
+def test_gateway_can_initialize_before_the_app_is_enabled(window):
+    win, app = window
+    async def run():
+        params = StdioServerParameters(command=sys.executable, args=[str(ENTRY), '--session', 'f' * 32])
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=8) as session:
+                await session.initialize()
+                assert [tool.name for tool in (await session.list_tools()).tools] == ['get_app_status']
+                result = await session.call_tool('get_app_status', {})
+                assert result.is_error
+                assert result.structured_content['code'] in ('APP_NOT_READY', 'PERMISSION_DENIED')
+    exercise(app, run)
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Current binary package is win64, not a native macOS/Linux installer')

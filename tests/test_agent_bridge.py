@@ -3,7 +3,7 @@ import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pytest
@@ -22,6 +22,8 @@ def window():
     with patch.object(MainWindow, '_load_settings', return_value={'check_updates_startup': False}), \
             patch('core.device_manager.device_manager.prewarm_async'):
         window = MainWindow()
+    # Fixture sessions must never overwrite the user's real settings.json.
+    window._save_settings = MagicMock(return_value=True)
     window._state = PipelineState(video_duration=10,
         speakers={'one': SpeakerInfo('one', 'private speaker'), 'two': SpeakerInfo('two', 'second')},
         dialogues=[DialogueItem(1, 'one', 1, 3, 'original caption')])

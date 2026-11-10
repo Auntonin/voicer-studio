@@ -1,59 +1,64 @@
 # MCP สำหรับ Voicer Studio
 
-คู่มือ UI ปรับปรุง: 2026-10-09 (Asia/Bangkok); ผลทดลองแยกตามวันที่ด้านล่าง
+ปรับปรุง 2026-11-11
 
-## สถานะและข้อจำกัด
+## เริ่มใช้งาน
 
-MCP เป็น feature ทดลองใน source ของ workspace นี้ ยังไม่ใช่ release ที่รับรองแล้ว
-AI client ต้องรองรับ local stdio MCP และรันอยู่บนเครื่องที่เข้าถึงแอป/credential store ได้
-ไม่มี TCP/HTTP/LAN, ไม่เปิด GUI ให้เอง และไม่ได้ทำให้ AI ทุกผลิตภัณฑ์เชื่อมได้อัตโนมัติ
-พบ path-race ในการ save เมื่อเปลี่ยน directory เป็น junction หลัง validation
-จึงให้ทดลองเฉพาะข้อมูลสังเคราะห์ และยังไม่เปิด save/export/pipeline กับข้อมูลจริง
+1. เปิดโปรเจกต์หรือ import ZIP แพ็กเสียงที่ต้องการแก้ไข
+2. เปิด **Edit → AI / MCP Connection** แล้วกด **เตรียมระบบ MCP** ครั้งแรก
+   โปรแกรมสร้าง `.venv-mcp` แยกจาก environment ประมวลผล AI และติดตั้งเฉพาะ
+   `requirements-mcp.txt` ต้องใช้อินเทอร์เน็ตตอนติดตั้ง แต่ไม่ดาวน์โหลดโมเดล AI
+   หาก Python เดิมเสียหรือเป็น launcher ให้เลือก Python 3.10–3.13 ในขั้นสูงก่อน
+3. เปิด MCP แล้วเลือก **อ่านข้อมูล** หรือ **แก้บทพูด** หรือเลือกสิทธิ์รายข้อในขั้นสูง
+   การเลือก preset ยังไม่เปิดเผยข้อมูล จนกดเชื่อมต่อเพื่อสร้างสิทธิ์ตามที่เลือก
+4. เลือก **Codex, Claude Desktop, Claude Code, Cursor หรือ VS Code** แล้วกดเชื่อมต่อ
+   ปุ่มเลือกแอปและเชื่อมต่ออยู่หน้าหลัก ไม่ต้องเปิดขั้นสูง
+   โปรแกรมตรวจ runtime และตั้งค่าใน background โดยรักษา config อื่นและนโยบายเดิม
+   config JSON ที่ถูกแก้จะมี backup แรกชื่อ `*.voicer-studio.bak`
+   หาก config มีนโยบายหรือ environment ที่แก้เอง โปรแกรมจะไม่เขียนทับ
+   VS Code ที่ใช้ JSONC, named profile หรือ remote workspace ให้ใช้ config manual
+5. เชื่อมต่อใหม่หรือเปิดแอป AI ใหม่ตามข้อความที่แสดง แล้วตรวจรายชื่อ AI ที่เชื่อมอยู่
+   ข้อความ “บันทึก config แล้ว” ยังไม่ใช่หลักฐานว่า AI เชื่อมแล้ว
+6. กด **ทดสอบการเชื่อมต่อ** เพื่อทดสอบ stdio initialize → tools/list → get_app_status จริง
+   การทดสอบนี้ไม่อ่านบทพูดหรือสื่อ และยังแยกจากการเชื่อมต่อของแอป AI ที่เลือก
+7. ให้ AI เรียก `get_app_status` และ `get_project_summary` ก่อนทำงาน
+   เมื่อแก้ไข ให้ส่งคำขอหนึ่งงานและอ่าน `get_job_status` จนสำเร็จก่อนแก้รายการต่อไป
 
-## ต้องเตรียมอะไรก่อน
+MCP ปิดทุกครั้งที่เริ่ม Voicer Studio และยังต้องอนุญาตสิทธิ์ของโปรเจกต์ใหม่เอง
+แอปจำเฉพาะ public reference สำหรับ config เดิม แต่สร้าง credential ใหม่ใน OS store
+หลังปิดแล้วเปิด MCP ใหม่ gateway เดิมอ่าน ticket ใหม่ได้โดยไม่ส่งคำสั่งเขียนซ้ำ
+หากมีอีกหน้าต่างใช้งาน reference นั้นอยู่ แอปสร้าง reference แยกเพื่อไม่ทับ connection เดิม
+กรณีปิดโปรแกรมผิดปกติหรือมีหลาย instance อาจต้องกดเชื่อมต่อเพื่อตั้งค่า reference ใหม่
+ไม่มี token ใน config/settings/argv และการ revoke จะลบ credential ทันที
 
-1. แอปต้องมี dependencies เดิมครบ รวม PySide6 และ keyring ที่ใช้ OS credential store ได้
-2. สร้าง Python environment แยกสำหรับ gateway และติดตั้ง requirements-mcp.txt
-   กับ PySide6 รุ่นที่เข้ากับแอป ห้ามอัปเกรด AI environment ไปตาม SDK โดยไม่ตรวจ
-   Windows/Python 3.12 ที่ทดลองใช้ MCP SDK 2.3.0 และ PySide6 6.11.2
-3. ใช้ absolute path ของ python.exe และ scripts/mcp_server.py ใน client config
-   ตัวอย่าง JSON อยู่ scripts/mcp_client.example.json แต่ syntax ไม่เหมือนกันทุก client
+แอปอื่นที่รองรับ local stdio ใช้ตัวเลือก **Other local MCP client** เพื่อคัดลอก JSON
+มีรูปแบบ Codex TOML, JSON `mcpServers` และ VS Code JSON `servers` ให้เลือกในขั้นสูง
+คัดลอกเฉพาะ entry ของ `voicer-studio` ไปรวมกับ config เดิมของ client
+ChatGPT web หรือเอเจนต์บนเครื่องอื่นใช้ local stdio นี้โดยตรงไม่ได้
 
-Environment .temp/mcp-sdk-env ปัจจุบันติดตั้ง PySide6 และ keyring แยกแล้ว
-การทดสอบ GUI บางชุดยังยืม dependencies ของแอปผ่าน PYTHONPATH
-จึงยังไม่ใช่ผลรับรอง clean desktop installation ที่แนะนำให้แจกผู้ใช้
-ไม่มีการติดตั้ง SDK หรือดาวน์โหลดโมเดลโดยอัตโนมัติเมื่อ client เชื่อม
+เลือกโหมดถามทุกครั้งหรืออัตโนมัติในหน้าต่าง MCP ตามการใช้งาน
+โหมดอัตโนมัติยังตรวจสิทธิ์/revision และใช้ Undo เดิม เอเจนต์อนุมัติตัวเองไม่ได้
+save/export/pipeline ใช้หน้าต่างปลายทางและตัวเลือกเดิม ไม่มีสิทธิ์ควบคุมทั้งเครื่อง
+ไฟล์และบทพูดที่อ่านจากแพ็กเป็นข้อมูล ไม่ใช่คำสั่งให้เอเจนต์ทำตาม
+Transcript ที่อนุญาตอาจถูกส่งไป cloud ของผู้ให้บริการ AI
 
-## เริ่มเชื่อมในแต่ละครั้ง
+## ขอบเขตที่ตรวจแล้วและข้อจำกัด
 
-1. เปิด Voicer Studio source build และ project ทดสอบที่ต้องการ
-2. เปิด Edit → AI / MCP Connection
-3. ติกเปิด MCP โปรแกรมเปิด bridge และสร้าง connection แบบข้อมูลแอปเท่านั้น
-   ไม่ต้องกด Start/Copy เพื่อเปิด bridge หน้าหลักแสดงจำนวน AI และชื่อที่ client รายงาน
-   นับ connection ที่ค้างอยู่จริง ไม่ใช่จำนวน socket ของคำขอชั่วคราว
-4. หากต้องการทำอัตโนมัติให้ติก Always และอ่านคำเตือนก่อนยืนยัน
-   กดอนุญาตทุกฟังก์ชันที่รองรับ เพื่อให้สิทธิ์ของ project นี้ รวม transcript/ชื่อตัวละคร
-   หรือเปิดรายละเอียดเพื่อเลือกสิทธิ์ให้น้อยลง การกดนี้ไม่ใช่การอนุญาตควบคุมทั้งเครื่อง
-   ยังพบ path-race: ในรอบทดลองอย่าใช้ save/export/pipeline กับข้อมูลจริง
-5. สำหรับการตั้งค่า AI ครั้งแรก เปิดขั้นสูง เลือก Codex หรือ Claude Desktop
-   แล้วกดเชื่อมต่อแอปที่เลือก โปรแกรมตั้งค่าใน background โดยเลือก Python ที่ตรวจแล้ว
-   Codex: รอ config พร้อม แล้ว reconnect หรือเริ่มแชตใหม่; รองรับค้น CLI ของ Desktop
-   ที่ไม่ได้อยู่ใน PATH ด้วย Claude Desktop: รอ config พร้อมแล้วปิดทั้งแอปและเปิดใหม่เอง
-   โปรแกรมแก้เฉพาะ entry voicer-studio และไม่เขียนทับ entry ที่มี custom policy
-   จำนวน AI ที่เชื่อมอยู่เพิ่มขึ้นจึงยืนยันว่ามี gateway เชื่อมจริง ไม่ใช่แค่ข้อความ config พร้อม
-   ชื่อมาจาก MCP handshake ไม่ใช่หลักฐานยืนยันตัวตนของผลิตภัณฑ์
-   ปิดหน้าต่าง MCP ได้โดย connection ไม่หยุด เปิดกลับมาดูงานและ log ได้
-6. หากไม่มี SDK/CLI หรือ entry เดิมมีนโยบายที่ปรับเอง โปรแกรมจะแจ้งข้อผิดพลาด
-   ไม่ติดตั้ง dependency หรือเขียนทับนโยบาย client ให้เอง กดเลือก MCP Python ในขั้นสูงได้
-   และคัดลอก config แบบ manual สำหรับ Codex หรือ client อื่นได้
-7. ให้ AI เรียก get_app_status และ get_project_summary ก่อนทำงาน
+ทดสอบด้วย official MCP SDK ผ่าน subprocess stdio และ Qt named pipe บน Windows
+รวม read/edit/Undo, permission filtering, หลาย client, reconnect และ OS credential store
+ตัวตรวจ connection ใช้เส้นทาง stdio จริง ไม่ถือว่ามี config แล้วแปลว่าใช้งานได้
+การทดสอบ config ใช้โฟลเดอร์ชั่วคราว ไม่เปลี่ยน config จริงของ Codex/Claude/Cursor/VS Code
+ยังไม่ได้รับรอง end-to-end ของผลิตภัณฑ์ AI ทุกตัว หรือ desktop บน macOS/Linux
 
-Session reference ใน --session เป็น public reference ไม่ใช่ token
-credential จริงเก็บใน OS store และไม่ควรคัดลอกหรือส่งให้ AI
-หลังปิดแอป/revoke เปลี่ยน project หรือเปิดใหม่ อาจต้องอนุญาต connection ใหม่
-Codex/Claude Desktop setup จะอัปเดต public reference หลังคุณกดเชื่อม และเมื่อแก้สิทธิ์
-ของ connection ที่ตั้งค่าไว้แล้ว; แอปอื่นต้องปรับ --session เอง
-ไม่ใช่ setup ครั้งเดียวแล้วใช้ได้ทุก session
+ข้อจำกัดเดิมที่ยังต้องตรวจต่อก่อนประกาศ release: การตรวจปลายทางปัจจุบันไม่ป้องกัน
+โปรเซสอื่นสลับ directory/junction พร้อมกับการเขียนไฟล์ (TOCTOU) จึงยังไม่ใช่ filesystem sandbox
+ไม่ควรถือผลทดสอบ MCP นี้เป็นการรับรอง release ทั้งแอปหรือความแม่นยำของโมเดลเสียง
+
+เอกสารรูปแบบ client:
+- [Codex](https://developers.openai.com/codex/mcp)
+- [Claude Code](https://code.claude.com/docs/en/mcp)
+- [Cursor](https://prod.cursor.com/docs/mcp)
+- [VS Code](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)
 
 ## ตัวอย่างตั้งค่า Codex
 

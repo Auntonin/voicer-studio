@@ -1,5 +1,6 @@
 # Optional gateway environment only. Do not install into the AI environment.
 # Tested locally: Windows / Python 3.12; 3.10/3.11 are not yet verified.
-# QLocalSocket client uses the application's existing PySide6 dependency.
+# Complete standalone gateway runtime: no GUI widgets, AI engines or models.
+PySide6-Essentials>=6.7.0,<7
 mcp==2.3.0
 keyring>=25.0.0
