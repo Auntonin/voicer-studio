@@ -41,6 +41,10 @@ class AgentDialog(QDialog):
             self.target_client.addItem(tr('mcp_target_' + client), client)
         self.target_client.currentIndexChanged.connect(self._client_changed)
         connect_row.addWidget(self.target_client, 1)
+        self.access_mode = QComboBox()
+        for mode in ('full', 'read', 'custom'):
+            self.access_mode.addItem(tr('mcp_access_' + mode), mode)
+        connect_row.addWidget(self.access_mode)
         self.connect_button = QPushButton(tr('mcp_connect_app'))
         self.connect_button.clicked.connect(self._connect_selected)
         connect_row.addWidget(self.connect_button)
@@ -89,6 +93,10 @@ class AgentDialog(QDialog):
         layout.addWidget(self.advanced_scroll)
         root_layout = layout
         layout = QVBoxLayout(self.advanced_panel)
+        for control in (warning, self.always, self.grant_all):
+            layout.addWidget(control)
+        root_layout.removeItem(runtime_row)
+        layout.addLayout(runtime_row)
         layout.addWidget(self.choose_python)
         self.approval_mode = QComboBox()
         for mode in ('ask', 'session', 'always'):
@@ -107,7 +115,7 @@ class AgentDialog(QDialog):
             button = QPushButton(tr(key))
             button.clicked.connect(lambda _checked=False, selected=scopes: self._set_scopes(selected))
             presets.addWidget(button)
-        root_layout.insertLayout(4, presets)
+        layout.addLayout(presets)
         self.scopes = {}
         permissions = QWidget()
         permission_layout = QVBoxLayout(permissions)
@@ -117,7 +125,7 @@ class AgentDialog(QDialog):
         advanced.toggled.connect(permissions.setVisible)
         layout.addWidget(advanced)
         for scope in ('read_project', 'read_transcript', 'read_speaker_names', 'edit_caption',
-                      'edit_speaker', 'save_project', 'export', 'pipeline', 'analyze_speakers', 'edit_clips', 'manage_speakers'):
+                      'edit_speaker', 'save_project', 'export', 'pipeline', 'analyze_speakers', 'edit_clips', 'manage_speakers', 'import_project'):
             check = QCheckBox(tr('mcp_scope_' + scope))
             self.scopes[scope] = check
             permission_layout.addWidget(check)
@@ -173,7 +181,7 @@ class AgentDialog(QDialog):
         self.cancel = QPushButton(tr('mcp_cancel'))
         self.cancel.clicked.connect(self._cancel)
         actions.addWidget(self.approve)
-        actions.addWidget(self.approve_all)
+        self.advanced_panel.layout().addWidget(self.approve_all)
         actions.addWidget(self.cancel)
         layout.addLayout(actions)
         # Single-shot coalescing only after state events; never a polling timer.
@@ -234,6 +242,12 @@ class AgentDialog(QDialog):
         self.connection_status.setText(tr('mcp_connect_hint'))
 
     def _connect_selected(self):
+        if self.access_mode.currentData() == 'full':
+            for check in self.scopes.values():
+                check.setChecked(True)
+        elif self.access_mode.currentData() == 'read':
+            for key, check in self.scopes.items():
+                check.setChecked(key in {'read_project', 'read_transcript', 'read_speaker_names'})
         if self.owner._agent_bridge is None:
             self.enabled.setChecked(True)
             if self.owner._agent_bridge is None:
@@ -261,9 +275,6 @@ class AgentDialog(QDialog):
         self.always.blockSignals(False)
 
     def _grant_all_scopes(self):
-        if not (self.owner._state.video_path or self.owner._state.dialogues):
-            self._error('NO_PROJECT')
-            return
         self._set_scopes(SCOPES)
         session = self._selected_session()
         if session:
@@ -347,6 +358,7 @@ class AgentDialog(QDialog):
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def _set_scopes(self, selected):
+        self.access_mode.setCurrentIndex(self.access_mode.findData('custom'))
         for key, check in self.scopes.items():
             check.setChecked(key in selected)
 
@@ -517,6 +529,10 @@ class AgentDialog(QDialog):
         job_id = self._selected_job()
         commands = self.owner._agent_commands
         jobs = list(commands._jobs.items()) if commands else []
+        self.jobs.setVisible(bool(jobs))
+        self.details.setVisible(bool(jobs))
+        self.approve.setVisible(bool(jobs))
+        self.cancel.setVisible(bool(jobs))
         self.approve_all.setEnabled(bool(bridge and any(job.state == 'awaiting_approval' for _, job in jobs)))
         self.jobs.blockSignals(True)
         self.jobs.setRowCount(len(jobs))

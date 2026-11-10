@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog,
     QToolTip
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEvent, Signal, QThread
+from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEvent, Signal, QThread, QStandardPaths
 from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette, QKeySequence, QShortcut
 
 from config import (
@@ -187,7 +187,17 @@ class MainWindow(QMainWindow):
         self._agent_pending_job = job_id
         try:
             from core.agent_commands import EXTENDED_FIELDS
-            if operation in ('analyze_voice', 'enroll_voice'):
+            if operation == 'import_project':
+                epoch = self._agent_epoch
+                self.on_import_video()
+                worker = getattr(self, '_pack_import_worker', None)
+                if worker is not None:
+                    commands.bind(job_id, lambda: None)
+                    self._pack_import_agent_job = job_id
+                    worker.finished.connect(lambda: self._finish_agent_import(job_id, epoch))
+                else:
+                    self._finish_agent_import(job_id, epoch)
+            elif operation in ('analyze_voice', 'enroll_voice'):
                 self._start_agent_voice_analysis(job_id)
             elif operation in EXTENDED_FIELDS:
                 self._apply_agent_operation(job_id, operation)
@@ -212,6 +222,17 @@ class MainWindow(QMainWindow):
                     commands.finish(job_id, 'cancelled')
         finally:
             self._agent_pending_job = None
+
+    def _finish_agent_import(self, job_id, previous_epoch):
+        commands = self.agent_commands()
+        job = commands._jobs[job_id]
+        self._pack_import_agent_job = None
+        if self._agent_epoch == previous_epoch or job.state == 'cancelling':
+            commands.finish(job_id, 'cancelled')
+            return
+        if job.owner in commands._sessions:
+            commands._session_epochs[job.owner] = self._agent_epoch
+        commands.finish(job_id, 'succeeded')
 
     def _start_agent_voice_analysis(self, job_id):
         from copy import deepcopy
@@ -594,17 +615,24 @@ class MainWindow(QMainWindow):
             first_name = Path(local_file).name
             self._show_toast(tr("msg_multi_file_title"), tr("msg_multi_file_desc", name=first_name), "info")
 
-        path = Path(local_file)
-        if path.suffix.lower() == ".zip":
-            if self._check_unsaved_changes():
-                self.load_pack_zip(path)
+        self.on_open_file(Path(local_file))
+
+    def on_open_file(self, path: Path):
+        """Route every user import surface through the same file-type dispatch."""
+        path = Path(path)
+        if self._is_busy():
+            self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
             return
-        if path.is_dir():
-            if (path / "_pack_info.ini").exists() or any(path.glob("*.txt")):
+        if path.is_dir() or path.suffix.lower() in {".zip", ".voicer", ".json"}:
+            if not self._check_unsaved_changes():
+                return
+            if path.is_dir():
                 self.load_pack_folder(path)
-        elif path.suffix.lower() in {".voicer", ".json"}:
-            self.load_project_file(path)
-        elif path.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
+            elif path.suffix.lower() == '.zip':
+                self.load_pack_zip(path)
+            else:
+                self.load_project_file(path)
+        else:
             self.on_import_video_file(path)
 
     # ── Menu Bar & Toolbar ───────────────────────────────────────────────────
@@ -955,7 +983,7 @@ class MainWindow(QMainWindow):
         # Video Panel
         self._video_panel = VideoPanel()
         self._video_panel.set_main_window(self)
-        self._video_panel.video_dropped.connect(self.load_video)
+        self._video_panel.video_dropped.connect(self.on_open_file)
         self._video_panel.browse_requested.connect(self.on_import_video)
         self._video_panel.seek_requested.connect(self._on_video_seek)
         self._video_panel.position_changed.connect(self._on_video_position_changed)
@@ -2403,8 +2431,9 @@ class MainWindow(QMainWindow):
         self._log_message("New project initialized", "info")
 
     def on_open_project(self):
-        """Open a .voicer project file."""
-        if not self._check_unsaved_changes():
+        """Open a saved project or an exported voice-pack ZIP."""
+        if self._is_busy():
+            self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
             return
 
         path_str, _ = QFileDialog.getOpenFileName(
@@ -2414,33 +2443,49 @@ class MainWindow(QMainWindow):
             tr("dlg_filter_project"),
         )
         if path_str:
-            path = Path(path_str)
-            if path.suffix.lower() == ".zip":
-                self.load_pack_zip(path)
-            else:
-                self.load_project_file(path)
+            self.on_open_file(Path(path_str))
 
     def load_pack_zip(self, path: Path):
         if self._is_busy():
             self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
             return
-        destination = QFileDialog.getExistingDirectory(self, tr("dlg_pack_workspace"), "")
-        if not destination:
-            return
-        worker = PackImportWorker(path, Path(destination), self)
+        documents = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+        destination = (Path(documents) if documents else Path.home() / 'Documents') / APP_NAME / 'Imported Packs'
+        worker = PackImportWorker(path, destination, self)
         self._pack_import_worker = worker
         self._pack_import_progress = QProgressDialog(tr("msg_pack_importing"), "", 0, 0, self)
         self._pack_import_progress.setCancelButton(None)
         self._pack_import_progress.setWindowModality(Qt.WindowModality.WindowModal)
         self._pack_import_progress.setMinimumDuration(0)
         self._pack_import_progress.show()
-        worker.finished.connect(self._pack_import_progress.close)
-        worker.ready.connect(lambda state, folder: self.load_pack_folder(folder, state))
-        worker.failed.connect(lambda error: QMessageBox.critical(
-            self, tr("msg_import_pack_error_title"), tr("msg_import_pack_error", error=error)))
-        worker.finished.connect(lambda: self.statusBar().clearMessage())
+        worker.ready.connect(lambda state, folder: self._pack_import_ready(state, folder, path))
+        worker.failed.connect(self._pack_import_failed)
+        worker.finished.connect(self._pack_import_finished)
         self.statusBar().showMessage(tr("msg_pack_importing"))
         worker.start()
+
+    def _pack_import_ready(self, state, folder, source):
+        self._pack_import_progress.close()
+        job_id = getattr(self, '_pack_import_agent_job', None)
+        if job_id and self.agent_commands()._jobs[job_id].state == 'cancelling':
+            return
+        self.load_pack_folder(folder, state, source_path=source)
+
+    def _pack_import_failed(self, error):
+        self._pack_import_progress.close()
+        job_id = getattr(self, '_pack_import_agent_job', None)
+        if job_id:
+            self.agent_commands().finish(job_id, 'failed', 'IMPORT_FAILED')
+        QMessageBox.critical(self, tr("msg_import_pack_error_title"), tr("msg_import_pack_error", error=error))
+
+    def _pack_import_finished(self):
+        self._pack_import_worker.deleteLater()
+        self._pack_import_worker = None
+        self._pack_import_progress.close()
+        self._pack_import_progress.deleteLater()
+        self._pack_import_progress = None
+        self.statusBar().clearMessage()
+        self._refresh_all_views()
 
     def on_open_pack_folder(self):
         """Import an existing exported pack folder (with _pack_info.ini and cue cards)."""
@@ -2536,16 +2581,19 @@ class MainWindow(QMainWindow):
         self._log_message(f"Opened project: {path.name} ({len(state.dialogues)} dialogues)", "ok")
         self._show_toast(tr("msg_project_loaded_title"), tr("msg_project_loaded_desc", count=len(state.dialogues), name=path.name), "ok")
 
-    def load_pack_folder(self, pack_dir: Path, state=None):
+    def load_pack_folder(self, pack_dir: Path, state=None, *, source_path=None):
         """Reconstruct project from an exported pack directory."""
         try:
             state = state or ProjectManager.load_from_pack_folder(pack_dir)
             self._state = state
             self._undo_manager = UndoManager()
             self._output_dir = pack_dir
-            self._current_project_path = pack_dir / f"{pack_dir.name}.voicer"
-            self._is_dirty = False
-            self._last_saved_time = datetime.now().strftime("%H:%M:%S")
+            self._current_project_path = None
+            self._is_dirty = True
+            self._last_saved_time = None
+
+            self._video_panel.reset()
+            self._clip_editor.clear()
 
             if state.video_path and state.video_path.exists():
                 self._video_panel.load_video(state.video_path)
@@ -2559,7 +2607,7 @@ class MainWindow(QMainWindow):
             self._refresh_all_views()
             self._update_window_title()
             self._update_save_status()
-            self._add_recent_project(str(self._current_project_path.resolve()))
+            self._add_recent_project(str(Path(source_path or pack_dir).resolve()))
             self._log_message(f"Imported pack folder: {pack_dir.name} ({len(state.dialogues)} dialogues)", "ok")
             self._show_toast(tr("msg_pack_imported_title"), tr("msg_pack_imported_desc", count=len(state.dialogues)), "ok")
         except Exception as e:
@@ -2651,7 +2699,7 @@ class MainWindow(QMainWindow):
             p = Path(p_str)
             if p.exists():
                 act = self._menu_recent_projects.addAction(f"{p.name}  ({p.parent})")
-                act.triggered.connect(lambda _, path=p: self.load_project_file(path))
+                act.triggered.connect(lambda _, path=p: self.on_open_file(path))
 
         self._menu_recent_projects.addSeparator()
         act_clear = self._menu_recent_projects.addAction(tr("menu_clear_recent_projects"))
@@ -2717,10 +2765,10 @@ class MainWindow(QMainWindow):
             self,
             tr("dlg_import_video"),
             "",
-            tr("dlg_filter_video"),
+            tr("dlg_filter_import"),
         )
         if path_str:
-            self.on_import_video_file(Path(path_str))
+            self.on_open_file(Path(path_str))
 
     def on_import_video_file(self, new_video_path: Path):
         """
@@ -2728,6 +2776,9 @@ class MainWindow(QMainWindow):
         - If busy: rejects.
         - If current project/cues active: prompts user with 4 clear choices (Save & New, Relink Video Only, Discard & New, Cancel).
         """
+        if new_video_path.is_dir() or new_video_path.suffix.lower() in {'.zip', '.voicer', '.json'}:
+            self.on_open_file(new_video_path)
+            return
         if self._is_busy():
             self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
             return
@@ -3235,8 +3286,6 @@ class MainWindow(QMainWindow):
             raise CommandError('APP_NOT_READY')
         if scopes and 'read_project' not in scopes:
             raise CommandError('INVALID_ARGUMENT')
-        if scopes and not (self._state.video_path or self._state.dialogues):
-            raise CommandError('NO_PROJECT')
         ticket = bridge.open_session(scopes, approval_mode=approval_mode)
         try:
             remembered = self._settings.get('mcp_connection_reference')

@@ -20,7 +20,13 @@ class AgentSetupWorker(QThread):
             elif self.mode == 'check':
                 result = check_gateway(self.root, self.reference, self.preferred)
             elif self.mode == 'connect':
-                result = register_client(self.root, self.reference, self.preferred, client=self.client)
+                try:
+                    result = register_client(self.root, self.reference, self.preferred, client=self.client)
+                except CommandError as exc:
+                    if exc.code != 'DEPENDENCY_MISSING':
+                        raise
+                    interpreter = install_gateway(self.root, self.preferred)
+                    result = register_client(self.root, self.reference, interpreter, client=self.client)
             else:
                 raise CommandError('INVALID_ARGUMENT')
             self.ready.emit(result, '')

@@ -31,6 +31,21 @@ def harness():
     return commands, session, state, undo, runtime
 
 
+def test_empty_project_can_be_inspected_and_bootstrapped(harness):
+    commands, _, state, _, runtime = harness
+    state.speakers.clear()
+    state.dialogues.clear()
+    session = commands.grant({'read_project', 'import_project', 'manage_speakers'})
+    page = commands.snapshot(session, limit=1)
+    assert page['clip_count'] == page['speaker_count'] == 0
+    for operation, fields in [('import_project', {}), ('add_character', {'name': 'Hero'})]:
+        proposal = commands.submit(session, {'operation': operation, 'project_epoch': page['project_epoch'],
+            'expected_revision': page['revision'], **fields})
+        commands.approve(proposal['job_id'])
+        assert runtime['started'][-1] == (proposal['job_id'], operation)
+        commands.finish(proposal['job_id'], 'succeeded')
+
+
 def caption_command(commands, session):
     snapshot = commands.snapshot(session, limit=1)
     return {'operation': 'caption', 'project_epoch': snapshot['project_epoch'],

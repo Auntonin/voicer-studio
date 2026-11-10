@@ -25,7 +25,7 @@ APPROVAL_TTL_SECONDS = 300
 APPROVAL_MODES = frozenset({'ask', 'session', 'always'})
 SCOPES = frozenset({'read_project', 'read_transcript', 'read_speaker_names',
                     'edit_caption', 'edit_speaker', 'pipeline', 'export', 'save_project', 'analyze_speakers',
-                    'edit_clips', 'manage_speakers'})
+                    'edit_clips', 'manage_speakers', 'import_project'})
 EXTENDED_FIELDS = {
     'add_character': {'name'}, 'rename_character': {'speaker_ref', 'name'},
     'delete_character': {'speaker_ref'}, 'clear_voiceprint': {'speaker_ref'},
@@ -160,12 +160,12 @@ class AgentCommands:
         if scopes and self._session_epochs[session] != self._version()[0]:
             raise CommandError('PERMISSION_DENIED')
 
-    def _project(self, session):
+    def _project(self, session, *, allow_empty=False):
         self._permission(session, 'read_project')
         if self._busy():
             raise CommandError('BUSY')
         state = self._state()
-        if not (state.video_path or state.dialogues or state.speakers):
+        if not allow_empty and not (state.video_path or state.dialogues or state.speakers):
             raise CommandError('NO_PROJECT')
         return state
 
@@ -188,7 +188,8 @@ class AgentCommands:
                 'scopes': sorted(scopes), 'batch_edits': False,
                 'operations': [op for op, scope in [('caption', 'edit_caption'),
                     ('speaker', 'edit_speaker'), ('save', 'save_project'),
-                    ('pipeline', 'pipeline'), ('export', 'export'), ('analyze_voice', 'analyze_speakers')]
+                    ('pipeline', 'pipeline'), ('export', 'export'), ('analyze_voice', 'analyze_speakers'),
+                    ('import_project', 'import_project')]
                     if scope in scopes] + [op for op in EXTENDED_FIELDS if operation_scope(op) in scopes
                                          and (op != 'apply_voice_match' or 'edit_speaker' in scopes)],
                 'max_page_size': MAX_PAGE_SIZE}
@@ -196,7 +197,7 @@ class AgentCommands:
     def snapshot(self, session, *, offset=0, limit=0):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 0 <= limit <= MAX_PAGE_SIZE:
             raise CommandError('INVALID_ARGUMENT')
-        state = self._project(session)
+        state = self._project(session, allow_empty=True)
         self._references(state)
         epoch, revision = self._version()
         if not math.isfinite(state.video_duration) or state.video_duration < 0:
@@ -240,7 +241,7 @@ class AgentCommands:
         elif operation == 'speaker':
             required |= {'clip_ref', 'speaker_ref'}
             scope = 'edit_speaker'
-        elif operation in ('pipeline', 'export'):
+        elif operation in ('pipeline', 'export', 'import_project'):
             scope = operation
         elif operation == 'save':
             scope = 'save_project'
@@ -285,7 +286,7 @@ class AgentCommands:
             if old_result['job_id'] not in self._jobs:
                 raise CommandError('JOB_NOT_FOUND')
             return bounded_object(old_result)
-        state = self._project(session)
+        state = self._project(session, allow_empty=operation in ('import_project', 'add_character'))
         self._check_revision(command)
         self._references(state)
         self._validate_extended(session, command, state)
@@ -384,7 +385,7 @@ class AgentCommands:
             operation = job.command['operation']
             scope = operation_scope(operation)
             self._permission(job.owner, scope)
-            state = self._project(job.owner)
+            state = self._project(job.owner, allow_empty=operation in ('import_project', 'add_character'))
             self._check_revision(job.command)
             self._references(state)
             self._validate_extended(job.owner, job.command, state)
