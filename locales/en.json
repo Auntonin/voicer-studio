@@ -736,5 +736,6 @@
   "mcp_access_read": "Read only",
   "mcp_access_custom": "Custom permissions",
   "mcp_scope_import_project": "Open video, voice pack or project",
-  "mcp_op_import_project": "Import media / project"
+  "mcp_op_import_project": "Import media / project",
+  "msg_error_title": "Error"
 }

@@ -204,6 +204,7 @@ class AgentCommands:
             raise CommandError('INVALID_ARGUMENT')
         result = {'project_epoch': epoch, 'revision': revision, 'clip_count': len(self._clips),
                   'speaker_count': len(self._speakers), 'duration': state.video_duration,
+                  'has_source_video': bool(state.video_path),
                   'dialogues': [], 'speakers': []}
         if limit:
             reverse = {sid: ref for ref, sid in self._speakers.items()}

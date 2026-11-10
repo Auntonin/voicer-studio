@@ -56,6 +56,14 @@ def test_default_off_toggle_cleanup_and_no_auto_permissions(window, vault):
     dialog.close()
 
 
+def test_pipeline_failure_reports_error_without_accessing_missing_i18n_attribute(window):
+    from core.models import PipelineStep
+    win, _ = window
+    with patch.object(win, '_show_toast') as toast:
+        win._on_pipeline_failed(PipelineStep.TRANSCRIPTION, 'Model unavailable')
+        assert toast.call_args.args[-1] == 'error'
+
+
 def test_simple_panel_enable_grant_all_and_close_keeps_bridge(window, vault):
     from core.agent_commands import SCOPES
     win, _ = window
@@ -86,7 +94,8 @@ def test_first_time_connection_controls_are_visible_without_advanced(window, vau
     assert dialog.connect_button.isVisible()
     assert not dialog.advanced_panel.isAncestorOf(dialog.connect_button)
     assert dialog.target_client.isVisible()
-    assert dialog.prepare_runtime.isVisible() and dialog.test_connection.isVisible()
+    assert not dialog.prepare_runtime.isVisible() and not dialog.test_connection.isVisible()
+    assert dialog.access_mode.isVisible()
     assert dialog.connect_button.isEnabled()
     with patch.object(dialog, '_auto_setup') as setup:
         dialog.enabled.setChecked(True)

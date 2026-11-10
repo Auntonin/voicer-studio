@@ -736,5 +736,6 @@
   "mcp_access_read": "อ่านข้อมูลอย่างเดียว",
   "mcp_access_custom": "เลือกสิทธิ์เอง",
   "mcp_scope_import_project": "เปิดวิดีโอ แพ็กเสียง หรือโปรเจกต์",
-  "mcp_op_import_project": "นำเข้าสื่อ / โปรเจกต์"
+  "mcp_op_import_project": "นำเข้าสื่อ / โปรเจกต์",
+  "msg_error_title": "เกิดข้อผิดพลาด"
 }

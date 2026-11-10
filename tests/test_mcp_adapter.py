@@ -26,10 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'scripts' / 'mcp_server.py'
 
 
-def exercise(app, async_test, approvals=None, commands=None, actions=None):
+def exercise(app, async_test, approvals=None, commands=None, actions=None, timeout=25):
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(asyncio.run, async_test())
-        deadline = time.monotonic() + 25
+        deadline = time.monotonic() + timeout
         while not future.done() and time.monotonic() < deadline:
             app.processEvents()
             if actions is not None:
@@ -305,7 +305,7 @@ def test_real_stdio_project_edit_tools_and_undo(window):
             async with ClientSession(read, write, read_timeout_seconds=8) as session:
                 await session.initialize()
                 tools = (await session.list_tools()).tools
-                assert len(tools) == 25
+                assert len(tools) == 26
                 for tool in tools:
                     invalid = await session.call_tool(tool.name, {'unexpected': True})
                     assert invalid.is_error and invalid.structured_content['code'] == 'INVALID_ARGUMENT'

@@ -22,7 +22,7 @@ class AgentDialog(QDialog):
         self._copied_session = None
         self._connect_requested = False
         self.setWindowTitle(tr('mcp_title'))
-        self.resize(720, 520)
+        self.resize(720, 340)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         layout = QVBoxLayout(self)
         warning = QLabel(tr('mcp_warning'))

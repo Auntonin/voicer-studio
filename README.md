@@ -215,15 +215,14 @@ not proof that every possible bug or external process failure was captured.
 
 ## Optional local MCP connection
 
-Open **Edit → AI / MCP Connection**. Click **Prepare MCP runtime** once to install
-`requirements-mcp.txt` into the separate `.venv-mcp` environment, without changing
-the AI environment or downloading models. Installation requires internet; normal
-MCP processing is local. A working Python 3.10–3.13 is required; select it under
-Advanced if the application's interpreter is unavailable.
+Open **Edit → AI / MCP Connection**, select the AI app and access level, then
+click **Connect**. A missing runtime is prepared in the separate `.venv-mcp`
+environment automatically on that explicit action. No AI models are downloaded.
+Advanced retains manual runtime preparation, connection checks and permissions.
 
-Enable MCP, choose a read-only or caption-editing permission preset, select
+Choose Full project assistance, Read only, or Custom permissions, select
 **Codex, Claude Desktop, Claude Code, Cursor or VS Code**, then click **Connect**.
-These controls are visible on the main panel. Setup preserves other servers,
+The main panel shows the app, access level and Connect button. Setup preserves other servers,
 preferences and custom policies; JSON configuration keeps its first backup.
 Reconnect/restart the chosen AI app after setup. Configuration ready is distinct
 from connected: the live client list confirms gateway connections, and names are

@@ -3196,7 +3196,7 @@ class MainWindow(QMainWindow):
         self._act_export.setEnabled(bool(self._state.dialogues))
         self._progress_panel.btn_cancel.setEnabled(False)
         self._log_message(f"Pipeline error at step '{step}': {msg}", "error")
-        self._show_toast(tr("msg_error_title") if "msg_error_title" in i18n._current_translations else "Error", f"{step}: {msg}", "error")
+        self._show_toast(tr("msg_error_title"), f"{step}: {msg}", "error")
 
     def _ensure_all_clip_files_exist(self):
         """Ensures that all active dialogues have corresponding .m4a, .jpg, and .txt files in self._output_dir."""
