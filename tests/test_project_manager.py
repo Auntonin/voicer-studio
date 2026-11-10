@@ -1,6 +1,8 @@
 import sys
 import unittest
 import tempfile
+import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 # Add project root to sys.path
@@ -11,6 +13,82 @@ from core.project_manager import ProjectManager
 
 
 class TestProjectManager(unittest.TestCase):
+
+    def _write_pack_zip(self, path, prefix="voice pack/"):
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(prefix + "_pack_info.ini", '[data]\ntitle="Test"\nicon="001_CHARACTER.jpg"\nauthors=["Archive"]\n')
+            archive.writestr(prefix + "001_CHARACTER.txt", '[data]\ncaption="Original"\nimage="001_CHARACTER.jpg"\ndub_timestamps=[1.250]\ndub_characters=["Hero", "Friend"]\n')
+            for name in ("001_CHARACTER.wav", "001_CHARACTER.jpg", "dub_video.ogv", "_backing_track.mp3"):
+                archive.writestr(prefix + name, name.encode())
+
+    def test_zip_edit_save_reload_export_preserves_layout_and_media(self):
+        from core.pack_builder import PackBuilder
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.zip"
+            self._write_pack_zip(source)
+            with patch('core.project_manager.AudioExtractor.probe_video', return_value={"duration": 10.0}):
+                state = ProjectManager.load_from_pack_zip(source, root / "imports")
+            state.dialogues[0].caption = 'Edited "caption"'
+            state.speakers[state.dialogues[0].speaker_id].display_name = "Renamed Hero"
+            project = root / "session.voicer"
+            self.assertTrue(ProjectManager.save_project(state, project))
+            state = ProjectManager.load_project(project)
+            # Media decoding is tested separately; here verify lossless file handling.
+            with patch('core.quality_checker.QualityChecker._check_audio_readable', return_value=True), \
+                 patch('core.quality_checker.QualityChecker._check_image_readable', return_value=True):
+                pack = PackBuilder().build_pack(state, root / "out", {"include_dub_video": True})
+            output = root / "edited.zip"
+            PackBuilder.export_zip(pack, output)
+            with zipfile.ZipFile(source) as original, zipfile.ZipFile(output) as edited:
+                self.assertEqual(set(original.namelist()), set(edited.namelist()))
+                for name in original.namelist():
+                    if not name.endswith((".txt", ".ini")):
+                        self.assertEqual(original.read(name), edited.read(name))
+                cue = edited.read("voice pack/001_CHARACTER.txt").decode()
+                self.assertIn('caption="Edited \\"caption\\""', cue)
+                self.assertIn('dub_characters=["Renamed Hero", "Friend"]', cue)
+                self.assertIn('dub_timestamps=[1.250]', cue)
+                self.assertIn('image="001_CHARACTER.jpg"', cue)
+
+    def test_zip_import_rejects_unsafe_paths_and_cleans_only_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "imports"
+            destination.mkdir()
+            sentinel = destination / "keep.txt"
+            sentinel.write_text("user data")
+            for name in ("../outside.txt", "C:/outside.txt", "/outside.txt", "..\\outside.txt"):
+                archive = root / "bad.zip"
+                with zipfile.ZipFile(archive, "w") as z:
+                    z.writestr(name, "unsafe")
+                with self.assertRaises(ValueError):
+                    ProjectManager.load_from_pack_zip(archive, destination)
+                self.assertEqual(list(destination.iterdir()), [sentinel])
+
+    def test_zip_import_rejects_missing_or_multiple_packs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for names in ([], ["a/_pack_info.ini", "b/_pack_info.ini"]):
+                archive = root / "bad.zip"
+                with zipfile.ZipFile(archive, "w") as z:
+                    for name in names:
+                        z.writestr(name, "[data]")
+                with self.assertRaises(ValueError):
+                    ProjectManager.load_from_pack_zip(archive, root / "imports")
+                self.assertEqual(list((root / "imports").iterdir()), [])
+
+    def test_root_zip_import_and_repeated_import_do_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "root.zip"
+            self._write_pack_zip(archive, "")
+            with patch('core.project_manager.AudioExtractor.probe_video', return_value={"duration": 10.0}):
+                first = ProjectManager.load_from_pack_zip(archive, root / "imports")
+                second = ProjectManager.load_from_pack_zip(archive, root / "imports")
+            self.assertNotEqual(first.dialogues[0].txt_path, second.dialogues[0].txt_path)
+            self.assertTrue(first.dialogues[0].audio_path.exists())
+            self.assertEqual(second.dialogues[0].imported_filename, "001_CHARACTER")
 
     def test_project_save_and_load(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

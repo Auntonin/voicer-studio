@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# The Choice Voicer Dialogue Extractor — macOS & Linux Setup
+# Voicer Studio — macOS & Linux Setup
 # ============================================================
 # Automatically configures Python virtual environment (.venv),
 # installs hardware-accelerated AI libraries (Metal MPS / CUDA / CPU),

@@ -125,6 +125,7 @@ class DialogueItem:
     # ── Confidence & Review ──────────────────────────────────────────────────
     speaker_confidence: float = 1.0      # 0.0 - 1.0 confidence score
     needs_review: bool = False           # Ambiguous or low-confidence attribution flag
+    imported_filename: str = ""          # Original cue stem for pack round-trips
 
     @property
     def duration(self) -> float:
@@ -141,6 +142,8 @@ class DialogueItem:
 
         e.g. "001_Weazemon"
         """
+        if self.imported_filename and Path(self.imported_filename).name == self.imported_filename:
+            return self.imported_filename
         return f"{self.id_str}_{speaker_safe_name}"
 
     @property
@@ -174,6 +177,7 @@ class DialogueItem:
             "end": round(self.end, 4),
             "caption": self.caption,
             "caption_language": self.caption_language,
+            "imported_filename": self.imported_filename,
             "audio_path": _rel_or_abs(self.audio_path),
             "image_path": _rel_or_abs(self.image_path),
             "txt_path": _rel_or_abs(self.txt_path),
@@ -208,6 +212,7 @@ class DialogueItem:
             end=float(data.get("end", 0.0)),
             caption=str(data.get("caption", "")),
             caption_language=data.get("caption_language"),
+            imported_filename=str(data.get("imported_filename", "")),
             audio_path=_resolve_path(data.get("audio_path")),
             image_path=_resolve_path(data.get("image_path")),
             txt_path=_resolve_path(data.get("txt_path")),
@@ -343,6 +348,7 @@ class PipelineState:
     separated_vocals_path: Optional[Path] = None  # Demucs vocals
     separated_bg_path: Optional[Path] = None      # Demucs background
     pack_backing_track_path: Optional[Path] = None
+    imported_pack_name: str = ""
 
     @property
     def backing_track_path(self) -> Optional[Path]:
@@ -474,6 +480,7 @@ class PipelineState:
             "separated_vocals_path": _rel_or_abs(self.separated_vocals_path),
             "separated_bg_path": _rel_or_abs(self.separated_bg_path),
             "pack_backing_track_path": _rel_or_abs(self.pack_backing_track_path),
+            "imported_pack_name": self.imported_pack_name,
             "video_duration": self.video_duration,
             "video_width": self.video_width,
             "video_height": self.video_height,
@@ -508,6 +515,7 @@ class PipelineState:
         state.separated_vocals_path = _resolve_path(data.get("separated_vocals_path"))
         state.separated_bg_path = _resolve_path(data.get("separated_bg_path"))
         state.pack_backing_track_path = _resolve_path(data.get("pack_backing_track_path"))
+        state.imported_pack_name = str(data.get("imported_pack_name", ""))
 
         state.video_duration = float(data.get("video_duration", 0.0))
         state.video_width = int(data.get("video_width", 0))

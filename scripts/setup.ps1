@@ -1,15 +1,15 @@
 # ============================================================
-# The Choice Voicer Dialogue Extractor - PowerShell Setup
+# Voicer Studio - PowerShell Setup
 # ============================================================
 # Run: powershell -ExecutionPolicy Bypass -File setup.ps1
 # ============================================================
 
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "The Choice Voicer Dialogue Extractor - Setup"
+$Host.UI.RawUI.WindowTitle = "Voicer Studio - Setup"
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  The Choice Voicer Dialogue Extractor" -ForegroundColor Cyan
+Write-Host "  Voicer Studio" -ForegroundColor Cyan
 Write-Host "  Setup Script for Windows (PowerShell)" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""

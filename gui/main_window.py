@@ -11,6 +11,7 @@ import json
 import logging
 import ctypes
 import subprocess
+from uuid import uuid4
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QLabel, QPushButton, QToolBar, QStatusBar,
     QFileDialog, QFrame, QSizePolicy, QTextEdit, QPlainTextEdit, QLineEdit,
-    QProgressBar, QApplication, QTabWidget, QMenuBar, QMenu,
+    QProgressBar, QProgressDialog, QApplication, QTabWidget, QMenuBar, QMenu,
     QMessageBox, QCheckBox, QGraphicsOpacityEffect, QScrollArea, QInputDialog,
     QToolTip
 )
@@ -26,7 +27,7 @@ from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEvent, Signal
 from PySide6.QtGui import QAction, QIcon, QColor, QFont, QPalette, QKeySequence, QShortcut
 
 from config import (
-    APP_NAME, APP_VERSION, COLORS, SETTINGS_FILE,
+    APP_NAME, APP_VERSION, COLORS, SETTINGS_FILE, MCP_ENABLED_DEFAULT,
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WHISPER_MODEL_DEFAULT, WHISPER_LANGUAGE_DEFAULT, ASSETS_DIR
 )
 from core.models import PipelineState, PipelineStep, UndoManager, SpeakerInfo, DialogueItem, PackInfo
@@ -44,6 +45,24 @@ from gui.preview_dialog import PreviewDialog
 from gui.video_panel import VideoPanel
 from gui.ui_utils import apply_dark_title_bar
 from core.platform_utils import platform_utils
+
+
+class PackImportWorker(QThread):
+    ready = Signal(object, object)
+    failed = Signal(str)
+
+    def __init__(self, path: Path, destination: Path, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.destination = destination
+
+    def run(self):
+        try:
+            state = ProjectManager.load_from_pack_zip(self.path, self.destination)
+            pack_dir = state.dialogues[0].txt_path.parent
+            self.ready.emit(state, pack_dir)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class SingleClipTranscribeWorker(QThread):
@@ -116,6 +135,208 @@ class MainWindow(QMainWindow):
     """
     Top-level application window — fully connected to pipeline, timeline, and video player.
     """
+    _asset_ready = Signal(str, object, str)
+
+    @property
+    def _state(self):
+        return self._project_state
+
+    @_state.setter
+    def _state(self, state):
+        self._project_state = state
+        self._agent_epoch = uuid4().hex
+        self._agent_revision = 0
+
+    def _agent_owner_check(self):
+        from core.agent_commands import CommandError
+        if QThread.currentThread() != self.thread():
+            raise CommandError('APP_NOT_READY')
+
+    def _agent_busy(self):
+        return bool(self._is_busy() or QApplication.activeModalWidget()
+                    or self._asset_jobs or self._clip_editor._frame_jobs
+                    or self._clip_editor._frame_preview_timer.isActive()
+                    or self._agent_pending_job)
+
+    def agent_commands(self):
+        """Lazy internal seam. Does not start a listener or enable external clients."""
+        self._agent_owner_check()
+        if self._agent_commands is None:
+            from core.agent_commands import AgentCommands
+            self._agent_commands = AgentCommands(
+                state=lambda: self._state,
+                version=lambda: (self._agent_epoch, self._agent_revision),
+                busy=self._agent_busy, apply_edit=self._apply_agent_edit,
+                start_job=self._start_agent_job, owner_check=self._agent_owner_check,
+                app_version=APP_VERSION)
+        return self._agent_commands
+
+    def _apply_agent_edit(self, operation, index, value):
+        if operation == 'caption':
+            self._on_caption_changed(index, value)
+            if self._clip_editor.item and self._clip_editor.item.index == index:
+                self._clip_editor.txt_caption.blockSignals(True)
+                self._clip_editor.txt_caption.setPlainText(value)
+                self._clip_editor.txt_caption.blockSignals(False)
+                self._clip_editor._update_caption_stats()
+        else:
+            self._on_speaker_changed(index, value)
+
+    def _start_agent_job(self, job_id, operation):
+        commands = self.agent_commands()
+        self._agent_pending_job = job_id
+        try:
+            from core.agent_commands import EXTENDED_FIELDS
+            if operation in ('analyze_voice', 'enroll_voice'):
+                self._start_agent_voice_analysis(job_id)
+            elif operation in EXTENDED_FIELDS:
+                self._apply_agent_operation(job_id, operation)
+            elif operation == 'save':
+                # Save As is the existing trusted destination/overwrite confirmation.
+                saved = self.on_save_project_as(agent_job_id=job_id)
+                commands.finish(job_id, 'succeeded' if saved else 'cancelled')
+            elif operation == 'pipeline':
+                from core.agent_paths import validate_output
+                base = self._settings.get('output_dir') or (self._state.video_path.parent / 'output' if self._state.video_path else None)
+                if base is None:
+                    from core.agent_commands import CommandError
+                    raise CommandError('NO_PROJECT')
+                validate_output(Path(base).absolute())
+                self.on_analyze()
+                if commands._jobs[job_id].stage == 'configuration':
+                    commands.finish(job_id, 'failed', 'APP_NOT_READY')
+            else:
+                # The existing export dialog is the trusted destination/repair approval.
+                self.on_export()
+                if commands._jobs[job_id].stage == 'configuration':
+                    commands.finish(job_id, 'cancelled')
+        finally:
+            self._agent_pending_job = None
+
+    def _start_agent_voice_analysis(self, job_id):
+        from copy import deepcopy
+        from core.agent_commands import CommandError
+        from gui.agent_audio_worker import AgentAudioWorker
+        commands = self.agent_commands()
+        job = commands._jobs[job_id]
+        item = commands._clips.get(job.command['clip_ref'])
+        source = self._state.separated_vocals_path or self._state.work_audio_path
+        if item is None or not source or not source.is_file():
+            raise CommandError('AUDIO_SOURCE_MISSING')
+        if job.command['operation'] == 'analyze_voice' and not any(speaker.has_voiceprint() for speaker in self._state.speakers.values()):
+            raise CommandError('NO_REFERENCE_VOICE')
+        # Copy reference vectors and one segment only, never media or whole state.
+        snapshot = PipelineState(speakers=deepcopy(self._state.speakers))
+        speaker_id = commands._speakers.get(job.command.get('speaker_ref'))
+        worker = AgentAudioWorker(job_id, snapshot, deepcopy(item), source, self,
+                                  operation=job.command['operation'], speaker_id=speaker_id)
+        old_worker = self._agent_audio_worker
+        if old_worker is not None and not old_worker.isRunning():
+            old_worker.deleteLater()
+        self._agent_audio_worker = worker
+        worker.ready.connect(self._on_agent_voice_analysis_ready)
+        commands.bind(job_id, worker.cancel)
+        worker.start()
+
+    def _on_agent_voice_analysis_ready(self, result, error):
+        commands = self.agent_commands()
+        worker = self._agent_audio_worker
+        job = commands._jobs[worker.job_id]
+        if worker.cancelled.is_set():
+            commands.finish(worker.job_id, 'cancelled')
+            return
+        if (job.command['project_epoch'], job.command['expected_revision']) != (self._agent_epoch, self._agent_revision):
+            commands.finish(worker.job_id, 'failed', 'REVISION_CONFLICT')
+            return
+        if error or not result:
+            commands.finish(worker.job_id, 'failed', error or 'AUDIO_ANALYSIS_FAILED')
+            return
+        if worker.operation == 'enroll_voice':
+            self._push_undo()
+            source_speaker = worker.state.speakers[worker.speaker_id]
+            speaker = self._state.speakers[worker.speaker_id]
+            speaker.embedding = list(source_speaker.embedding)
+            speaker.voiceprint_samples = list(source_speaker.voiceprint_samples)
+            item = commands._clips[job.command['clip_ref']]
+            item.speaker_id, item.speaker_confidence, item.needs_review = worker.speaker_id, 1., False
+            self._mark_dirty(True)
+            self._refresh_all_views()
+            job.result = {'enrolled': True}
+            commands.finish(worker.job_id, 'succeeded')
+            return
+        # Only opaque authorized references and scores cross the bridge.
+        refs = {sid: ref for ref, sid in commands._speakers.items()}
+        result['candidates'] = [{'speaker_ref': refs[candidate['speaker_id']], 'score': candidate['score']}
+                                for candidate in result['candidates'] if candidate['speaker_id'] in refs]
+        result['project_epoch'] = job.command['project_epoch']
+        result['revision'] = job.command['expected_revision']
+        result['clip_ref'] = job.command['clip_ref']
+        job.result = result
+        commands.finish(worker.job_id, 'succeeded')
+
+    def _apply_agent_operation(self, job_id, operation):
+        from core.agent_commands import CommandError
+        commands = self.agent_commands()
+        job = commands._jobs[job_id]
+        command = job.command
+        item = commands._clips.get(command.get('clip_ref'))
+        speaker_id = commands._speakers.get(command.get('speaker_ref'))
+        if operation == 'split':
+            self._on_split(item.index, split_at=command['time'])
+        elif operation == 'merge':
+            self._on_merge_next(item.index)
+        elif operation == 'timing':
+            self._on_timestamps_changed(item.index, command['start'], command['end'], regenerate=False)
+        elif operation == 'add_clip':
+            self._on_add_clip_at(speaker_id, command['start'], end=command['end'], caption=command['caption'])
+        elif operation == 'delete_clip':
+            self._on_dialogue_deleted(item.index)
+        elif operation == 'add_character':
+            self._on_add_track(name=command['name'])
+        elif operation == 'rename_character':
+            self._push_undo()
+            self._state.speakers[speaker_id].display_name = command['name'].strip()
+            self._mark_dirty(True)
+            self._refresh_all_views()
+        elif operation == 'delete_character':
+            self._on_delete_track(speaker_id, confirmed=True)
+        elif operation == 'clear_voiceprint':
+            self._on_speaker_clear_voiceprint_requested(speaker_id)
+        elif operation == 'apply_voice_match':
+            analysis = commands._jobs[command['analysis_job_id']].result
+            matched_item = commands._clips[analysis['clip_ref']]
+            best = analysis['candidates'][0]
+            self._on_speaker_changed(matched_item.index, commands._speakers[best['speaker_ref']], confidence=best['score'])
+        elif operation in ('undo', 'redo'):
+            if not getattr(self._undo_manager, operation)(self._state):
+                raise CommandError('NO_UNDO_HISTORY')
+            self._mark_dirty(True)
+            self._refresh_all_views()
+        elif operation in ('regenerate_audio', 'regenerate_frame'):
+            asset_id = self._start_asset_job(item.index, 'audio' if operation == 'regenerate_audio' else 'image')
+            if not asset_id:
+                raise CommandError('ASSET_SOURCE_MISSING')
+            self._asset_agent_jobs[asset_id] = job_id
+            commands.bind(job_id, lambda: None)  # Complete current bounded FFmpeg work, then discard on cancel.
+            return
+        else:
+            raise CommandError('INVALID_ARGUMENT')
+        commands.finish(job_id, 'succeeded')
+
+    def _bind_agent_worker(self, worker, operation):
+        job_id = self._agent_pending_job
+        if not job_id:
+            return
+        commands = self.agent_commands()
+        commands.bind(job_id, worker.cancel)
+        signals = worker.signals if operation == 'pipeline' else worker
+        if operation == 'pipeline':
+            signals.progress.connect(lambda pct: commands.progress(job_id, 'pipeline', pct))
+            signals.step_started.connect(lambda step: commands.progress(job_id, step.name, 0))
+        else:
+            signals.progress.connect(lambda pct, _msg: commands.progress(job_id, 'export', pct))
+        signals.settled.connect(lambda outcome: commands.finish(
+            job_id, outcome, 'OPERATION_FAILED' if outcome == 'failed' else None))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -145,11 +366,23 @@ class MainWindow(QMainWindow):
 
         self._state = PipelineState()
         self._undo_manager = UndoManager()
+        self._agent_commands = None
+        self._agent_pending_job = None
+        self._agent_bridge = None
+        self._agent_dialog = None
+        self._agent_connections = {}
+        self._agent_audio_worker = None
+        self._agent_setup_worker = None
+        self._export_dialog = None
+        self._asset_jobs = {}
+        self._asset_agent_jobs = {}
+        self._asset_ready.connect(self._on_asset_ready)
         self._active_speaker_id: str = "SPEAKER_00"
         
         self._worker: PipelineWorker | None = None
         self._export_worker: ExportWorker | None = None
         self._settings: dict = self._load_settings()
+        self._settings['mcp_enabled'] = MCP_ENABLED_DEFAULT
         # Initialize UI language (defaults to 100% English)
         app_lang = self._settings.get("app_language", "en")
         i18n.set_language(app_lang)
@@ -323,11 +556,21 @@ class MainWindow(QMainWindow):
         self._toast_anim.start()
 
     def _is_busy(self) -> bool:
-        """Returns True if a pipeline worker, transcribe worker, or export worker is currently running."""
-        worker_running = hasattr(self, '_worker') and self._worker and self._worker.isRunning()
-        export_running = hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning()
-        transcribe_running = hasattr(self, '_transcribe_worker') and self._transcribe_worker and self._transcribe_worker.isRunning()
-        return bool(worker_running or export_running or transcribe_running)
+        """Include workers and the entire export approval/dialog lifecycle."""
+        for name in ('_worker', '_export_worker', '_transcribe_worker',
+                     '_clip_transcribe_worker', '_proxy_worker', '_agent_audio_worker', '_agent_setup_worker',
+                     '_pack_import_worker'):
+            worker = getattr(self, name, None)
+            if worker is not None and worker.isRunning():
+                return True
+        # Thread exit is not result settlement: ready may still be queued on Qt.
+        worker = getattr(self, '_agent_audio_worker', None)
+        commands = getattr(self, '_agent_commands', None)
+        if worker is not None and commands is not None:
+            job = commands._jobs.get(worker.job_id)
+            if job is not None and job.state in ('running', 'cancelling'):
+                return True
+        return bool(getattr(self, '_export_dialog', None) or getattr(self, '_asset_jobs', {}))
 
 
     def dragEnterEvent(self, event):
@@ -352,6 +595,10 @@ class MainWindow(QMainWindow):
             self._show_toast(tr("msg_multi_file_title"), tr("msg_multi_file_desc", name=first_name), "info")
 
         path = Path(local_file)
+        if path.suffix.lower() == ".zip":
+            if self._check_unsaved_changes():
+                self.load_pack_zip(path)
+            return
         if path.is_dir():
             if (path / "_pack_info.ini").exists() or any(path.glob("*.txt")):
                 self.load_pack_folder(path)
@@ -432,6 +679,10 @@ class MainWindow(QMainWindow):
         self._act_settings.setShortcut(QKeySequence.StandardKey.Preferences)
         self._act_settings.setMenuRole(QAction.MenuRole.PreferencesRole)
         self._act_settings.triggered.connect(self.on_settings)
+
+        self._act_mcp = self._menu_edit.addAction(tr('mcp_title'))
+        self._act_mcp.setIcon(QIcon(str(ASSETS_DIR / 'icons' / 'settings.svg')))
+        self._act_mcp.triggered.connect(self.on_agent_connection)
 
         # View Menu (Toggle visibility of panels & Full Screen)
         self._menu_view = menubar.addMenu(tr("menu_view"))
@@ -1017,6 +1268,7 @@ class MainWindow(QMainWindow):
         self._speaker_panel.speaker_added.connect(self._on_speaker_added)
         self._speaker_panel.speaker_deleted.connect(self._on_speaker_deleted)
         self._speaker_panel.speaker_reordered.connect(self._refresh_all_views)
+        self._speaker_panel.speaker_reordered.connect(lambda: self._mark_dirty(True))
         self._speaker_panel.speaker_selected.connect(self._set_active_speaker)
         self._speaker_panel.speaker_enroll_requested.connect(self._on_speaker_enroll_requested)
         self._speaker_panel.speaker_clear_voiceprint_requested.connect(self._on_speaker_clear_voiceprint_requested)
@@ -1031,6 +1283,7 @@ class MainWindow(QMainWindow):
         self._clip_editor.regenerate_audio_requested.connect(self._on_regen_audio)
         self._clip_editor.regenerate_caption_requested.connect(self._on_regen_caption)
         self._clip_editor.change_image_requested.connect(self._on_change_image)
+        self._clip_editor.asset_changed.connect(self._on_dialogue_changed)
         self._clip_editor.play_started.connect(self._stop_global_playback)
 
         # ── Connect Pack Info Panel & Table Edit Signals ──
@@ -1175,7 +1428,7 @@ class MainWindow(QMainWindow):
 
     # ── Manual Track & Speaker Handlers ──────────────────────────────────────
 
-    def _on_add_track(self):
+    def _on_add_track(self, name=None):
         existing_indices = []
         for sid in self._state.speakers.keys():
             if sid.startswith("SPEAKER_"):
@@ -1187,14 +1440,11 @@ class MainWindow(QMainWindow):
         new_spk_id = f"SPEAKER_{next_idx:02d}"
         default_name = f"Speaker {next_idx + 1}"
 
-        name, ok = QInputDialog.getText(
-            self,
-            tr("tl_dialog_add_track_title"),
-            tr("tl_dialog_add_track_msg"),
-            text=default_name
-        )
-        if not ok:
-            return
+        if not isinstance(name, str):
+            name, ok = QInputDialog.getText(
+                self, tr("tl_dialog_add_track_title"), tr("tl_dialog_add_track_msg"), text=default_name)
+            if not ok:
+                return
         display_name = name.strip() if name.strip() else default_name
 
         self._push_undo()
@@ -1217,14 +1467,14 @@ class MainWindow(QMainWindow):
         last_spk = self._state.get_speaker_order()[-1]
         self._on_delete_track(last_spk)
 
-    def _on_delete_track(self, spk_id: str):
+    def _on_delete_track(self, spk_id: str, *, confirmed=False):
         if spk_id in self._state.speakers:
             if len(self._state.speakers) <= 1:
                 QMessageBox.warning(self, tr("msg_delete_speaker_title"), tr("msg_delete_speaker_cannot_last"))
                 return
             spk_info = self._state.speakers[spk_id]
             clip_count = sum(1 for d in self._state.active_dialogues() if d.speaker_id == spk_id)
-            reply = QMessageBox.question(
+            reply = QMessageBox.StandardButton.Yes if confirmed else QMessageBox.question(
                 self,
                 tr("msg_confirm_delete_speaker_title"),
                 tr("msg_confirm_delete_speaker_prompt", name=spk_info.display_name, id=spk_id, count=clip_count),
@@ -1248,7 +1498,7 @@ class MainWindow(QMainWindow):
             self._refresh_all_views()
             self._log_message(f"Deleted speaker track '{spk_info.display_name}'", "info")
 
-    def _on_add_clip_at(self, spk_id: Optional[str] = None, t: Optional[float] = None):
+    def _on_add_clip_at(self, spk_id: Optional[str] = None, t: Optional[float] = None, *, end=None, caption=''):
         if not self._state.speakers:
             self._on_add_track()
 
@@ -1282,8 +1532,8 @@ class MainWindow(QMainWindow):
             index=len(self._state.dialogues) + 1,
             speaker_id=spk_id,
             start=t,
-            end=min(max_dur, t + clip_dur),
-            caption=""
+            end=min(max_dur, t + clip_dur) if end is None else end,
+            caption=caption
         )
         self._state.dialogues.append(new_d)
         self._state.renumber()
@@ -1614,7 +1864,7 @@ class MainWindow(QMainWindow):
 
     def _on_dialogue_deleted(self, idx: int):
         self._push_undo()
-        for item in self._state.dialogues:
+        for item in self._state.active_dialogues():
             if item.index == idx:
                 item.is_deleted = True
                 break
@@ -1676,6 +1926,9 @@ class MainWindow(QMainWindow):
         target.end = max(target.end, next_d.end)
         target.audio_path = None
         target.audio_confirmed = False
+        target.image_path = None
+        target.image_confirmed = False
+        target.selected_frame_idx = None
         if next_d.caption:
             if target.caption:
                 target.caption = f"{target.caption} {next_d.caption}".strip()
@@ -1684,12 +1937,13 @@ class MainWindow(QMainWindow):
         next_d.is_deleted = True
 
         self._state.renumber()
+        self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._refresh_all_views()
         spk_name = self._state.get_speaker_display_name(target.speaker_id)
         self._log_message(f"Merged clip #{target.index} with next clip for character '{spk_name}'", "ok")
 
-    def _on_split(self, idx: int):
+    def _on_split(self, idx: int, *, split_at=None):
         target = None
         for d in self._state.active_dialogues():
             if d.index == idx:
@@ -1698,7 +1952,7 @@ class MainWindow(QMainWindow):
         if not target:
             return
 
-        cur_t = self._timeline.current_time
+        cur_t = self._timeline.current_time if split_at is None else split_at
         # Priority 1: If playhead is positioned inside target clip, split at exact playhead time
         if target.start + 0.05 < cur_t < target.end - 0.05:
             split_time = round(cur_t, 3)
@@ -1713,6 +1967,9 @@ class MainWindow(QMainWindow):
         target.end = split_time
         target.audio_path = None
         target.audio_confirmed = False
+        target.image_path = None
+        target.image_confirmed = False
+        target.selected_frame_idx = None
 
         # Smart Caption Splitting (divide text proportionally by split ratio)
         cap1, cap2 = "", ""
@@ -1753,21 +2010,29 @@ class MainWindow(QMainWindow):
                 self._push_undo()
                 d.caption = text
                 break
+        else:
+            return
         self._mark_dirty(True)
         self._dialogue_table.populate(self._state)
 
-    def _on_speaker_changed(self, idx: int, spk_id: str):
+    def _on_speaker_changed(self, idx: int, spk_id: str, *, confidence=1.):
         if not spk_id: return
-        self._push_undo()
-        self._active_speaker_id = spk_id
         for d in self._state.active_dialogues():
             if d.index == idx:
+                if d.speaker_id == spk_id and not d.needs_review:
+                    return
+                self._push_undo()
+                self._active_speaker_id = spk_id
                 d.speaker_id = spk_id
+                d.needs_review = False
+                d.speaker_confidence = confidence
                 break
+        else:
+            return
         self._mark_dirty(True)
         self._refresh_all_views()
 
-    def _on_timestamps_changed(self, idx: int, start: float, end: float):
+    def _on_timestamps_changed(self, idx: int, start: float, end: float, *, regenerate=True):
         self._push_undo()
         target_item = None
         for d in self._state.active_dialogues():
@@ -1776,24 +2041,20 @@ class MainWindow(QMainWindow):
                 d.end = max(start + 0.05, end)
                 d.audio_path = None
                 d.audio_confirmed = False
+                d.image_path = None
+                d.image_confirmed = False
+                d.selected_frame_idx = None
                 target_item = d
                 break
         
-        if target_item and (self._state.work_audio_path or self._state.separated_vocals_path):
-            try:
-                from core.clip_generator import ClipGenerator
-                gen = ClipGenerator()
-                out_dir = self._output_dir or (self._state.video_path.parent / "output" / "pack" if self._state.video_path else Path.cwd() / "output")
-                gen.regenerate_clip(target_item, self._state, out_dir)
-            except Exception as e:
-                self._log_message(f"Could not auto-regenerate audio clip: {e}", "warn")
-
         # Clip boundaries affect audio, frame selection, and every downstream
         # artefact.  Keep expensive upstream analysis cached, but rebuild these.
         self._state.invalidate_from(PipelineStep.CLIP_GENERATION)
         self._mark_dirty(True)
         self._dialogue_table.populate(self._state)
         self._timeline.populate(self._state)
+        if regenerate and target_item and (self._state.work_audio_path or self._state.separated_vocals_path):
+            self._start_asset_job(idx, 'audio')
 
     def _on_timeline_segment_moved(self, idx: int, start: float, end: float):
         self._on_timestamps_changed(idx, start, end)
@@ -1817,26 +2078,7 @@ class MainWindow(QMainWindow):
         self._timeline.populate(self._state)
 
     def _on_regen_audio(self, idx: int):
-        for d in self._state.active_dialogues():
-            if d.index == idx:
-                self._log_message(f"Regenerating audio for clip #{d.index} in background...", "info")
-                out_dir = self._output_dir or (self._state.video_path.parent / "output" / "pack")
-                def _worker(itm=d):
-                    try:
-                        from core.clip_generator import ClipGenerator
-                        gen = ClipGenerator()
-                        gen.regenerate_clip(itm, self._state, out_dir)
-                        def _done():
-                            self._mark_dirty(True)
-                            self._dialogue_table.update_row(itm, self._state)
-                            self._clip_editor.load_item(itm, self._state)
-                            self._log_message(f"Regenerated audio for clip #{itm.index}", "ok")
-                        QTimer.singleShot(0, _done)
-                    except Exception as e:
-                        QTimer.singleShot(0, lambda err=e: self._log_message(f"Error regenerating clip: {err}", "error"))
-                import threading
-                threading.Thread(target=_worker, daemon=True).start()
-                break
+        self._start_asset_job(idx, 'audio')
 
     def _on_regen_caption(self, idx: int):
         target_item = None
@@ -1943,41 +2185,102 @@ class MainWindow(QMainWindow):
         self._show_toast(tr("msg_transcribe_err_title"), err_msg, "error")
 
     def _on_change_image(self, idx: int):
-        for d in self._state.active_dialogues():
-            if d.index == idx:
-                self._log_message(f"Extracting frame for clip #{d.index} in background...", "info")
-                vid_path = self._state.video_path
-                out_dir = self._output_dir
-                def _worker(itm=d):
+        self._start_asset_job(idx, 'image')
+
+    def _start_asset_job(self, idx, kind):
+        """Workers receive copies; owner-thread callbacks change live data."""
+        from copy import copy, deepcopy
+        import threading
+        item = next((d for d in self._state.active_dialogues() if d.index == idx), None)
+        if item is None or self._is_busy():
+            return
+        state = copy(self._state)
+        state.speakers = deepcopy(self._state.speakers)
+        worker_item = deepcopy(item)
+        out_dir = self._output_dir or (state.video_path.parent / 'output' / 'pack' if state.video_path else None)
+        if out_dir is None:
+            return
+        if kind == 'audio':
+            self._log_message(f'Regenerating audio for clip #{item.index} in background...', 'info')
+        else:
+            self._log_message(f'Extracting frame for clip #{item.index} in background...', 'info')
+        job_id = uuid4().hex
+        signature = (item.start, item.end, item.speaker_id)
+        self._asset_jobs[job_id] = (self._agent_epoch, item, kind, signature)
+
+        def run():
+            result, error = None, ''
+            try:
+                if kind == 'audio':
+                    from core.clip_generator import ClipGenerator
+                    ClipGenerator().regenerate_clip(worker_item, state, out_dir)
+                    result = worker_item.audio_path
+                elif state.video_path and state.video_path.exists():
+                    from core.frame_extractor import FrameExtractor
+                    extractor = FrameExtractor(state.video_path)
                     try:
-                        from core.frame_extractor import FrameExtractor
-                        if vid_path and vid_path.exists():
-                            ext = FrameExtractor(vid_path)
-                            frame = ext.find_best_frame(itm.start, itm.end, num_candidates=5)
-                            ext.release()
-                            if frame is not None and out_dir:
-                                spk_name = self._state.get_speaker_safe_name(itm.speaker_id)
-                                out_img = out_dir / f"{itm.id_str}_{spk_name}.png"
-                                ext.save_frame(frame, out_img)
-                                def _done():
-                                    itm.image_path = out_img
-                                    self._mark_dirty(True)
-                                    self._dialogue_table.update_row(itm, self._state)
-                                    self._clip_editor.load_item(itm, self._state)
-                                    self._log_message(f"Extracted new frame for clip #{itm.index}", "ok")
-                                QTimer.singleShot(0, _done)
-                    except Exception as e:
-                        QTimer.singleShot(0, lambda err=e: self._log_message(f"Error changing image: {err}", "error"))
-                import threading
-                threading.Thread(target=_worker, daemon=True).start()
-                break
+                        frame = extractor.find_best_frame(worker_item.start, worker_item.end, num_candidates=5)
+                    finally:
+                        extractor.release()
+                    if frame is not None:
+                        result = out_dir / f'{worker_item.id_str}_{state.get_speaker_safe_name(worker_item.speaker_id)}.png'
+                        extractor.save_frame(frame, result)
+            except Exception as exc:
+                error = str(exc)
+            finally:
+                self._asset_ready.emit(job_id, result, error)
+
+        threading.Thread(target=run, daemon=True).start()
+        return job_id
+
+    def _on_asset_ready(self, job_id, result, error):
+        epoch, item, kind, signature = self._asset_jobs.pop(job_id)
+        agent_id = self._asset_agent_jobs.pop(job_id, None)
+        commands = self.agent_commands() if agent_id else None
+        if agent_id and commands._jobs[agent_id].state == 'cancelling':
+            commands.finish(agent_id, 'cancelled')
+            return
+        if error:
+            if agent_id:
+                commands.finish(agent_id, 'failed', 'ASSET_GENERATION_FAILED')
+            if kind == 'audio':
+                self._log_message(f'Error regenerating clip: {error}', 'error')
+            else:
+                self._log_message(f'Error changing image: {error}', 'error')
+            return
+        if (not result or epoch != self._agent_epoch or
+                not any(d is item and not d.is_deleted for d in self._state.dialogues) or
+                signature != (item.start, item.end, item.speaker_id) or
+                (agent_id and (commands._jobs[agent_id].command['project_epoch'],
+                               commands._jobs[agent_id].command['expected_revision']) !=
+                               (self._agent_epoch, self._agent_revision))):
+            if agent_id:
+                commands.finish(agent_id, 'failed', 'REVISION_CONFLICT' if result else 'ASSET_GENERATION_FAILED')
+            return
+        if agent_id:
+            self._push_undo()
+        if kind == 'audio':
+            item.audio_path = result
+        else:
+            item.image_path = result
+        self._mark_dirty(True)
+        if agent_id:
+            commands.finish(agent_id, 'succeeded')
+        self._dialogue_table.update_row(item, self._state)
+        if self._clip_editor.item is item:
+            self._clip_editor.load_item(item, self._state)
+        if kind == 'audio':
+            self._log_message(f'Regenerated audio for clip #{item.index}', 'ok')
+        else:
+            self._log_message(f'Extracted new frame for clip #{item.index}', 'ok')
 
     def _on_pack_info_changed(self, info: PackInfo):
         self._state.pack_info = info
         self._mark_dirty(True)
 
     def _on_dialogue_changed(self, item: DialogueItem):
-        self._mark_dirty(True)
+        if any(d is item for d in self._state.dialogues):
+            self._mark_dirty(True)
 
     # ── Status Bar ───────────────────────────────────────────────────────────
 
@@ -1996,6 +2299,8 @@ class MainWindow(QMainWindow):
 
     def _mark_dirty(self, dirty: bool = True, invalidate_pack: bool = True):
         """Record unsaved edits and invalidate generated pack metadata when needed."""
+        if dirty:
+            self._agent_revision += 1
         if dirty and invalidate_pack:
             self._state.invalidate_from(PipelineStep.PACK_BUILD)
         self._is_dirty = dirty
@@ -2109,7 +2414,33 @@ class MainWindow(QMainWindow):
             tr("dlg_filter_project"),
         )
         if path_str:
-            self.load_project_file(Path(path_str))
+            path = Path(path_str)
+            if path.suffix.lower() == ".zip":
+                self.load_pack_zip(path)
+            else:
+                self.load_project_file(path)
+
+    def load_pack_zip(self, path: Path):
+        if self._is_busy():
+            self._show_toast(tr("msg_busy_title"), tr("msg_busy_desc"), "warn")
+            return
+        destination = QFileDialog.getExistingDirectory(self, tr("dlg_pack_workspace"), "")
+        if not destination:
+            return
+        worker = PackImportWorker(path, Path(destination), self)
+        self._pack_import_worker = worker
+        self._pack_import_progress = QProgressDialog(tr("msg_pack_importing"), "", 0, 0, self)
+        self._pack_import_progress.setCancelButton(None)
+        self._pack_import_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._pack_import_progress.setMinimumDuration(0)
+        self._pack_import_progress.show()
+        worker.finished.connect(self._pack_import_progress.close)
+        worker.ready.connect(lambda state, folder: self.load_pack_folder(folder, state))
+        worker.failed.connect(lambda error: QMessageBox.critical(
+            self, tr("msg_import_pack_error_title"), tr("msg_import_pack_error", error=error)))
+        worker.finished.connect(lambda: self.statusBar().clearMessage())
+        self.statusBar().showMessage(tr("msg_pack_importing"))
+        worker.start()
 
     def on_open_pack_folder(self):
         """Import an existing exported pack folder (with _pack_info.ini and cue cards)."""
@@ -2205,10 +2536,10 @@ class MainWindow(QMainWindow):
         self._log_message(f"Opened project: {path.name} ({len(state.dialogues)} dialogues)", "ok")
         self._show_toast(tr("msg_project_loaded_title"), tr("msg_project_loaded_desc", count=len(state.dialogues), name=path.name), "ok")
 
-    def load_pack_folder(self, pack_dir: Path):
+    def load_pack_folder(self, pack_dir: Path, state=None):
         """Reconstruct project from an exported pack directory."""
         try:
-            state = ProjectManager.load_from_pack_folder(pack_dir)
+            state = state or ProjectManager.load_from_pack_folder(pack_dir)
             self._state = state
             self._undo_manager = UndoManager()
             self._output_dir = pack_dir
@@ -2253,7 +2584,7 @@ class MainWindow(QMainWindow):
                 return False
         return self.on_save_project_as()
 
-    def on_save_project_as(self) -> bool:
+    def on_save_project_as(self, *, agent_job_id=None) -> bool:
         """Prompt user for a destination and save project."""
         suggested_name = "Untitled_Project"
         if self._state.pack_info.title and self._state.pack_info.title != "Untitled Pack":
@@ -2274,6 +2605,21 @@ class MainWindow(QMainWindow):
             return False
 
         path = Path(path_str)
+        if agent_job_id is not None:
+            from core.agent_paths import validate_output
+            from core.agent_commands import CommandError
+            commands = self.agent_commands()
+            job = commands._jobs[agent_job_id]
+            if job.state != 'running':
+                commands.finish(agent_job_id, 'cancelled')
+                return False
+            try:
+                commands._check_revision(job.command)
+                path = validate_output(path, '.voicer')
+            except CommandError as exc:
+                commands.finish(agent_job_id, 'failed', exc.code)
+                QMessageBox.warning(self, tr('mcp_title'), tr('mcp_error', code=exc.code))
+                return False
         ok = ProjectManager.save_project(self._state, path)
         if ok:
             ProjectManager.delete_autosave(path)
@@ -2285,6 +2631,8 @@ class MainWindow(QMainWindow):
             self._show_toast(tr("msg_project_saved_title"), path.name, "ok")
             return True
         else:
+            if agent_job_id is not None:
+                self.agent_commands().finish(agent_job_id, 'failed', 'OPERATION_FAILED')
             self._log_message("Failed to save project file", "error")
             QMessageBox.critical(self, tr("msg_save_error_title"), tr("msg_save_error"))
             return False
@@ -2479,6 +2827,8 @@ class MainWindow(QMainWindow):
 
         self._add_recent_video(str(path.resolve()))
         self._state.video_path = path
+        self._agent_epoch = uuid4().hex
+        self._agent_revision = 0
 
         if not replace_video_only:
             self._state.pack_info.title = path.stem
@@ -2551,6 +2901,7 @@ class MainWindow(QMainWindow):
             def on_proxy_ready(out_path_str: str):
                 out_path = Path(out_path_str)
                 self._state.preview_proxy_path = out_path
+                self._agent_revision += 1
                 self._video_panel.set_proxy_video(out_path, target_height)
                 if self.statusBar():
                     self.statusBar().showMessage(f"Preview proxy ({target_height}p) ready", 4000)
@@ -2700,7 +3051,13 @@ class MainWindow(QMainWindow):
         if hasattr(self._worker.signals, 'pack_ready'):
             self._worker.signals.pack_ready.connect(self._on_pack_ready)
 
+        self._worker.signals.settled.connect(lambda _outcome: self._agent_state_settled())
+        self._bind_agent_worker(self._worker, 'pipeline')
+        self._agent_revision += 1  # Invalidate references before worker mutation.
         self._worker.start()
+
+    def _agent_state_settled(self):
+        self._agent_revision += 1
 
     def _on_dialogues_ready(self):
         """Called after VAD — populate table with initial segments."""
@@ -2844,7 +3201,92 @@ class MainWindow(QMainWindow):
             return
         from gui.export_dialog import ExportDialog
         dlg = ExportDialog(self, self._state, self._settings)
-        dlg.exec_()
+        self._export_dialog = dlg
+        dlg.worker_created.connect(lambda worker: self._bind_agent_worker(worker, 'export'))
+        try:
+            dlg.exec_()
+        finally:
+            self._export_dialog = None
+            self._agent_revision += 1
+
+    def on_agent_connection(self):
+        from gui.agent_dialog import AgentDialog
+        if self._agent_dialog is None:
+            self._agent_dialog = AgentDialog(self)
+        self._agent_dialog.show()
+        self._agent_dialog.raise_()
+        self._agent_dialog.activateWindow()
+
+    def _on_agent_changed(self):
+        if self._agent_dialog is not None:
+            self._agent_dialog.schedule_refresh()
+
+    def _enable_agent_bridge(self):
+        if self._agent_bridge is None:
+            from gui.agent_bridge import AgentBridge
+            self._agent_bridge = AgentBridge(self.agent_commands(), self)
+            self._agent_bridge.changed.connect(self._on_agent_changed)
+
+    def _add_agent_connection(self, scopes, *, approval_mode='ask'):
+        from core.agent_commands import CommandError
+        from core.agent_credentials import publish
+        bridge = self._agent_bridge
+        if bridge is None:
+            raise CommandError('APP_NOT_READY')
+        if scopes and 'read_project' not in scopes:
+            raise CommandError('INVALID_ARGUMENT')
+        if scopes and not (self._state.video_path or self._state.dialogues):
+            raise CommandError('NO_PROJECT')
+        ticket = bridge.open_session(scopes, approval_mode=approval_mode)
+        try:
+            reference = publish(ticket)
+        except CommandError:
+            bridge.revoke(ticket.session_id)
+            raise
+        self._agent_connections[ticket.session_id] = {'reference': reference}
+        self._on_agent_changed()
+        return ticket.session_id
+
+    def _revoke_agent_connection(self, session):
+        from core.agent_credentials import remove
+        connection = self._agent_connections.pop(session, None)
+        if self._agent_bridge:
+            self._agent_bridge.revoke(session)
+        if connection:
+            remove(connection['reference'])
+        self._on_agent_changed()
+
+    def _disable_agent_bridge(self, *, ask=False, cancel_running=False):
+        from core.agent_commands import CommandError
+        commands = self._agent_commands
+        running = [jid for jid, job in commands._jobs.items()
+                   if job.state in ('running', 'cancelling')] if commands else []
+        if ask and running:
+            choice = QMessageBox.question(self, tr('mcp_title'), tr('mcp_disable_jobs'),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel)
+            if choice == QMessageBox.StandardButton.Cancel:
+                return False
+            cancel_running = choice == QMessageBox.StandardButton.Yes
+        if cancel_running:
+            for job_id in running:
+                commands.cancel_trusted(job_id)
+        cleanup_failed = False
+        for session in list(self._agent_connections):
+            try:
+                self._revoke_agent_connection(session)
+            except CommandError:
+                cleanup_failed = True
+        if self._agent_bridge:
+            self._agent_bridge.close()
+            self._agent_bridge.deleteLater()
+            self._agent_bridge = None
+        if commands:
+            commands.change_notify = self._on_agent_changed
+        self._on_agent_changed()
+        if cleanup_failed:
+            self.statusBar().showMessage(tr('mcp_error', code='CREDENTIAL_CLEANUP_FAILED'))
+        return True
 
     def on_settings(self):
         dlg = SettingsDialog(self)
@@ -2894,6 +3336,11 @@ class MainWindow(QMainWindow):
             self.act_redo.setText(tr("menu_redo"))
             self._act_kb_shortcuts.setText(tr("menu_shortcuts"))
             self._act_settings.setText(tr("menu_settings"))
+            self._act_mcp.setText(tr('mcp_title'))
+            if self._agent_dialog is not None:
+                self._agent_dialog.hide()
+                self._agent_dialog.deleteLater()
+                self._agent_dialog = None
 
         if hasattr(self, '_menu_view'):
             self._menu_view.setTitle(tr("menu_view"))
@@ -3020,7 +3467,7 @@ class MainWindow(QMainWindow):
             token = str(settings.get("hf_token", ""))
             if not set_huggingface_token(token):
                 self._log_message("Could not securely save the Hugging Face token; settings were not changed.", "warn")
-                return
+                return False
             persisted_settings = dict(settings)
             persisted_settings.pop("hf_token", None)
             tmp = SETTINGS_FILE.with_suffix(".tmp")
@@ -3029,8 +3476,10 @@ class MainWindow(QMainWindow):
                 encoding="utf-8"
             )
             tmp.replace(SETTINGS_FILE)
+            return True
         except Exception as e:
             self._log_message(f"Could not save settings: {e}", "warn")
+            return False
 
     def closeEvent(self, event):
         report_worker = getattr(self, '_diagnostic_report_worker', None)
@@ -3039,29 +3488,26 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         if self._is_busy():
-            reply = QMessageBox.question(
-                self,
-                tr("msg_quit_busy_title"),
-                tr("msg_quit_busy_desc"),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                event.ignore()
-                return
-
-            # Gracefully terminate background workers
-            if hasattr(self, '_worker') and self._worker and self._worker.isRunning():
-                self._worker.cancel()
-                self._worker.wait(2000)
-            if hasattr(self, '_transcribe_worker') and self._transcribe_worker and self._transcribe_worker.isRunning():
-                self._transcribe_worker.wait(1500)
-            if hasattr(self, '_export_worker') and self._export_worker and self._export_worker.isRunning():
-                if hasattr(self._export_worker, 'cancel'):
-                    self._export_worker.cancel()
-                self._export_worker.wait(2000)
-            if hasattr(self, '_proxy_thread') and self._proxy_thread and self._proxy_thread.isRunning():
-                self._proxy_thread.wait(1000)
+            if not getattr(self, '_close_when_idle', False):
+                reply = QMessageBox.question(
+                    self, tr('msg_quit_busy_title'), tr('msg_quit_busy_desc'),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
+                    event.ignore()
+                    return
+                self._close_when_idle = True
+                for name in ('_worker', '_export_worker', '_agent_audio_worker'):
+                    worker = getattr(self, name, None)
+                    if worker and worker.isRunning() and hasattr(worker, 'cancel'):
+                        worker.cancel()
+                if self._export_dialog:
+                    self._export_dialog.reject()
+            # Uncancellable clip/proxy/asset operations finish normally; never terminate.
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
+        self._close_when_idle = False
 
         # Stop timers immediately to prevent background execution during exit
         if hasattr(self, '_autosave_timer'):
@@ -3121,9 +3567,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_update_worker') and self._update_worker and self._update_worker.isRunning():
             self._update_worker.terminate()
             self._update_worker.wait(100)
-        if hasattr(self, '_clip_transcribe_worker') and self._clip_transcribe_worker and self._clip_transcribe_worker.isRunning():
-            self._clip_transcribe_worker.terminate()
-            self._clip_transcribe_worker.wait(100)
 
         # Release GPU resources and memory on exit without blocking
         try:
@@ -3132,6 +3575,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        self._disable_agent_bridge(cancel_running=True)
         event.accept()
 
     def _build_stylesheet(self) -> str:

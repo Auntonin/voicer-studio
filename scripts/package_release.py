@@ -68,6 +68,7 @@ def step_stage_files():
         "main.py",
         "config.py",
         "requirements.txt",
+        "requirements-mcp.txt",
         "settings.example.json",
         "README.md",
         "LICENSE",

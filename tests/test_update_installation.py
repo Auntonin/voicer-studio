@@ -45,6 +45,25 @@ def make_package(path, members):
             archive.writestr(name, content)
 
 
+def test_mcp_manifest_update_preserves_projects_models_settings(tmp_path):
+    from scripts.update_installer import install_update
+    target = tmp_path / 'installed'
+    target.mkdir()
+    for filename, content in [('settings.json', 'user settings'), ('project.voicer', 'user project')]:
+        (target / filename).write_text(content)
+    (target / 'models').mkdir()
+    (target / 'models' / 'model.bin').write_bytes(b'preserve weights')
+    archive = tmp_path / 'update.zip'
+    make_package(archive, {'main.py': 'new code', 'config.py': 'new config',
+        'VoicerStudio.exe': 'fixture launcher', 'requirements-mcp.txt': 'mcp==2.3.0',
+        'scripts/mcp_server.py': 'gateway code'})
+    install_update(archive, True, target, target / 'VoicerStudio.exe')
+    assert (target / 'requirements-mcp.txt').read_text() == 'mcp==2.3.0'
+    assert (target / 'settings.json').read_text() == 'user settings'
+    assert (target / 'project.voicer').read_text() == 'user project'
+    assert (target / 'models' / 'model.bin').read_bytes() == b'preserve weights'
+
+
 def test_nested_release_installs_and_preserves_user_data(tmp_path):
     from scripts.update_installer import install_update
     target = tmp_path / 'installed ภาษาไทย & space'
@@ -151,6 +170,73 @@ def test_copy_failure_rolls_back_all_changed_files(tmp_path):
     assert (target / 'main.py').read_text() == 'old code'
     assert not (target / 'config.py').exists()
     assert not (target / 'VoicerStudio.exe').exists()
+
+
+def test_source_rollback_to_git_head_preserves_new_settings_and_project(tmp_path):
+    """Run the actual previous source loader in an isolated installation.
+
+    No running application is downgraded; HEAD is the explicit rollback target.
+    This validates source/settings compatibility, not a native installer smoke.
+    """
+    import io
+    from core.models import DialogueItem, PipelineState, SpeakerInfo
+    from core.project_manager import ProjectManager
+    from scripts.update_installer import install_update
+    from config import SUBPROCESS_FLAGS
+    repository = Path(__file__).resolve().parents[1]
+    revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=repository, check=True,
+                              capture_output=True, text=True).stdout.strip()
+    snapshot = subprocess.run(['git', 'archive', '--format=zip', revision], cwd=repository,
+                              check=True, capture_output=True).stdout
+    allowed = {'main.py', 'config.py', 'VoicerStudio.exe', 'requirements.txt',
+               'settings.example.json', 'README.md', 'LICENSE', 'core', 'gui',
+               'scripts', 'locales', 'assets'}
+    package = tmp_path / 'previous-source.zip'
+    with zipfile.ZipFile(io.BytesIO(snapshot)) as source, zipfile.ZipFile(package, 'w') as archive:
+        for item in source.infolist():
+            if not item.is_dir() and Path(item.filename).parts[0] in allowed:
+                archive.writestr(item, source.read(item))
+    target = tmp_path / 'isolated rollback ภาษาไทย'
+    target.mkdir()
+    settings = {'mcp_enabled': True, 'check_updates_startup': False,
+                'language': 'th', 'user_preference_fixture': 'preserved'}
+    (target / 'settings.json').write_text(json.dumps(settings), encoding='utf-8')
+    (target / 'models').mkdir()
+    (target / 'models' / 'fixture.bin').write_bytes(b'preserved synthetic weights')
+    (target / 'media').mkdir()
+    (target / 'media' / 'fixture.bin').write_bytes(b'preserved synthetic media')
+    project = target / 'fixture.voicer'
+    state = PipelineState(video_duration=3, speakers={'one': SpeakerInfo('one', 'Fixture')},
+                          dialogues=[DialogueItem(1, 'one', .2, 1.2, 'ทดสอบ rollback')])
+    assert ProjectManager.save_project(state, project)
+    before = {path.relative_to(target): path.read_bytes() for path in target.rglob('*') if path.is_file()}
+    install_update(package, True, target, target / 'VoicerStudio.exe')
+    # Orphaned optional source files are not removed by the updater: old startup
+    # must not import or activate them merely because the new setting remains.
+    (target / 'requirements-mcp.txt').write_text('mcp==2.3.0')
+    code = '''
+import json, sys
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, str(Path.cwd()))
+from core.project_manager import ProjectManager
+from gui.main_window import MainWindow
+with patch('core.credentials.get_huggingface_token', return_value=''):
+    settings = MainWindow._load_settings(None)
+assert settings['mcp_enabled'] is True
+assert settings['user_preference_fixture'] == 'preserved'
+state = ProjectManager.load_project(Path('fixture.voicer'))
+assert state.dialogues[0].caption == 'ทดสอบ rollback'
+assert state.dialogues[0].start == .2 and state.dialogues[0].end == 1.2
+assert 'mcp' not in sys.modules and 'gui.agent_bridge' not in sys.modules
+print(json.dumps({'rollback_loader': 'passed'}))
+'''
+    result = subprocess.run([sys.executable, '-c', code], cwd=target, capture_output=True,
+                            text=True, encoding='utf-8', timeout=30, creationflags=SUBPROCESS_FLAGS)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['rollback_loader'] == 'passed'
+    for relative, content in before.items():
+        assert (target / relative).read_bytes() == content
 
 
 def test_installer_runs_as_real_isolated_python_process(tmp_path):

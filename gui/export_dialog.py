@@ -211,6 +211,7 @@ class FullExportWorker(QThread):
     progress = Signal(float, str)             # (percent_float, detail_message)
     finished = Signal(str, str, float, int)   # (zip_path, pack_dir, elapsed_sec, zip_size_bytes)
     error    = Signal(str)
+    settled  = Signal(str)
 
     def __init__(self, state: PipelineState, output_base: Path, zip_path: Path, options: dict, parent=None):
         super().__init__(parent)
@@ -219,6 +220,7 @@ class FullExportWorker(QThread):
         self.zip_path = zip_path
         self.options = options
         self._is_cancelled = False
+        self.outcome = 'failed'
 
     def cancel(self):
         self._is_cancelled = True
@@ -226,6 +228,8 @@ class FullExportWorker(QThread):
     def run(self):
         t0 = time.time()
         try:
+            if self._is_cancelled:
+                return
             builder = PackBuilder()
 
             def on_progress(pct: float, msg: str):
@@ -237,7 +241,8 @@ class FullExportWorker(QThread):
 
             pack_dir = builder.build_pack(
                 self.state, self.output_base, self.options,
-                progress_cb=on_progress
+                progress_cb=on_progress,
+                cancel_check=lambda: self._is_cancelled,
             )
 
             if self._is_cancelled:
@@ -269,20 +274,26 @@ class FullExportWorker(QThread):
                 raise RuntimeError("Export cancelled by user")
 
             elapsed = time.time() - t0
-            zip_size = self.zip_path.stat().st_size if self.zip_path.exists() else 0
+            zip_size = self.zip_path.stat().st_size
             self.progress.emit(100.0, tr("exp_step_success"))
             self.finished.emit(str(self.zip_path), str(pack_dir), elapsed, zip_size)
+            self.outcome = 'succeeded'
 
         except Exception as e:
             if not self._is_cancelled:
                 logging.getLogger(__name__).exception('Export failed', extra={'operation': 'export'})
                 self.error.emit(str(e))
+        finally:
+            if self._is_cancelled and self.outcome != 'succeeded':
+                self.outcome = 'cancelled'
+            self.settled.emit(self.outcome)
 
 
 class ExportDialog(QDialog):
     """
     Modern Adobe-style Export Dialog.
     """
+    worker_created = Signal(object)
     SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
     def showEvent(self, event):
@@ -302,6 +313,7 @@ class ExportDialog(QDialog):
         self._pending_finish_data: Optional[tuple] = None
         self._spinner_idx: int = 0
         self._spinner_tick: int = 0
+        self._close_pending = False
 
         self.setWindowTitle(tr("exp_win_title"))
         self.setFixedSize(620, 440)
@@ -753,18 +765,56 @@ class ExportDialog(QDialog):
         }
 
     def _start_export(self):
+        agent_id = getattr(self.parent(), '_agent_pending_job', None)
+        if agent_id:
+            from core.agent_paths import validate_output
+            from core.agent_commands import CommandError
+            commands = self.parent().agent_commands()
+            job = commands._jobs[agent_id]
+            if job.state != 'running':
+                commands.finish(agent_id, 'cancelled')
+                return
+            try:
+                commands._check_revision(job.command)
+                validate_output(self.target_zip_path, '.zip')
+            except CommandError as exc:
+                commands.finish(agent_id, 'failed', exc.code)
+                QMessageBox.warning(self, tr('mcp_title'), tr('mcp_error', code=exc.code))
+                return
+            if self.target_zip_path.exists():
+                answer = QMessageBox.question(self, tr('mcp_title'), tr('mcp_overwrite'),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
         # Pre-export check: Detect missing assets and request user confirmation if needed
         missing_info = self._detect_missing_assets()
         if missing_info["has_missing"]:
             auto_repair = self.settings.get("auto_repair_missing_export_assets", False)
+            # Agent requests never inherit blanket auto-repair consent.
+            agent_request = bool(getattr(self.parent(), '_agent_pending_job', None))
+            if agent_request:
+                auto_repair = False
             if not auto_repair:
                 dlg = ExportRepairConfirmDialog(missing_info, parent=self)
+                if agent_request:
+                    dlg.chk_dont_ask.setVisible(False)
                 if dlg.exec() != QDialog.DialogCode.Accepted:
                     return
-                if dlg.dont_ask_again():
+                if dlg.dont_ask_again() and not agent_request:
                     self.settings["auto_repair_missing_export_assets"] = True
                     save_settings(self.settings)
 
+        if agent_id:
+            # Recheck after nested overwrite/repair dialogs, immediately before worker I/O.
+            try:
+                if job.state != 'running':
+                    commands.finish(agent_id, 'cancelled')
+                    return
+                commands._check_revision(job.command)
+                validate_output(self.target_zip_path, '.zip')
+            except CommandError as exc:
+                commands.finish(agent_id, 'failed', exc.code)
+                return
         self.state.pack_info.include_dub_video = self.chk_dub_video.isChecked()
 
         # Update thumbnail & title on progress page
@@ -804,7 +854,39 @@ class ExportDialog(QDialog):
         self.worker.progress.connect(self._on_worker_progress)
         self.worker.finished.connect(self._on_worker_finished)
         self.worker.error.connect(self._on_worker_error)
+        self.worker.settled.connect(self._on_worker_settled)
+        self.worker_created.emit(self.worker)
         self.worker.start()
+
+    def _on_worker_settled(self, outcome):
+        if outcome == 'cancelled':
+            self.timer.stop()
+            self.reject()
+
+    def reject(self):
+        # Escape/window-close must not orphan a running export or destroy its QThread.
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel()
+            if not self._close_pending:
+                self._close_pending = True
+                QTimer.singleShot(50, self._close_when_worker_stops)
+            return
+        super().reject()
+
+    def _close_when_worker_stops(self):
+        if self.worker and self.worker.isRunning():
+            QTimer.singleShot(50, self._close_when_worker_stops)
+        else:
+            self._close_pending = False
+            self.timer.stop()
+            super().reject()
+
+    def closeEvent(self, event):
+        if self.worker and self.worker.isRunning():
+            self.reject()
+            event.ignore()
+        else:
+            super().closeEvent(event)
 
     def _on_worker_progress(self, percent: float, msg: str):
         self.target_percent = max(self.target_percent, min(100.0, percent))
@@ -883,8 +965,8 @@ class ExportDialog(QDialog):
                 self.worker.cancel()
                 self.btn_abort.setEnabled(False)
                 self.lbl_step_detail.setText(tr("exp_cancelling"))
-                self.worker.wait(2000)
-            self.reject()
+            else:
+                self.reject()
 
     def _open_output_folder(self):
         from core.platform_utils import platform_utils

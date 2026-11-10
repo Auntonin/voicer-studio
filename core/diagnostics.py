@@ -55,6 +55,14 @@ class _JsonFormatter(logging.Formatter):
         for key in ('operation', 'stage'):
             if hasattr(record, key):
                 data[key] = redact(str(getattr(record, key)))
+        # Correlation fields are opaque runtime IDs, never arbitrary user data.
+        for key in ('request_id', 'job_id', 'session_id'):
+            value = getattr(record, key, None)
+            if isinstance(value, str) and re.fullmatch('[0-9a-f]{32}', value):
+                data[key] = value
+        code = getattr(record, 'code', None)
+        if isinstance(code, str) and re.fullmatch('[A-Z_]{1,40}', code):
+            data['code'] = code
         return json.dumps(data, ensure_ascii=False)
 
 

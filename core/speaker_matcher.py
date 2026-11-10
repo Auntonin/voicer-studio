@@ -103,7 +103,7 @@ class SpeakerMatcher:
             return False
         spk = state.get_speaker(speaker_id)
         vec = cls.extract_segment_features(audio_path, start, end)
-        if vec is None:
+        if vec is None or not np.all(np.isfinite(vec)) or float(np.linalg.norm(vec)) <= 1e-6:
             return False
 
         if not sample_name:
@@ -124,10 +124,7 @@ class SpeakerMatcher:
                 new_vec = new_vec / norm
             spk.embedding = new_vec.tolist()
 
-        logger.info(
-            f"Enrolled sample '{sample_name}' for speaker {speaker_id} ({spk.display_name}). "
-            f"Total samples: {len(spk.voiceprint_samples)}"
-        )
+        logger.info('Enrolled reference voice sample', extra={'operation': 'speaker_enrollment', 'stage': 'complete'})
         return True
 
     @classmethod
@@ -142,6 +139,37 @@ class SpeakerMatcher:
     def has_enrolled_speakers(state: PipelineState) -> bool:
         """Returns True if at least one speaker in state has an enrolled voiceprint."""
         return any(spk.has_voiceprint() for spk in state.speakers.values())
+
+    @classmethod
+    def analyze_segment(cls, state: PipelineState, audio_path: Path, start: float, end: float) -> Dict[str, Any]:
+        """Read-only ranking. Similarity is not calibrated probability.
+
+        Short segments, a single reference identity, and weak/ambiguous matches
+        remain review-only. Never assign a speaker as a side effect.
+        """
+        vec = cls.extract_segment_features(audio_path, start, end)
+        if vec is None or not np.all(np.isfinite(vec)) or float(np.linalg.norm(vec)) <= 1e-6:
+            raise ValueError('AUDIO_ANALYSIS_FAILED')
+        vec = vec / np.linalg.norm(vec)
+        scores = []
+        for sid, speaker in state.speakers.items():
+            if not speaker.has_voiceprint():
+                continue
+            reference = np.asarray(speaker.embedding, dtype=np.float32)
+            if reference.shape != vec.shape or not np.all(np.isfinite(reference)):
+                continue
+            norm = float(np.linalg.norm(reference))
+            if norm <= 1e-6:
+                continue
+            score = float(np.dot(vec, reference / norm))
+            scores.append({'speaker_id': sid, 'score': round(max(0., min(1., score)), 4)})
+        scores.sort(key=lambda candidate: candidate['score'], reverse=True)
+        if not scores:
+            raise ValueError('NO_REFERENCE_VOICE')
+        margin = scores[0]['score'] - (scores[1]['score'] if len(scores) > 1 else 0.)
+        return {'method': 'acoustic_features_52', 'score_is_probability': False,
+                'candidates': scores[:3], 'margin': round(margin, 4),
+                'needs_review': len(scores) < 2 or end - start < 1. or scores[0]['score'] < .85 or margin < .15}
 
     @classmethod
     def match_dialogues(

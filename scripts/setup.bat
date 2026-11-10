@@ -3,17 +3,17 @@ cd /d "%~dp0.."
 setlocal enabledelayedexpansion
 
 :: ============================================================
-:: The Choice Voicer Dialogue Extractor — Windows Setup
+:: Voicer Studio — Windows Setup
 :: ============================================================
 :: Requires: Python 3.10+ and FFmpeg in PATH
 :: Run this script once before launching the application.
 :: ============================================================
 
-title The Choice Voicer Dialogue Extractor — Setup
+title Voicer Studio — Setup
 
 echo.
 echo  ==========================================
-echo   The Choice Voicer Dialogue Extractor
+echo   Voicer Studio
 echo   Setup Script for Windows
 echo  ==========================================
 echo.

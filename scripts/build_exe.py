@@ -67,7 +67,7 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName",      "The Choice Voicer"
+            VALUE "CompanyName",      "Voicer Studio"
             VALUE "FileDescription",  "Voicer Studio — Dialogue Extractor & Audio Separation Suite"
             VALUE "FileVersion",      "{v_dotted}"
             VALUE "InternalName",     "VoicerStudio"

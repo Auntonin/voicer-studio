@@ -3,7 +3,7 @@
 <img src="assets/app_icon.png" width="128" height="128" alt="Voicer Studio Logo" />
 
 # Voicer Studio
-### The Choice Voicer Dialogue Extractor & Vocal Separator
+### Voicer Studio — Dialogue Editing & Vocal Separation
 
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![GUI Framework](https://img.shields.io/badge/GUI-PySide6%20(Qt6)-41cd52.svg)](https://wiki.qt.io/Qt_for_Python)
@@ -212,6 +212,153 @@ when exported, but their raw local files can contain paths. No variable/local
 values or memory dumps are collected. Disk/permission failures are reported rather
 than preventing the application from starting. Logging is diagnostic evidence,
 not proof that every possible bug or external process failure was captured.
+
+## Optional MCP connection (experimental; not release-qualified)
+
+`scripts/mcp_server.py` uses the official Python MCP SDK over stdio. The regular
+application needs no MCP dependency and opens no listener by default. Install
+`requirements-mcp.txt` plus the application's existing PySide6 dependency in a
+**separate virtual environment**, not the AI environment. Nothing installs or
+downloads automatically. Use the absolute interpreter and script paths in
+`scripts/mcp_client.example.json`; edit them for your installation. Arguments
+are an array, including paths with spaces or Thai characters. No shell or batch
+launcher is used, and the gateway does not start another GUI instance.
+
+Open **Edit → AI / MCP Connection**, then explicitly enable the local bridge.
+It is off on every launch, even with an older saved `mcp_enabled: true` setting.
+Enabling starts the local bridge and creates a metadata-only connection without
+a Start/Copy step. The main panel shows persistent connected AI names and count.
+First-time client configuration is under Advanced: choose Codex or Claude Desktop,
+select permissions, then click Connect selected app. Enabling alone does not edit
+other apps' configuration. Explicitly requested configuration runs in the background.
+Codex uses the installed `codex mcp add` CLI, with Windows desktop-bundled CLI
+discovery when PATH is missing. Claude Desktop merges its local JSON configuration
+and preserves a pre-integration backup and unrelated entries. It chooses a validated
+Python gateway interpreter, not `VoicerStudio.exe`; missing dependencies/CLI or a
+customized existing entry produce an actionable error without automatic installs.
+Only the `voicer-studio` entry is managed; client approval/sandbox policies are not
+changed. Reconnect or start a new Codex chat after configuration is ready; fully
+quit and reopen Claude Desktop yourself. Configured does not mean connected:
+the live client count confirms a gateway connection; names are peer-reported, not
+authenticated product identities. Other clients use an explicitly
+labeled manual configuration option, not a claim of universal automatic setup.
+Choose Always automatic if desired, then explicitly click Allow all supported
+project functions, or expand advanced permissions to grant fewer scopes. The
+all-functions button includes transcripts and speaker names: those may reach the
+AI provider's cloud. Advanced controls retain manual stdio configuration for
+other clients. Config syntax and local MCP support differ by product; no native
+AI product end-to-end connection is certified by the tests below.
+
+The `--session` argument is a public, per-connection reference, not a credential.
+Windows uses Windows Credential Manager; macOS uses Keychain; Linux requires a
+working Secret Service desktop session. The GUI needs its existing keyring
+dependency; the gateway environment needs keyring and PySide6 too. Unknown,
+plaintext and chained backends are rejected; missing/locked stores fail closed.
+Credentials never enter settings, argv, repo files, config examples or diagnostics.
+They are removed on normal revoke/disable/exit; after a crash an orphaned OS-store
+entry cannot authenticate against a restarted instance and may be removed through
+the OS credential manager. Recreate connections after restart or changing projects.
+Each reference selects one specific running instance; multiple windows do not
+share authorization. No TCP/HTTP/LAN listener or automatic GUI launch is provided.
+The in-memory environment-based ticket route remains available for trusted test
+harnesses only. Approval is deliberately NOT an MCP tool.
+
+Permissions control tool/resource/prompt listing and are checked again on calls.
+`read_project`, `read_transcript`, and `read_speaker_names` are independent.
+The 25 supported tools include captions/assignments, character management,
+reference-voice enrollment, local ranked voice analysis, confidence-guarded
+assignment, clip creation/soft deletion/split/merge/timing, audio/frame
+regeneration and project Undo/Redo, alongside status, save/export/pipeline jobs.
+Local acoustic-feature scores are not probabilities or validated human-speaker
+accuracy. Uncertain, short, single-reference or ambiguous matches require review
+and cannot be applied through the confident-match tool. Timing changes invalidate
+assets; request regeneration or use the existing export repair workflow.
+Audio regeneration re-slices existing audio, not voice conversion or synthesis.
+Save uses existing Save As confirmation; export and pipeline retain their dialogs.
+No arbitrary path, raw media, batch, shell, or self-approval tool exists. This is
+not an API for every GUI menu or whole-computer control.
+Caption/metadata text is untrusted data, never an instruction to bypass policy.
+An external AI provider may send returned data to its cloud even though Voicer
+  Studio and this bridge run locally: grant transcript access only deliberately.
+
+Choose Ask every time (default), Automatic for this session, or Always automatic
+in the trusted MCP panel. Automatic modes require an explicit risk confirmation
+and apply only to granted scopes and supported commands. Always remembers the
+choice, not credentials or permissions; the bridge remains off on every launch.
+Changing back to Ask or revoking stops queued automatic requests; running work
+requires cancellation. Agents cannot change this policy. Existing save/export/
+pipeline workflow dialogs still require user input, and no whole-computer control
+is provided. Poll job status; queued automatic approval is not completed work.
+
+Select a pending job to see the plain-text caption/speaker diff. Approval expires
+after five minutes and rechecks session, project epoch, revision and immutable
+payload before mutation. Pipeline options/output and possible model downloads are
+shown before approval; change options in Settings first. Export uses the original
+dialog and validator, with explicit overwrite/repair confirmation each time,
+regardless of GUI blanket auto-repair preferences. Save uses the original Save As
+dialog. No destination is accepted from an agent. Selected Windows destinations
+reject traversal, invalid extensions, UNC/mapped network drives and reparse points;
+all platforms reject symlinks. Checks are repeated after dialogs, before I/O.
+This reject/recheck policy does NOT secure concurrent hostile filesystem replacement
+or every Unix network mount: stronger safe-open validation remains a release gate.
+
+Revoke removes credentials and pending approvals. For running jobs, choose whether
+to request cooperative cancellation or let approved work finish. Disable stops the
+listener and revokes every session; approved jobs remain visible and cancellable in
+the panel even after revocation. No thread is killed or output deleted by MCP.
+Closing the control panel alone does not disable the bridge. Permissions are NOT
+a sandbox for filesystem/shell tools that an AI agent has outside Voicer Studio.
+
+Writes require an epoch, expected revision, and idempotency key. Identical retries
+within the same authorized application session reuse the proposal/job; different
+payloads with the same key fail. The cache holds at most 256 keys for 10 minutes,
+  and jobs are bounded separately. Reconnect never automatically replays a write.
+After restart, expired credentials or a project change, obtain fresh authorization
+  and read state before resubmitting; exactly-once across restarts is not promised.
+
+Limits: 16 authorized sessions, 8 IPC sockets, one pending approval per session,
+128 job records, 128 requests/second/session, 100 clips/page and 64 KiB IPC messages.
+Status polling should back off; `RATE_LIMITED` requires waiting at least one second.
+`APP_NOT_READY`: open/enable the selected app instance; `PERMISSION_DENIED`: ask the
+user to grant scopes; `REVISION_CONFLICT`: read a fresh snapshot; `APPROVAL_EXPIRED`:
+propose anew; `IDEMPOTENCY_CONFLICT`: restore the original payload or use a new key.
+
+Verified locally: Windows / Python 3.12 / PySide6 6.11.2 / MCP SDK 2.3.0, official
+`ClientSession` subprocess stdio client, protocol `2025-11-25`; native Windows
+keyring references; offscreen UI controls; staged source ZIP/checksum/updater and
+installed gateway under a Thai/space path. This does not certify a newly compiled
+launcher, a dependency-clean desktop install or import into The Choice Voicer.
+Also verified: [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+CLI 2.10.1 with Node 24.14.1, legacy-era stdio `tools/list` and a metadata-only
+`tools/call`, through a public OS-keyring session reference. Its v2 command
+ordering was checked against the installed source (server argv before `--`,
+Inspector options after). The test interpreter explicitly borrowed the app's Qt
+installation via test-only PYTHONPATH; use a complete dedicated runtime for real
+clients. The Inspector web UI and other methods were not tested.
+Python 3.10/3.11, macOS/Linux desktop permissions/Keychain/Secret Service, real
+desktop smoke tests and two user-selected AI clients remain unverified.
+CI retains the original OS × Python matrix and adds SDK tests in a separate venv;
+the remote matrix has not been run here. A pinned Windows Inspector CLI gate is
+separate; without its configured test environment, only that optional test skips.
+Existing SDK-free coverage is unchanged.
+Source/runtime support is distinct from binary delivery: the current packager is
+win64, not a native macOS/Linux installer. No version bump or release was made.
+
+`scripts/benchmark_agent.py --mode off|on` prints raw offscreen microbenchmark data;
+`tests/fixtures/mcp_benchmark_windows.json` records same-build off/on measurements.
+The fixture has 10,000 synthetic clips, bounded IPC pages, 12 logical CPU cores,
+50 query samples and 50 toggles. CPU normalization is process CPU/wall time/cores;
+the measurement loop itself consumes CPU. IPC timings exclude MCP stdio/client
+overhead. SDK is absent from the GUI in both modes. These measurements are NOT a
+pre-change baseline, desktop latency result or proof of pipeline/RAM/VRAM <=5%
+regression. Full media benchmarks and agreed budgets are outstanding release gates.
+
+For rollback, disable/revoke, then wait for workers to finish/cancel safely before
+using the existing source/package rollback workflow. Never downgrade while writing
+files. MCP does not alter project/pack formats or remove projects/media/models/
+settings; the new settings key is ignored by older versions. An actual previous-
+version desktop rollback trial remains pending. Do not release until all security,
+export/project compatibility, cross-platform, client and performance gates pass.
 
 ## 📄 License
 

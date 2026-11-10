@@ -13,6 +13,8 @@ import os
 import re
 import shutil
 import time
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Set
 
@@ -48,6 +50,38 @@ def _read_quoted_array(content: str, key: str) -> List[str]:
 
 class ProjectManager:
     """Handles project save/load, pack folder import, and auto-save operations."""
+
+    @classmethod
+    def load_from_pack_zip(cls, archive_path: Path, destination: Path) -> PipelineState:
+        """Extract one pack to a unique persistent workspace, never over user files."""
+        destination = Path(destination).resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        workspace = Path(tempfile.mkdtemp(prefix="voicer_import_", dir=destination)).resolve()
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                targets = set()
+                for member in archive.infolist():
+                    name = member.filename.replace("\\", "/")
+                    target = (workspace / name).resolve()
+                    if (not target.is_relative_to(workspace) or ":" in name
+                            or (member.external_attr >> 16) & 0o170000 == 0o120000):
+                        raise ValueError(f"Unsafe ZIP entry: {member.filename}")
+                    key = str(target).casefold()
+                    if key in targets:
+                        raise ValueError(f"Duplicate ZIP entry: {member.filename}")
+                    targets.add(key)
+                archive.extractall(workspace)
+            candidates = [p.parent for p in workspace.rglob("_pack_info.ini")]
+            if len(candidates) != 1:
+                raise ValueError("ZIP must contain exactly one pack with _pack_info.ini")
+            state = cls.load_from_pack_folder(candidates[0])
+            if not state.dialogues:
+                raise ValueError("Pack contains no dialogue cue cards")
+            return state
+        except Exception:
+            # Only remove the unique workspace allocated by this call.
+            shutil.rmtree(workspace)
+            raise
 
     @staticmethod
     def save_project(state: PipelineState, path: Path) -> bool:
@@ -132,6 +166,7 @@ class ProjectManager:
             raise NotADirectoryError(f"Directory not found: {pack_dir}")
 
         state = PipelineState()
+        state.imported_pack_name = pack_dir.name
 
         # 1. Parse _pack_info.ini if present
         ini_file = pack_dir / "_pack_info.ini"
@@ -186,7 +221,7 @@ class ProjectManager:
 
         for txt_path in txt_files:
             try:
-                content = txt_path.read_text(encoding="utf-8")
+                content = txt_path.read_text(encoding="utf-8-sig")
             except Exception as e:
                 logger.warning(f"Could not read cue file {txt_path}: {e}")
                 continue
@@ -241,7 +276,7 @@ class ProjectManager:
             image_path = None
             if image_name:
                 cand_img = pack_dir / image_name
-                if cand_img.exists():
+                if Path(image_name).name == image_name and cand_img.is_file():
                     image_path = cand_img
             if not image_path:
                 for alt_ext in (".png", ".jpg", ".jpeg", ".webp"):
@@ -271,6 +306,7 @@ class ProjectManager:
                 caption_confirmed=bool(caption),
                 image_confirmed=bool(image_path),
                 audio_confirmed=bool(audio_path and audio_path.exists()),
+                imported_filename=txt_path.stem,
             )
 
             if len(char_names) > 1:
@@ -283,7 +319,7 @@ class ProjectManager:
             state.speakers["SPEAKER_00"] = SpeakerInfo(speaker_id="SPEAKER_00", display_name="Speaker 1")
             state.speaker_order = ["SPEAKER_00"]
 
-        state.renumber()
+        state.pack_info.include_dub_video = bool(state.video_path)
 
         # Update duration if not yet set
         if state.video_duration <= 0.0 and state.dialogues:

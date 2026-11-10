@@ -1,5 +1,7 @@
 {
   "app_language": "en",
+  "mcp_enabled": false,
+  "mcp_approval_mode": "ask",
   "hf_token": "",
   "whisper_model": "large-v3",
   "whisper_language": null,

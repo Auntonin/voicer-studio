@@ -52,6 +52,8 @@ class ClipEditor(QWidget):
     split_requested = Signal(int)
     merge_requested = Signal(int)
     play_started = Signal()
+    asset_changed = Signal(object)
+    _frame_job_finished = Signal()
     _frame_qimage_ready = Signal(int, QImage, object, str)
     _preview_audio_ready = Signal(str)
 
@@ -61,6 +63,8 @@ class ClipEditor(QWidget):
         self.state = None
         self._temp_audio_file = None
         self._is_loading = False
+        self._frame_jobs = 0
+        self._frame_job_finished.connect(self._finish_frame_job)
 
         # Asynchronous frame preview state (prevents UI freeze during scrubbing/cutting)
         self._frame_preview_timer = QTimer(self)
@@ -517,8 +521,8 @@ class ClipEditor(QWidget):
             return
         new_spk = self.combo_speaker.currentData()
         if new_spk and new_spk != self.item.speaker_id:
-            self.item.speaker_id = new_spk
             self.speaker_changed.emit(self.item.index, new_spk)
+            self.item.speaker_id = new_spk
             self._set_save_status("Saved")
 
     def _auto_save_timing(self):
@@ -527,9 +531,9 @@ class ClipEditor(QWidget):
         s = self.spin_start.value()
         e = max(s + 0.05, self.spin_end.value())
         if abs(self.item.start - s) > 0.001 or abs(self.item.end - e) > 0.001:
+            self.timestamps_changed.emit(self.item.index, s, e)
             self.item.start = s
             self.item.end = e
-            self.timestamps_changed.emit(self.item.index, s, e)
         self._set_save_status("Saved")
 
     def _set_save_status(self, text: str):
@@ -539,6 +543,7 @@ class ClipEditor(QWidget):
         if req_id == self._frame_preview_req_id and item is self.item and not qimg.isNull():
             if image_path:
                 item.image_path = Path(image_path)
+                self.asset_changed.emit(item)
             pix = QPixmap.fromImage(qimg).scaled(152, 86, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.image_preview.setPixmap(pix)
         elif image_path:
@@ -567,6 +572,7 @@ class ClipEditor(QWidget):
         video_src = self.state.preview_proxy_path if (self.state.preview_proxy_path and self.state.preview_proxy_path.exists()) else self.state.video_path
         if save_image:
             video_src = self.state.video_path
+        self._frame_jobs += 1
 
         def _worker():
             try:
@@ -594,9 +600,14 @@ class ClipEditor(QWidget):
                     self._frame_qimage_ready.emit(req_id, qimg, item, image_path)
             except Exception:
                 pass
+            finally:
+                self._frame_job_finished.emit()
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _finish_frame_job(self):
+        self._frame_jobs -= 1
 
     def load_item(self, item: DialogueItem, state: PipelineState):
         self._frame_preview_req_id += 1

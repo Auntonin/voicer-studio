@@ -3,6 +3,10 @@ import re
 import shutil
 import subprocess
 import zipfile
+import time
+from queue import Queue, Empty
+from threading import Thread
+from uuid import uuid4
 from copy import copy
 from collections import deque
 from pathlib import Path
@@ -137,6 +141,9 @@ class PackBuilder:
                 if not name or not str(name).strip():
                     if sid in state.speakers and state.speakers[sid].display_name.strip():
                         name = state.speakers[sid].display_name.strip()
+                    elif item.imported_filename:
+                        # Imported extra speakers are display names, not AI IDs.
+                        name = sid
                     else:
                         name = state.get_speaker_safe_name(sid)
                 if name and str(name).strip():
@@ -157,8 +164,10 @@ class PackBuilder:
         return pack_info.to_ini_string()
 
     @staticmethod
-    def get_unique_pack_dir(output_dir: Path, title: str) -> Path:
+    def get_unique_pack_dir(output_dir: Path, title: str, preserve_name: bool = False) -> Path:
         sanitized = PackBuilder.sanitize_pack_name(title)
+        if preserve_name and title not in (".", "..") and Path(title).name == title:
+            sanitized = title
         target = output_dir / sanitized
         if not target.exists():
             return target
@@ -192,9 +201,11 @@ class PackBuilder:
         state: PipelineState,
         output_dir: Path,
         options: dict,
-        progress_cb: Optional[Callable[[float, str], None]] = None
+        progress_cb: Optional[Callable[[float, str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Path:
-        pack_dir = self.get_unique_pack_dir(output_dir, state.pack_info.title)
+        pack_dir = self.get_unique_pack_dir(output_dir, state.imported_pack_name or state.pack_info.title,
+                                            preserve_name=bool(state.imported_pack_name))
         pack_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Building pack in {pack_dir}")
@@ -215,6 +226,10 @@ class PackBuilder:
 
         timestamp_mode = options.get('timestamp_mode', 'start_only')
         active_items = state.active_dialogues()
+        filenames = [item.filename_base(state.get_speaker_safe_name(item.speaker_id)).casefold()
+                     for item in active_items]
+        if len(filenames) != len(set(filenames)):
+            raise ValueError("Duplicate dialogue filenames in export")
         total_items = max(1, len(active_items))
         from core.quality_checker import QualityChecker
         checker = QualityChecker()
@@ -241,12 +256,16 @@ class PackBuilder:
 
         try:
             for idx, item in enumerate(active_items):
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Export cancelled by user")
                 speaker_safe_name = state.get_speaker_safe_name(item.speaker_id)
                 base_name = item.filename_base(speaker_safe_name)
 
                 # 1. Copy/repair audio (.mp3)
                 dest_audio = pack_dir / f"{base_name}.mp3"
                 if item.audio_path and checker._check_audio_readable(Path(item.audio_path)):
+                    if item.imported_filename:
+                        dest_audio = pack_dir / f"{base_name}{item.audio_path.suffix}"
                     if Path(item.audio_path).resolve() != dest_audio.resolve():
                         shutil.copy2(item.audio_path, dest_audio)
                 else:
@@ -263,7 +282,10 @@ class PackBuilder:
                 # 2. Copy/repair image (.png)
                 dest_image = pack_dir / f"{base_name}.png"
                 old_image_name = Path(item.image_path).name if item.image_path else ""
-                if item.image_path and checker._check_png_readable(Path(item.image_path)):
+                if item.image_path and (checker._check_image_readable(Path(item.image_path))
+                                        if item.imported_filename else checker._check_png_readable(Path(item.image_path))):
+                    if item.imported_filename:
+                        dest_image = pack_dir / f"{base_name}{item.image_path.suffix}"
                     if Path(item.image_path).resolve() != dest_image.resolve():
                         shutil.copy2(item.image_path, dest_image)
                 else:
@@ -327,134 +349,186 @@ class PackBuilder:
             else:
                 self._create_fallback_audio(dest_bg, max(1.0, state.video_duration))
 
-        # Video Processing
+        # Share the same video creation path with Analyze.
         if has_video:
-            # 1. Chunked stream copy of source video as dub_video.mp4
-            dest_mp4 = pack_dir / "dub_video.mp4"
-            if state.video_path.resolve() != dest_mp4.resolve():
-                try:
-                    if state.video_path.suffix.lower() == ".mp4":
-                        self._copy_file_chunked(
-                            state.video_path, dest_mp4,
-                            vid_copy_base, vid_copy_span,
-                            progress_cb=progress_cb,
-                            msg_template=tr("exp_step_copying_source", cur="{cur}", total="{total}")
-                        )
-                    else:
-                        from config import SUBPROCESS_FLAGS
-                        result = subprocess.run(
-                            ["ffmpeg", "-y", "-i", str(state.video_path), "-map", "0:v:0",
-                             "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", str(dest_mp4)],
-                            capture_output=True, timeout=300, creationflags=SUBPROCESS_FLAGS
-                        )
-                        if result.returncode != 0:
-                            # Codecs such as Theora cannot be copied into MP4.
-                            result = subprocess.run(
-                                ["ffmpeg", "-y", "-i", str(state.video_path), "-map", "0:v:0",
-                                 "-map", "0:a:0?", "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                                 "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(dest_mp4)],
-                                capture_output=True, creationflags=SUBPROCESS_FLAGS
-                            )
-                            if result.returncode != 0:
-                                logger.error('MP4 FFmpeg failed: %s', result.stderr.decode('utf-8', errors='replace')[-4096:], extra={'operation': 'export', 'stage': 'mp4'})
-                                raise RuntimeError("FFmpeg could not convert the source video into MP4")
-                        if progress_cb:
-                            progress_cb(vid_copy_base + vid_copy_span, tr("exp_step_validating"))
-                except Exception as e:
-                    raise RuntimeError(f"Could not create dub_video.mp4: {e}") from e
+            if state.imported_pack_name and state.video_path.name in ("dub_video.ogv", "dub_video.mp4"):
+                def report_copy(pct, msg):
+                    if cancel_check and cancel_check():
+                        raise InterruptedError("Export cancelled by user")
+                    if progress_cb:
+                        progress_cb(pct, msg)
+                self._copy_file_chunked(state.video_path, pack_dir / state.video_path.name,
+                                        vid_copy_base, end_pct - vid_copy_base, report_copy)
             else:
-                if progress_cb:
-                    progress_cb(vid_copy_base + vid_copy_span, tr("exp_step_copying_source", cur="0", total="0"))
-
-            # 2. Maximum Quality OGV encode as dub_video.ogv
-            dest_vid = pack_dir / "dub_video.ogv"
-            if state.video_path.suffix.lower() == ".ogv":
-                if state.video_path.resolve() != dest_vid.resolve():
-                    self._copy_file_chunked(
-                        state.video_path, dest_vid,
-                        vid_enc_base, vid_enc_span,
-                        progress_cb=progress_cb,
-                        msg_template=tr("exp_step_copying_source", cur="{cur}", total="{total}")
-                    )
-            else:
-                total_dur = state.video_duration if (state.video_duration and state.video_duration > 0) else 0.0
-                if progress_cb:
-                    progress_cb(vid_enc_base, tr("exp_step_encoding_ogv", cur="0.0", total=f"{total_dur:.1f}", pct="0"))
-
-                if not self.check_theora_encoder_available():
-                    logger.warning("FFmpeg build lacks libtheora encoder. Skipping dub_video.ogv encoding.")
-                else:
-                    try:
-                        cmd = [
-                            "ffmpeg", "-y", "-i", str(state.video_path),
-                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                            "-c:v", "libtheora", "-qscale:v", "10", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "20M",
-                            "-pix_fmt", "yuv420p", "-g", "15",
-                            "-c:a", "libvorbis", "-qscale:a", "8",
-                            "-progress", "pipe:1", "-nostats", "-v", "error",
-                            str(dest_vid)
-                        ]
-                        from config import SUBPROCESS_FLAGS
-                        proc = subprocess.Popen(
-                            cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            bufsize=1,
-                            universal_newlines=True,
-                            creationflags=SUBPROCESS_FLAGS
-                        )
-
-                        recent_output = deque(maxlen=20)
-                        if proc.stdout:
-                            try:
-                                for line in proc.stdout:
-                                    line = line.strip()
-                                    recent_output.append(line[-2048:])
-                                    if line.startswith("out_time_us="):
-                                        try:
-                                            us_val = int(line.split("=", 1)[1])
-                                            cur_sec = us_val / 1_000_000.0
-                                            if total_dur > 0:
-                                                frac = min(1.0, max(0.0, cur_sec / total_dur))
-                                                pct = vid_enc_base + vid_enc_span * frac
-                                                if progress_cb:
-                                                    progress_cb(
-                                                        pct,
-                                                        tr("exp_step_encoding_ogv",
-                                                           cur=f"{cur_sec:.1f}",
-                                                           total=f"{total_dur:.1f}",
-                                                           pct=int(frac * 100))
-                                                    )
-                                        except (ValueError, IndexError):
-                                            pass
-                                    elif line.startswith("progress=end"):
-                                        if progress_cb:
-                                            progress_cb(vid_enc_base + vid_enc_span, tr("exp_step_validating"))
-                            except Exception:
-                                proc.kill()
-                                proc.wait()
-                                if dest_vid.exists():
-                                    try:
-                                        dest_vid.unlink()
-                                    except Exception:
-                                        pass
-                                raise
-
-                        proc.wait()
-                        if proc.returncode != 0 or not dest_vid.exists():
-                            logger.error('OGV FFmpeg failed: %s', '\n'.join(recent_output), extra={'operation': 'export', 'stage': 'ogv'})
-                            raise RuntimeError(f"FFmpeg OGV encoding finished with code {proc.returncode}")
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to encode dub_video.ogv: {e}") from e
+                self.build_dub_videos(
+                    state, pack_dir, progress_cb, cancel_check,
+                    copy_base=vid_copy_base, copy_span=vid_copy_span,
+                    encode_base=vid_enc_base, encode_span=vid_enc_span,
+                    require_ogv=False,
+                )
 
         if progress_cb:
             progress_cb(end_pct, tr("exp_step_validating"))
         state.pack_info.icon = export_info.icon
         state.pack_backing_track_path = dest_bg
         return pack_dir
+
+    @staticmethod
+    def _encode_video(command, destination, progress_cb=None, cancel_check=None,
+                      stall_timeout=600.0):
+        """Allow long encodes while frames advance; publish only complete files."""
+        from config import SUBPROCESS_FLAGS
+        temporary = destination.with_name(f".{destination.stem}.{uuid4().hex}.part{destination.suffix}")
+        cmd = ["ffmpeg", "-nostdin", "-y", *command,
+               "-progress", "pipe:1", "-nostats", "-v", "error", str(temporary)]
+        proc = None
+        reader = None
+        recent_output = deque(maxlen=20)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, encoding="utf-8", errors="replace", bufsize=1,
+                                    creationflags=SUBPROCESS_FLAGS)
+            lines = Queue()
+
+            def read_output():
+                try:
+                    for line in proc.stdout:
+                        lines.put(line)
+                except Exception as exc:
+                    lines.put(exc)
+                finally:
+                    lines.put(None)
+
+            reader = Thread(target=read_output, daemon=True)
+            reader.start()
+            last_advance = time.monotonic()
+            last_values = {}
+            while True:
+                if cancel_check and cancel_check():
+                    raise InterruptedError(tr("video_encode_cancelled"))
+                if time.monotonic() - last_advance > stall_timeout:
+                    raise TimeoutError(tr("video_encode_stalled", seconds=f"{stall_timeout:g}",
+                                          detail="\n".join(recent_output)))
+                try:
+                    line = lines.get(timeout=0.2)
+                except Empty:
+                    continue
+                if line is None:
+                    break
+                if isinstance(line, Exception):
+                    raise line
+                line = line.strip()
+                recent_output.append(line[-2048:])
+                key, _, value = line.partition("=")
+                if key in ("out_time_us", "frame", "total_size"):
+                    try:
+                        current = int(value)
+                    except ValueError:
+                        continue
+                    if current > last_values.get(key, 0):
+                        last_advance = time.monotonic()
+                        last_values[key] = current
+                    if key == "out_time_us" and progress_cb:
+                        progress_cb(max(0.0, current / 1_000_000.0))
+            # Keep cancellation responsive even after FFmpeg closes its output pipe.
+            while True:
+                if cancel_check and cancel_check():
+                    raise InterruptedError(tr("video_encode_cancelled"))
+                if time.monotonic() - last_advance > stall_timeout:
+                    raise TimeoutError(tr("video_encode_stalled", seconds=f"{stall_timeout:g}",
+                                          detail="\n".join(recent_output)))
+                try:
+                    proc.wait(timeout=0.2)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            if proc.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
+                detail = "\n".join(recent_output)
+                logger.error("Video FFmpeg failed: %s", detail)
+                kind = "OGV" if destination.suffix == ".ogv" else "MP4"
+                raise RuntimeError(tr("video_encode_failed", kind=kind, code=proc.returncode, detail=detail))
+            temporary.replace(destination)
+        finally:
+            if proc is not None:
+                if proc.returncode is None:
+                    proc.kill()
+                    proc.wait()
+                if reader:
+                    reader.join(timeout=2)
+                if proc.stdout:
+                    proc.stdout.close()
+            temporary.unlink(missing_ok=True)
+
+    def build_dub_videos(self, state, pack_dir, progress_cb=None, cancel_check=None,
+                         copy_base=0.0, copy_span=10.0, encode_base=10.0, encode_span=90.0,
+                         require_ogv=True):
+        """Create genuine MP4/OGV containers without reusing interrupted outputs."""
+        source = state.video_path
+        total_duration = max(0.0, state.video_duration or 0.0)
+
+        def check_cancel():
+            if cancel_check and cancel_check():
+                raise InterruptedError(tr("video_encode_cancelled"))
+
+        def copy_video(destination, base, span):
+            if source.resolve() == destination.resolve():
+                return
+            temporary = destination.with_name(f".{destination.stem}.{uuid4().hex}.part{destination.suffix}")
+            def report(pct, detail):
+                check_cancel()
+                if progress_cb:
+                    progress_cb(pct, detail)
+            try:
+                check_cancel()
+                self._copy_file_chunked(source, temporary, base, span, report,
+                                        tr("exp_step_copying_source", cur="{cur}", total="{total}"))
+                check_cancel()
+                if temporary.stat().st_size == 0:
+                    raise RuntimeError(tr("video_source_empty"))
+                temporary.replace(destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+        check_cancel()
+        has_theora = source.suffix.lower() == ".ogv" or self.check_theora_encoder_available()
+        if not has_theora and require_ogv:
+            raise RuntimeError(tr("video_theora_missing"))
+        mp4 = pack_dir / "dub_video.mp4"
+        if source.suffix.lower() == ".mp4":
+            copy_video(mp4, copy_base, copy_span)
+        else:
+            common = ["-i", str(source), "-map", "0:v:0", "-map", "0:a:0?"]
+            try:
+                self._encode_video([*common, "-c", "copy", "-movflags", "+faststart"], mp4,
+                                   cancel_check=cancel_check)
+            except RuntimeError:
+                # Theora and other codecs cannot be remuxed into MP4.
+                self._encode_video([*common, "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                                    "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart"], mp4,
+                                   cancel_check=cancel_check)
+        check_cancel()
+        if not has_theora:
+            # Preserve Export's existing MP4-only fallback on limited FFmpeg builds.
+            logger.warning("FFmpeg build lacks libtheora encoder. Skipping dub_video.ogv encoding.")
+            return
+        ogv = pack_dir / "dub_video.ogv"
+        if source.suffix.lower() == ".ogv":
+            copy_video(ogv, encode_base, encode_span)
+        else:
+            def report(seconds):
+                fraction = min(1.0, seconds / total_duration) if total_duration else 0.0
+                if progress_cb:
+                    progress_cb(encode_base + encode_span * fraction,
+                                tr("exp_step_encoding_ogv", cur=f"{seconds:.1f}",
+                                   total=f"{total_duration:.1f}", pct=int(fraction * 100)))
+            report(0.0)
+            self._encode_video(
+                ["-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
+                 "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                 "-c:v", "libtheora", "-qscale:v", "10", "-b:v", "12M", "-maxrate", "16M",
+                 "-bufsize", "20M", "-pix_fmt", "yuv420p", "-g", "15",
+                 "-c:a", "libvorbis", "-qscale:a", "8"], ogv, report, cancel_check)
+        check_cancel()
 
     @staticmethod
     def export_zip(

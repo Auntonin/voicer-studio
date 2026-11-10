@@ -137,7 +137,7 @@ def test_ogv_error_output_decoding_does_not_mask_encoder_failure(source_state, t
         if str(command[-1]).endswith('.ogv'):
             output = io.TextIOWrapper(io.BytesIO('FFmpeg: ข้อผิดพลาด '.encode('utf-8') + b'\xff\n'),
                                       encoding=kwargs.get('encoding', 'ascii'), errors=kwargs.get('errors', 'strict'))
-            return SimpleNamespace(stdout=output, returncode=1, wait=lambda: None, kill=lambda: None)
+            return SimpleNamespace(stdout=output, returncode=1, wait=lambda **kwargs: None, kill=lambda: None)
         return real_popen(command, *args, **kwargs)
     with patch('core.pack_builder.subprocess.Popen', side_effect=fail_ogv), \
             patch.object(PackBuilder, 'check_theora_encoder_available', return_value=True):

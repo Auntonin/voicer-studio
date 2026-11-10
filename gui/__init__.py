@@ -1,3 +1,3 @@
 """
-gui — PySide6 GUI modules for The Choice Voicer Dialogue Extractor
+gui — PySide6 GUI modules for Voicer Studio
 """

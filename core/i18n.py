@@ -30,7 +30,7 @@ LOCALES_DIR = ROOT_DIR / "locales"
 STRINGS_EN: Dict[str, str] = {
     # ── Application Metadata & Menus ──
     "app_name": "Voicer Studio",
-    "app_tagline": "The Choice Voicer Dialogue Extractor & Vocal Separator",
+    "app_tagline": "Voicer Studio — Dialogue Editing & Vocal Separation",
     "menu_file": "File",
     "menu_new_proj": "New Project",
     "menu_open_proj": "Open Project...",
@@ -176,7 +176,7 @@ STRINGS_EN: Dict[str, str] = {
     "status_no_video": "No video loaded",
     "status_file": "File: {name}",
     "status_project_no_video": "Project: {name} (No video file)",
-    "status_version": "v{version}  |  The Choice Voicer Dialogue Extractor",
+    "status_version": "v{version}  |  Voicer Studio",
 
     # ── Settings Dialog ──
     "settings_title": "Settings",
@@ -696,7 +696,7 @@ STRINGS_EN: Dict[str, str] = {
 STRINGS_TH: Dict[str, str] = {
     # ── Application Metadata & Menus ──
     "app_name": "Voicer Studio",
-    "app_tagline": "โปรแกรมแยกเสียงบทสนทนาและตัดต่อคำพากย์ The Choice Voicer",
+    "app_tagline": "Voicer Studio — โปรแกรมตัดต่อบทสนทนาและแยกเสียงร้อง",
     "menu_file": "ไฟล์",
     "menu_new_proj": "สร้างโปรเจกต์ใหม่",
     "menu_open_proj": "เปิดโปรเจกต์...",
@@ -842,7 +842,7 @@ STRINGS_TH: Dict[str, str] = {
     "status_no_video": "ยังไม่ได้เปิดไฟล์วิดีโอ",
     "status_file": "ไฟล์: {name}",
     "status_project_no_video": "โปรเจกต์: {name} (ไม่มีไฟล์วิดีโอ)",
-    "status_version": "v{version}  |  The Choice Voicer Dialogue Extractor",
+    "status_version": "v{version}  |  Voicer Studio",
 
     # ── Settings Dialog ──
     "settings_title": "การตั้งค่า",

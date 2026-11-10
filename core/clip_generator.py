@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Callable
 from core.models import PipelineState, DialogueItem
+from core.i18n import tr
 from config import AUDIO_EXPORT_BITRATE, AUDIO_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,9 @@ class ClipGenerator:
                         progress_cb(completed_count, total, item)
                 except Exception as e:
                     logger.error(f"Failed to generate clip: {e}")
+                    for pending in future_to_item:
+                        pending.cancel()
+                    raise RuntimeError(tr("clip_generation_failed", index=future_to_item[future].index, detail=str(e))) from e
 
     def regenerate_clip(self, item: DialogueItem, state: PipelineState, output_dir: Path):
         logger.info(f"Regenerating clip for item {item.index}")

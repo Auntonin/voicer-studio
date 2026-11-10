@@ -57,6 +57,7 @@ class PipelineSignals(QObject):
     pack_ready     = Signal(str)                   # pack output dir path
     finished       = Signal()                      # entire pipeline done
     cancelled      = Signal()                      # user cancelled
+    settled        = Signal(str)                   # terminal outcome, independent of thread exit
 
 
 # ── Pipeline Worker ────────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ class PipelineWorker(QThread):
         self.options = options
         self.signals = PipelineSignals()
         self._cancelled = False
+        self.outcome = 'failed'
         self._output_dir: Optional[Path] = None
         self._start_time: float = 0.0
         self._fatal_steps = {
@@ -113,17 +115,20 @@ class PipelineWorker(QThread):
 
     def _complete_step(self, step: PipelineStep):
         self.state.step_completed[step] = True
+        self.state.step_errors.pop(step, None)
         label = PIPELINE_STEP_LABELS.get(step, str(step))
         self._log(f"{label} — done", "ok")
         self.signals.step_completed.emit(step)
 
     def _fail_step(self, step: PipelineStep, err: str):
+        self.state.step_completed.pop(step, None)
         self.state.step_errors[step] = err
         self._log(f"{PIPELINE_STEP_LABELS.get(step, str(step))} — FAILED: {err}", "error")
         self.signals.step_failed.emit(step, err)
 
     def _check_cancel(self) -> bool:
         if self._cancelled:
+            self.outcome = 'cancelled'
             self._log("Pipeline cancelled by user.", "warn")
             self.signals.cancelled.emit()
             return True
@@ -381,16 +386,14 @@ class PipelineWorker(QThread):
     def _step_clip_generation(self):
         step = PipelineStep.CLIP_GENERATION
         if self._skip_if_done(step):
+            self._resolve_output_dir()
             return
         self._begin_step(step)
         try:
             from core.clip_generator import ClipGenerator
             gen = ClipGenerator()
 
-            pack_name = self._get_pack_name()
-            out_dir = self._get_output_dir() / pack_name
-            out_dir.mkdir(parents=True, exist_ok=True)
-            self._output_dir = out_dir
+            out_dir = self._resolve_output_dir()
 
             source_audio = self.state.separated_vocals_path or self.state.work_audio_path
             dialogues = self.state.active_dialogues()
@@ -424,6 +427,7 @@ class PipelineWorker(QThread):
         if self._skip_if_done(step):
             return
         self._begin_step(step)
+        self._resolve_output_dir()
         from core.frame_extractor import FrameExtractor
         extractor = FrameExtractor(self.state.video_path)
         dialogues = self.state.active_dialogues()
@@ -469,6 +473,7 @@ class PipelineWorker(QThread):
             return
 
         use_original = self.options.get("backing_track_original", False)
+        self._resolve_output_dir()
         self._begin_step(step)
         try:
             from core.separator import VoiceSeparator
@@ -488,12 +493,14 @@ class PipelineWorker(QThread):
         except Exception as e:
             self._fail_step(step, str(e))
             self._log("Backing track generation failed", "warn")
+            raise
 
     def _step_pack_build(self):
         step = PipelineStep.PACK_BUILD
         if self._skip_if_done(step):
             return
         self._begin_step(step)
+        self._resolve_output_dir()
         try:
             from core.pack_builder import PackBuilder
             builder = PackBuilder()
@@ -529,38 +536,21 @@ class PipelineWorker(QThread):
             pack_info_path = self._output_dir / "_pack_info.ini"
             pack_info_path.write_text(pack_info_content, encoding="utf-8")
 
-            # Copy/encode dub_video.ogv & dub_video.mp4
             if self.state.pack_info.include_dub_video and self.state.video_path:
-                import shutil, subprocess
-                dub_mp4 = self._output_dir / "dub_video.mp4"
-                if not dub_mp4.exists() and self.state.video_path.resolve() != dub_mp4.resolve():
-                    try:
-                        shutil.copy2(self.state.video_path, dub_mp4)
-                    except Exception:
-                        pass
-
-                dub_video_path = self._output_dir / "dub_video.ogv"
-                if not dub_video_path.exists():
-                    self.signals.sub_progress.emit(total, total, tr("pipe_encoding_ogv"))
-                    if self.state.video_path.suffix.lower() == ".ogv":
-                        shutil.copy2(self.state.video_path, dub_video_path)
-                    else:
-                        cmd = [
-                            "ffmpeg", "-y", "-i", str(self.state.video_path),
-                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                            "-c:v", "libtheora", "-qscale:v", "10", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "20M",
-                            "-pix_fmt", "yuv420p", "-g", "15",
-                            "-c:a", "libvorbis", "-qscale:a", "8",
-                            str(dub_video_path)
-                        ]
-                        from config import SUBPROCESS_FLAGS
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, creationflags=SUBPROCESS_FLAGS)
-                        if result.returncode != 0 or not dub_video_path.exists() or dub_video_path.stat().st_size == 0:
-                            dub_video_path.unlink(missing_ok=True)
-                            raise RuntimeError(f"FFmpeg could not encode dub_video.ogv: {result.stderr[-500:]}")
+                builder.build_dub_videos(
+                    self.state, self._output_dir,
+                    progress_cb=lambda pct, detail: self.signals.sub_progress.emit(int(pct), 100, detail),
+                    cancel_check=lambda: self._cancelled,
+                )
+            if self._check_cancel():
+                return
 
             self.signals.sub_progress.emit(total, total, tr("pipe_pack_done", count=total))
             self._complete_step(step)
+        except InterruptedError:
+            if self._check_cancel():
+                return
+            raise
         except Exception as e:
             self._fail_step(step, str(e))
             raise
@@ -568,8 +558,15 @@ class PipelineWorker(QThread):
     def _resolve_output_dir(self) -> Path:
         if self._output_dir:
             return self._output_dir
+        # Cached Analyze retries must write alongside the already generated clips.
+        cached_dirs = {item.audio_path.parent for item in self.state.active_dialogues()
+                       if item.audio_path and item.audio_path.is_file()}
+        if self.state.is_step_done(PipelineStep.CLIP_GENERATION) and len(cached_dirs) == 1:
+            self._output_dir = cached_dirs.pop()
+            return self._output_dir
+        from core.pack_builder import PackBuilder
         pack_name = self._get_pack_name()
-        out_dir = self._get_output_dir() / pack_name
+        out_dir = PackBuilder.get_unique_pack_dir(self._get_output_dir(), pack_name)
         out_dir.mkdir(parents=True, exist_ok=True)
         self._output_dir = out_dir
         return out_dir
@@ -595,10 +592,10 @@ class PipelineWorker(QThread):
             else:
                 self._log(f"Validation passed ({len(warns)} warning(s))", "ok")
 
-            self.state.step_completed[step] = True
-            self.signals.step_completed.emit(step)
+            self._complete_step(step)
         except Exception as e:
             self._fail_step(step, str(e))
+            raise
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -625,8 +622,9 @@ class PipelineWorker(QThread):
     def run(self):
         """Execute the full pipeline sequentially."""
         self._start_time = time.time()
-        self._log(f"Pipeline started for: {self.state.video_path.name}", "info")
+        self.outcome = 'failed'
         try:
+            self._log(f"Pipeline started for: {self.state.video_path.name}", "info")
             # 1. Initialize and configure optimal compute hardware (CUDA / DirectML / ROCm / MPS / CPU)
             from core.device_manager import device_manager
             active_dev = device_manager.get_optimal_device(self.options.get("compute_device", "auto"))
@@ -672,8 +670,11 @@ class PipelineWorker(QThread):
                     return
                 step_fn()
 
+            if self._check_cancel():
+                return
             elapsed = time.time() - self._start_time
             self.state.current_step = PipelineStep.DONE
+            self.outcome = 'failed' if self.state.step_errors else 'succeeded'
             self.signals.progress.emit(100)
             self._log(f"Pipeline complete in {elapsed:.1f}s — pack is ready to export.", "ok")
             if self._output_dir:
@@ -690,6 +691,7 @@ class PipelineWorker(QThread):
             self.state.current_step = PipelineStep.ERROR
             self.signals.step_failed.emit(err_step, str(e))
         finally:
+            self.signals.settled.emit(self.outcome)
             from core.device_manager import device_manager
             device_manager.release_gpu_memory()
 

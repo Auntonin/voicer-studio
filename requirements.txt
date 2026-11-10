@@ -1,5 +1,5 @@
 # ============================================================
-# The Choice Voicer Dialogue Extractor — Requirements
+# Voicer Studio — Requirements
 # ============================================================
 # Install: pip install -r requirements.txt
 # Recommended: Python 3.10, 3.11, or 3.12

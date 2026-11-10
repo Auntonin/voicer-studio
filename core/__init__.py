@@ -1,4 +1,4 @@
 """
-core — AI pipeline modules for The Choice Voicer Dialogue Extractor
+core — AI pipeline modules for Voicer Studio
 """
 from .models import DialogueItem, SpeakerInfo, PackInfo, PipelineState

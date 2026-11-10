@@ -69,6 +69,7 @@ def install_update(package: Path, is_zip: bool, target_dir: Path, target_exe: Pa
             if target_exe.suffix.lower() == '.exe' and not (source / target_exe.name).is_file():
                 raise ValueError('Update package is missing the application launcher')
             allowed = {'VoicerStudio.exe', 'VoicerStudio', 'main.py', 'config.py', 'requirements.txt',
+                       'requirements-mcp.txt',
                        'settings.example.json', 'README.md', 'LICENSE', 'assets', 'core', 'gui', 'locales', 'scripts'}
             files = []
             for path in source.rglob('*'):

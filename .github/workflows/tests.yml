@@ -73,3 +73,33 @@ jobs:
           else
             python -m pytest tests/ -v
           fi
+
+      - name: Test Optional MCP Gateway in Separate Environment
+        shell: bash
+        run: |
+          python -m venv --system-site-packages .mcp-test-env
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            MCP_PYTHON=".mcp-test-env/Scripts/python.exe"
+          else
+            MCP_PYTHON=".mcp-test-env/bin/python"
+          fi
+          "$MCP_PYTHON" -m pip install -r requirements-mcp.txt
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a "$MCP_PYTHON" -m pytest tests/test_agent_commands.py tests/test_agent_bridge.py tests/test_agent_controls.py tests/test_mcp_adapter.py -v
+          else
+            "$MCP_PYTHON" -m pytest tests/test_agent_commands.py tests/test_agent_bridge.py tests/test_agent_controls.py tests/test_mcp_adapter.py -v
+          fi
+
+      - name: Set up Node for Windows Inspector Gate
+        if: runner.os == 'Windows'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Test Pinned Inspector CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          npm install --prefix .temp/mcp-inspector --ignore-scripts --no-audit --no-fund @modelcontextprotocol/inspector@2.10.1
+          export VOICER_INSPECTOR_ENTRY="$GITHUB_WORKSPACE/.temp/mcp-inspector/node_modules/@modelcontextprotocol/inspector/clients/launcher/build/index.js"
+          .mcp-test-env/Scripts/python.exe -m pytest tests/test_mcp_adapter.py -k inspector -v

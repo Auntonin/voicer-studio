@@ -90,19 +90,21 @@ class QualityChecker:
                 results.append(CheckResult('error', f"Speaker ID not found: {item.speaker_id}", item.index))
                 
             # File existence and names
-            audio_f = pack_dir / f"{base_name}.mp3"
-            image_f = pack_dir / f"{base_name}.png"
+            audio_ext = item.audio_path.suffix if item.imported_filename and item.audio_path else ".mp3"
+            image_ext = item.image_path.suffix if item.imported_filename and item.image_path else ".png"
+            audio_f = pack_dir / f"{base_name}{audio_ext}"
+            image_f = pack_dir / f"{base_name}{image_ext}"
             txt_f = pack_dir / f"{base_name}.txt"
             
             if not audio_f.exists():
-                results.append(CheckResult('error', f"Missing audio file: {base_name}.mp3", item.index))
+                results.append(CheckResult('error', f"Missing audio file: {audio_f.name}", item.index))
             elif not self._check_audio_readable(audio_f):
-                results.append(CheckResult('error', f"Unreadable audio file: {base_name}.mp3", item.index))
+                results.append(CheckResult('error', f"Unreadable audio file: {audio_f.name}", item.index))
                 
             if not image_f.exists():
-                results.append(CheckResult('error', f"Missing image file: {base_name}.png", item.index))
-            elif not self._check_png_readable(image_f):
-                results.append(CheckResult('error', f"Unreadable image file: {base_name}.png", item.index))
+                results.append(CheckResult('error', f"Missing image file: {image_f.name}", item.index))
+            elif not self._check_image_readable(image_f):
+                results.append(CheckResult('error', f"Unreadable image file: {image_f.name}", item.index))
                 
             if not txt_f.exists():
                 results.append(CheckResult('error', f"Missing txt file: {base_name}.txt", item.index))
@@ -122,7 +124,19 @@ class QualityChecker:
         return self._check_media_readable(path)
 
     def _check_image_reference(self, pack_dir: Path, name: str) -> bool:
-        return bool(name and Path(name).name == name and self._check_png_readable(pack_dir / name))
+        return bool(name and Path(name).name == name and self._check_image_readable(pack_dir / name))
+
+    def _check_image_readable(self, path: Path) -> bool:
+        formats = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}
+        try:
+            from PIL import Image
+            with Image.open(path) as image:
+                if image.format != formats.get(path.suffix.lower()):
+                    return False
+                image.verify()
+            return True
+        except (ImportError, OSError, ValueError):
+            return False
 
     def _check_png_readable(self, path: Path) -> bool:
         if not path.exists() or path.stat().st_size <= 0:

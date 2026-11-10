@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "voicer-studio": {
+      "command": "C:/Voicer Studio/mcp-env/Scripts/python.exe",
+      "args": ["C:/Voicer Studio/scripts/mcp_server.py", "--session", "PUBLIC_REFERENCE_FROM_CONNECTION_UI"]
+    }
+  }
+}
